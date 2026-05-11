@@ -269,11 +269,12 @@ def simplify_result_set(result_set: ResultSet | None) -> Any:
         The simplified result set: if the result set consists just of a single row, this row is unwrapped from the list. If the
         result set contains just a single column, this is unwrapped from the tuple. Both simplifications are also combined,
         such that a result set of a single row of a single column is turned into the single value.
+        As a special case, an empty result set is turned into *None*.
     """
     # simplify the query result as much as possible: [(42, 24)] becomes (42, 24) and [(1,), (2,)] becomes [1, 2]
     # [(42, 24), (4.2, 2.4)] is left as-is
     if not result_set:
-        return []
+        return None
 
     result_structure = result_set[0]  # what do the result tuples look like?
     if len(result_structure) == 1:  # do we have just one column?

@@ -28,7 +28,7 @@ import time
 import tomllib
 import warnings
 from collections import UserString
-from collections.abc import Callable, Generator, Iterable, Sequence, Sized
+from collections.abc import Callable, Iterable, Sequence, Sized
 from dataclasses import dataclass
 from multiprocessing import connection as mp_conn
 from pathlib import Path
@@ -358,7 +358,9 @@ class PostgresConfiguration(collections.UserString):
         )
 
     def __init__(self, settings: Iterable[PostgresSetting]) -> None:
-        self._settings = {setting.parameter: setting for setting in settings}
+        self._settings: dict[str, PostgresSetting] = {
+            setting.parameter: setting for setting in settings
+        }
         super().__init__(self._format())
 
     @property
@@ -496,7 +498,9 @@ class PostgresConfiguration(collections.UserString):
             return self._settings[index]
         return super().__getitem__(index)
 
-    def __setitem__(self, key: str, value: object) -> None:
+    def __setitem__(self, key: str, value: str | PostgresSetting) -> None:
+        if isinstance(value, str):
+            value = PostgresSetting(key, value)
         self._settings[key] = value
         self.data = self._format()
 
@@ -741,9 +745,7 @@ class PostgresInterface(Database):
                 end_time - start_time
             ) / 10**9  # convert to seconds
 
-            query_result = (
-                self._cursor.fetchall() if self._cursor.rowcount >= 0 else None
-            )
+            query_result = self._cursor.fetchall()
             if cache_enabled:
                 self._inflate_query_cache()
                 self._query_cache[query] = query_result
@@ -839,7 +841,7 @@ class PostgresInterface(Database):
         return proc_path.resolve()
 
     def describe(self) -> jsondict:
-        base_info = {
+        base_info: dict[str, Any] = {
             "system_name": self.database_system_name(),
             "system_version": self.database_system_version(),
             "database": self.database_name(),
@@ -2470,37 +2472,6 @@ def _extract_plan_join_order(plan: QueryPlan) -> str:
     return f"({outer} {inner})"
 
 
-def _iter_plan_bfs(plan: QueryPlan) -> Generator[QueryPlan, None, None]:
-    queue = collections.deque([plan])
-    while queue:
-        node = queue.popleft()
-        queue.extend(node.children)
-        yield node
-
-
-def _process_pglab_upperrel(
-    node: QueryPlan, *, used_parallel: bool, par_workers: int
-) -> list[str]:
-    """_summary_
-
-    Assumptions: we are in an upperrel. Parallel workers are set.
-
-    Parameters
-    ----------
-    node : QueryPlan
-        _description_
-    used_parallel : bool
-        _description_
-    par_workers : int
-        _description_
-
-    Returns
-    -------
-    list[str]
-        _description_
-    """
-
-
 def _generate_pglab_plan(
     node: QueryPlan,
     *,
@@ -2518,7 +2489,6 @@ def _generate_pglab_plan(
     indentation = " " * level
     hintable_node = node.is_scan() or node.is_join()
     in_upperrel = in_upperrel and not hintable_node
-    par_workers = node.parallel_workers or par_workers
 
     if par_workers and in_upperrel:
         if used_parallel:
@@ -2537,11 +2507,35 @@ def _generate_pglab_plan(
                     par_workers=0,
                     used_parallel=True,
                     in_upperrel=True,
-                    level=0,
+                    level=level + 1,
                 )
             )
 
         return hints
+
+    # We need to set par_workers _after_ we did the upperrel processing to distinguish between a Gather in the upperrel and
+    # a gather on top of a join i.e. to distinguish between
+    #
+    # Finalize Aggregate
+    #   -> Gather (workers=4)
+    #       -> Partial Aggregate
+    #          -> ...
+    #
+    # and
+    #
+    # Aggregate
+    #   -> Gather (workers=4)
+    #       -> Nested Loop
+    #          -> ...
+    #
+    # If we do not delay the par_workers update, we would get the parallel workers from the Gather node, and (since we are
+    # in the Gather node) detect that we do not have a join/scan node and thus remain in the upperrel. In turn, we would always
+    # create a Result() hint.
+    # By delaying the par_workers update, we compare the par_workers value as given by the parent _generate_pglab_plan()
+    # invocation and perform the local upperrel check. For a gather node, we would "fall through" to the child node with the
+    # actual par_workers. If the child is still an upperrel node, we generate the (now correct) Result(), if we encouter a
+    # scan/join, we parallelize it as intended.
+    par_workers = node.parallel_workers or par_workers
 
     operator = PGLabOptimizerHints.get(node.operator) if node.operator else None
     if operator is None:
@@ -2552,7 +2546,7 @@ def _generate_pglab_plan(
                     par_workers=par_workers,
                     used_parallel=used_parallel,
                     in_upperrel=in_upperrel,
-                    level=level,
+                    level=level + 1,
                 )
             )
         return hints
@@ -3291,7 +3285,7 @@ def is_running(pgdata: str | Path = "") -> bool:
     cmd = ["pg_ctl"]
     pgdata = pgdata or os.environ.get("PGDATA", "")
     if pgdata:
-        cmd.extend(["-D", pgdata])
+        cmd.extend(["-D", str(pgdata)])
     cmd.append("status")
 
     res = subprocess.run(cmd)
