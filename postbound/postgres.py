@@ -2219,7 +2219,6 @@ def _generate_pghintplan_hints(
 ) -> Hint:
     hints: list[str] = []
     prep_statements: list[str] = []
-    used_parallel: bool = False
 
     geqo_thresh: str = pg_instance.config["geqo_threshold"]
     if len(query.tables()) > int(geqo_thresh):
@@ -2239,21 +2238,14 @@ def _generate_pghintplan_hints(
             op = PGHintPlanOptimizerHints[scan.operator]
             tab = scan.table.identifier()
             hints.append(f"{op}({tab})")
-            if scan.parallel_workers > 1 and not used_parallel:
+            if scan.parallel_workers > 1:
                 hints.append(f"Parallel({tab} {scan.parallel_workers} hard)")
-                used_parallel = True
-            elif used_parallel:
-                warnings.warn(
-                    "Cannot set multiple parallel hints for Postgres. Ignoring additional hints.",
-                    category=HintWarning,
-                    stacklevel=3,
-                )
 
         for join in phys_ops.join_operators.values():
             op = PGHintPlanOptimizerHints[join.operator]
             intermediate = " ".join(tab.identifier() for tab in join.intermediate)
             hints.append(f"{op}({intermediate})")
-            if join.parallel_workers > 1 and not used_parallel:
+            if join.parallel_workers > 1:
                 warnings.warn(
                     "Cannot directly set parallel workers on a join with pg_hint_plan. "
                     "Setting on all base tables instead.",
@@ -2264,12 +2256,6 @@ def _generate_pghintplan_hints(
                     hints.append(
                         f"Parallel({tab.identifier()} {join.parallel_workers} hard)"
                     )
-            elif used_parallel:
-                warnings.warn(
-                    "Cannot set multiple parallel hints for Postgres. Ignoring additional hints.",
-                    category=HintWarning,
-                    stacklevel=3,
-                )
 
         for tabs, intermediate_op in phys_ops.intermediate_operators.items():
             op = PGHintPlanOptimizerHints.get(intermediate_op)
@@ -2306,17 +2292,9 @@ def _generate_pghintplan_hints(
         for tabs, workers in plan_params.parallel_workers.items():
             if workers == 1:
                 continue
-            elif used_parallel:
-                warnings.warn(
-                    "Cannot set multiple parallel hints for Postgres. Ignoring additional hints.",
-                    category=HintWarning,
-                    stacklevel=3,
-                )
-                continue
 
             intermediate = " ".join(tab.identifier() for tab in tabs)
             hints.append(f"Parallel({intermediate} {workers} hard)")
-            used_parallel = True
 
         for setting, val in plan_params.system_settings.items():
             # TODO: we could be smart here and differentiate betwen settings that only affect the optimizer and settings
@@ -2351,7 +2329,6 @@ def _generate_pglab_hints(
     prep_statements: list[str] = []
 
     has_worker_params = plan_params is not None and plan_params.parallel_workers
-    used_parallel = False
 
     if has_worker_params and phys_ops is None:
         warnings.warn(
@@ -2384,16 +2361,9 @@ def _generate_pglab_hints(
             op = PGLabOptimizerHints[scan.operator]
             table = scan.table.identifier()
 
-            if scan.parallel_workers > 1 and not used_parallel:
+            if scan.parallel_workers > 1:
                 # TODO: check for off-by-one errors!!!
                 hint = f"{op}({table} (workers={scan.parallel_workers}))"
-                used_parallel = True
-            elif scan.parallel_workers > 1 and used_parallel:
-                warnings.warn(
-                    "Cannot set multiple parallel hints for Postgres. Ignoring additional hints.",
-                    category=HintWarning,
-                    stacklevel=3,
-                )
             else:
                 hint = f"{op}({table})"
             hints.append(hint)
@@ -2402,15 +2372,8 @@ def _generate_pglab_hints(
             op = PGLabOptimizerHints[join.operator]
             intermediate = " ".join(tab.identifier() for tab in join.intermediate)
 
-            if join.parallel_workers > 1 and not used_parallel:
+            if join.parallel_workers > 1:
                 hint = f"{op}({intermediate} (workers={join.parallel_workers}))"
-                used_parallel = True
-            elif join.parallel_workers > 1 and used_parallel:
-                warnings.warn(
-                    "Cannot set multiple parallel hints for Postgres. Ignoring additional hints.",
-                    category=HintWarning,
-                    stacklevel=3,
-                )
             else:
                 hint = f"{op}({intermediate})"
             hints.append(hint)
@@ -2476,7 +2439,6 @@ def _generate_pglab_plan(
     node: QueryPlan,
     *,
     par_workers: int = 0,
-    used_parallel: bool = False,
     in_upperrel: bool = True,
     level: int = 0,
 ) -> list[str]:
@@ -2491,21 +2453,13 @@ def _generate_pglab_plan(
     in_upperrel = in_upperrel and not hintable_node
 
     if par_workers and in_upperrel:
-        if used_parallel:
-            warnings.warn(
-                "Plan contains multiple parallel hints. This is not supported by Postgres. Ignoring additional hints.",
-                category=HintWarning,
-                stacklevel=3,
-            )
-        else:
-            hints.append(f"Result(workers={par_workers})")
+        hints.append(f"Result(workers={par_workers})")
 
         for child in node.children:
             hints.extend(
                 _generate_pglab_plan(
                     child,
                     par_workers=0,
-                    used_parallel=True,
                     in_upperrel=True,
                     level=level + 1,
                 )
@@ -2544,7 +2498,6 @@ def _generate_pglab_plan(
                 _generate_pglab_plan(
                     child,
                     par_workers=par_workers,
-                    used_parallel=used_parallel,
                     in_upperrel=in_upperrel,
                     level=level + 1,
                 )
@@ -2552,15 +2505,8 @@ def _generate_pglab_plan(
         return hints
 
     metadata_elems: list[str] = []
-    if par_workers and used_parallel:
-        warnings.warn(
-            "Plan contains multiple parallel hints. This is not supported by Postgres. Ignoring additional hints.",
-            category=HintWarning,
-            stacklevel=3,
-        )
-    elif par_workers and not used_parallel:
+    if par_workers:
         metadata_elems.append(f"workers={par_workers}")
-        used_parallel = True
         par_workers = 0
 
     intermediate = " ".join(tab.identifier() for tab in node.tables())
@@ -2575,7 +2521,6 @@ def _generate_pglab_plan(
             _generate_pglab_plan(
                 child,
                 par_workers=par_workers,
-                used_parallel=used_parallel,
                 in_upperrel=in_upperrel,
                 level=level + 1,
             )

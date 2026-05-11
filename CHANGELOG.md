@@ -26,6 +26,10 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 🏥 Fixes
 
+- Lifted the restriction of only one parallel hint per plan for Postgres.
+  We have been under the impression that Postgres can only run a single subtree
+  of a plan in parallel. As it turns out, this is not the case if the two subtrees
+  are "independent" of each other, i.e. appear in parallel branches of the plan.
 - Fixed hinting a plan for pg_lab messing up the placement of parallel workers.
   The bug occurred when a join computed its outer child in parallel. Instead of
   placing the parallel workers on that child, the hinting process placed them on
