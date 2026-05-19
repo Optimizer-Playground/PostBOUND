@@ -2499,7 +2499,7 @@ def _generate_pglab_plan(
                     child,
                     par_workers=par_workers,
                     in_upperrel=in_upperrel,
-                    level=level + 1,
+                    level=max(level, 1),
                 )
             )
         return hints
@@ -2512,6 +2512,35 @@ def _generate_pglab_plan(
     intermediate = " ".join(tab.identifier() for tab in node.tables())
     metadata = " (" + " ".join(metadata_elems) + ")" if metadata_elems else ""
     hints.append(f"{indentation}{operator}({intermediate}{metadata})")
+
+    # HOTFIX: we need to inject the cardinality estimate, even if we hint the operator explicitly
+    # This is because pg_lab/Postgres still have some freedom regarding the operator parameterization.
+    #
+    # Consider Index scans as an example: the Postgres optimizer is free to choose which index to scan.
+    # Now, depending on the chosen index, an upper level merge join might require explicit sorting or not.
+    # This becomes relevant in the following experiment:
+    # For a specific query, inject (arbitrary non-native) cardinality estimates. Capture the execution plan.
+    # Afterwards, hint the same plan, but without the cardinality estimates. Now, the optimizer needs to base all decisions on
+    # its own native estimates.
+    # In experiments, we have actually seen that this shift in cardinality estimates might lead to the optimizer preferring a
+    # different index scan and thus require additional sorting for the merge join.
+    # Something similar can also happen with memoize nodes: they currently require at least two (estimated) rows in the outer
+    # relation to be considered during path generation. If we change the estimates on the outer relation, the optimizer might
+    # never even consider a memoize node and thus we cannot enforce the memoization hint at all.
+    # Lastly, the same reasoning also applies to switching between Index scan and Index-only scan, as well as to the choice
+    # of the bitmap index scans.
+    #
+    # To circumvent all of these issues, we just inject the cardinality estimates for all hinted nodes.
+    # Note that this is still an imperfect band-aid, because
+    # a) the cardinalities themselves might be unreliable (e.g. when parallel workers are involved), and
+    # b) this should actually be addressed at pg_lab level. For memoize this has already been done, but for index scans we
+    #    would essentially need to be able to hint the exact index in addition to the operator
+    #
+    # As a final note, we always use the estimated cardinality to make sure that the plan contains the intended _estimates_
+    # if the user explicitly wants true cardinalities, the QueryPlan provides a with_actual_card() method.
+    card = node.estimated_cardinality
+    if card.is_valid() and node.operator not in IntermediateOperator:
+        hints.append(f"{indentation}Card({intermediate} #{card})")
 
     if node.is_scan():
         return hints
