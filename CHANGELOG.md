@@ -23,6 +23,7 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 ## 📰 Updates
 
 - Added an `extract_subquery()` transformation as a saner alternative to `extract_query_fragment()`.
+- Improved the performance of `PreComputedCardinalities` for large queries
 
 ## 🏥 Fixes
 

@@ -64,7 +64,7 @@ class PreciseCardinalities(CardinalityEstimator):
         self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         intermediate = util.enlist(intermediate)
-        subquery = transform.extract_query_fragment(query, intermediate)
+        subquery = transform.extract_subquery(query, intermediate)
         subquery = transform.as_count_star_query(subquery)
         if subquery in self._cardinality_cache:
             return self._cardinality_cache[subquery]
@@ -112,6 +112,7 @@ class PreComputedCardinalities(CardinalityEstimator):
         In case no cardinality estimate exists for a specific intermediate, a default cardinality can be used instead. In case
         no default value has been specified, an error would be raised. Notice that a ``None`` value unsets the default. If the
         client should handle this situation instead, another value (e.g. ``Cardinality.unknown()`` has to be used).
+        The default cardinality is not used if live fallback is enabled (see below).
     label_col : str, optional
         The column in the CSV file that contains the query labels. Defaults to *label*.
     tables_col : str, optional
@@ -175,38 +176,26 @@ class PreComputedCardinalities(CardinalityEstimator):
         self._live_fallback_style = live_fallback_style
         self._save_life_fallback = save_live_fallback_results
 
-        self._true_card_df = pd.read_csv(
+        true_card_df = pd.read_csv(
             lookup_table_path, converters={tables_col: _parse_tables}
         )
+        self._df_cols = set(true_card_df.columns)
+        self._cards: dict[tuple[str, frozenset[TableReference]], Cardinality] = {}
+        for _, row in true_card_df.iterrows():
+            label = row[label_col]
+            tables = row[tables_col]
+            card = row[cardinality_col]
+            self._cards[(label, frozenset(tables))] = Cardinality(card)
 
     def calculate_estimate(
-        self, query: SqlQuery, tables: TableReference | Iterable[TableReference]
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
-        tables = frozenset(util.enlist(tables))
+        intermediate = frozenset(util.enlist(intermediate))
         label = self._workload.label_of(query)
-        relevant_samples = self._true_card_df[
-            self._true_card_df[self._label_col] == label
-        ]
-        cardinality_sample = relevant_samples[
-            relevant_samples[self._tables_col] == tables
-        ]
-
-        tables_debug = "(" + ", ".join(tab.identifier() for tab in tables) + ")"
-        n_samples = len(cardinality_sample)
-        if n_samples == 1:
-            cardinality = Cardinality(cardinality_sample.iloc[0][self._card_col])
-            return cardinality
-        elif n_samples > 1:
-            raise ValueError(
-                f"{n_samples} samples found for join {tables_debug} in query {label}. Expected 1."
-            )
-
-        fallback_value = self._attempt_fallback_estimate(n_samples, query, tables)
-        if fallback_value is None and self._error_on_missing_card:
-            raise ValueError(
-                f"No matching sample found for join {tables_debug} in query {label}"
-            )
-        return fallback_value
+        card = self._cards.get((label, intermediate))
+        if card is not None:
+            return card
+        return self._use_default(query, intermediate)
 
     def describe(self) -> dict:
         return {
@@ -215,55 +204,38 @@ class PreComputedCardinalities(CardinalityEstimator):
             "workload": self._workload.name,
         }
 
-    def _attempt_fallback_estimate(
-        self, n_samples: int, query: SqlQuery, tables: frozenset[TableReference]
+    def _use_default(
+        self, query: SqlQuery, intermediate: frozenset[TableReference]
     ) -> Cardinality:
-        """Tries to infer the fallback value for a specific estimate, if this is necessary.
-
-        The inference strategy applies the following rules:
-
-        1. If exactly one sample was found, no fallback is necessary.
-        2. If no sample was found, but we specified a static fallback value, this value is used.
-        3. If a live fallback is available, the cardinality is calculated according to the `live_fallback_style`.
-        4. Otherwise no fallback is possible.
-
-        Parameters
-        ----------
-        n_samples : int
-            The number of samples found for the current intermediate
-        query : SqlQuery
-            The query for which the cardinality should be estimated
-        tables : frozenset[TableReference]
-            The joins that form the current intermediate
-
-        Returns
-        -------
-        Cardinality
-            The fallback value if it could be inferred, otherwise *NaN*.
-        """
-        if n_samples == 1:
-            # If we found exactly one sample, we did not need to fall back at all
-            return Cardinality.unknown()
+        if self._live_db is not None:
+            return self._use_live_fallback(query, intermediate)
 
         if self._default_card is not None:
             return self._default_card
-        if self._live_db is None:
-            return Cardinality.unknown()
 
-        query_fragment = transform.extract_query_fragment(query, tables)
-        if not query_fragment:
-            return Cardinality.unknown()
+        if self._error_on_missing_card:
+            raise ValueError(
+                f"No cardinality estimate found for query '{query}' and tables '{intermediate}' and no default value specified."
+            )
+        return Cardinality.unknown()
 
-        if self._live_fallback_style == "actual":
-            true_card_query = transform.as_count_star_query(query_fragment)
-            cardinality = Cardinality(self._live_db.execute_query(true_card_query))
-        elif self._live_fallback_style == "estimated":
-            cardinality = self._live_db.optimizer().cardinality_estimate(query_fragment)
-        else:
-            raise ValueError(f"Unknown fallback style: '{self._live_fallback_style}'")
+    def _use_live_fallback(
+        self, query: SqlQuery, intermediate: frozenset[TableReference]
+    ) -> Cardinality:
+        assert self._live_db is not None
+        query_fragment = transform.extract_subquery(query, intermediate)
+
+        match self._live_fallback_style:
+            case "actual":
+                true_card_query = transform.as_count_star_query(query_fragment)
+                cardinality = Cardinality(self._live_db.execute_query(true_card_query))
+            case "estimated":
+                cardinality = self._live_db.optimizer().cardinality_estimate(
+                    query_fragment
+                )
 
         if self._save_life_fallback:
-            self._dump_fallback_estimate(query, tables, cardinality)
+            self._dump_fallback_estimate(query, intermediate, cardinality)
         return cardinality
 
     def _dump_fallback_estimate(
@@ -287,20 +259,16 @@ class PreComputedCardinalities(CardinalityEstimator):
         result_row[self._label_col] = [self._workload.label_of(query)]
         result_row[self._tables_col] = [util.to_json(tables)]
 
-        if "query" in self._true_card_df.columns:
+        if "query" in self._df_cols:
             result_row["query"] = [str(query)]
-        if "query_fragment" in self._true_card_df.columns:
+        if "query_fragment" in self._df_cols:
             result_row["query_fragment"] = [
                 str(transform.extract_query_fragment(query, tables))
             ]
 
         result_row[self._card_col] = [cardinality]
         result_df = pd.DataFrame(result_row)
-
-        self._true_card_df = pd.concat(
-            [self._true_card_df, result_df], ignore_index=True
-        )
-        self._true_card_df.to_csv(self._lookup_df_path, index=False)
+        result_df.to_csv(self._lookup_df_path, index=False, mode="a", header=False)
 
 
 class CardinalityDistortion(CardinalityEstimator):
@@ -348,9 +316,9 @@ class CardinalityDistortion(CardinalityEstimator):
         }
 
     def calculate_estimate(
-        self, query: SqlQuery, tables: TableReference | Iterable[TableReference]
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
-        card_est = self.estimator.calculate_estimate(query, tables)
+        card_est = self.estimator.calculate_estimate(query, intermediate)
         if not card_est.is_valid():
             return Cardinality.unknown()
         if self.distortion_strategy == "fixed":
