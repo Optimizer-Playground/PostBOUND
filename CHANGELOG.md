@@ -18,6 +18,10 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 - Added a `pre_exec_callback` parameter to the benchmarking utilities. This is
   called right before the query execution.
+- Pre-execution and post-execution callbacks for the benchmarking utilities can
+  now optionally return a dictionary. The key/value pairs of this dictionary will
+  be automatically added to the result data frame as additional columns. This allows
+  to incorporate custom measurements into the benchmarking process.
 - Added a lot of convenience functions to manually create QAL objects
 
 ## 📰 Updates

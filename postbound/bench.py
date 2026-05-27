@@ -361,8 +361,8 @@ class _BenchmarkConfig:
     shuffled: bool
     query_prep: QueryPreparation | None
     timeout: float | None
-    pre_exec_callback: Callable[[SqlQuery], None] | None
-    post_exec_callback: Callable[[ExecutionResult], None] | None
+    pre_exec_callback: Callable[[SqlQuery], None | dict] | None
+    post_exec_callback: Callable[[ExecutionResult], None | dict] | None
     log: _LoggerImpl
     error_action: ErrorHandling
     start_time: datetime | None = None
@@ -663,6 +663,9 @@ class _ResultSample:
         self.exec_times: list[float] = []
         self.db_configs: list[util.jsondict] = []
 
+        self._pre_exec_data: list[dict] = []
+        self._post_exec_data: list[dict] = []
+
         # internal fields
         self._max_query_reps = max_query_reps
         self._optimization_failure: Exception | None = None
@@ -717,6 +720,16 @@ class _ResultSample:
         self.exec_times.append(np.nan)
         self.db_configs.append(db_config)
 
+    def add_pre_exec_data(self, data: dict | None) -> None:
+        if data is None:
+            return
+        self._pre_exec_data.append(data)
+
+    def add_post_exec_data(self, data: dict | None) -> None:
+        if data is None:
+            return
+        self._post_exec_data.append(data)
+
     def failed_optimization(self) -> Optional[Exception]:
         return self._optimization_failure
 
@@ -763,6 +776,16 @@ class _ResultSample:
                 "optimization_pipeline": [self.optimization_pipeline],
                 "optimized_query": [self.optimized_query],
             }
+
+            if self._pre_exec_data:
+                pre_exec = self._pre_exec_data[-1]
+                for key, val in pre_exec.items():
+                    rows[key] = [val]
+            if self._post_exec_data:
+                post_exec = self._post_exec_data[-1]
+                for key, val in post_exec.items():
+                    rows[key] = [val]
+
         else:
             rows = {
                 "exec_index": [self._initial_idx + i for i in range(n_samples)],
@@ -781,6 +804,19 @@ class _ResultSample:
                 "optimization_pipeline": [self.optimization_pipeline] * n_samples,
                 "optimized_query": [self.optimized_query] * n_samples,
             }
+
+            if self._pre_exec_data:
+                for key in self._pre_exec_data[0].keys():
+                    rows[key] = []
+                for pre_exec in self._pre_exec_data:
+                    for key, val in pre_exec.items():
+                        rows[key].append(val)
+            if self._post_exec_data:
+                for key in self._post_exec_data[0].keys():
+                    rows[key] = []
+                for post_exec in self._post_exec_data:
+                    for key, val in post_exec.items():
+                        rows[key].append(val)
 
         return pd.DataFrame(rows)
 
@@ -932,7 +968,8 @@ def _exec_ctl_loop(
     cfg.log.next_query_rep()
 
     if cfg.pre_exec_callback is not None:
-        cfg.pre_exec_callback(query)
+        data = cfg.pre_exec_callback(query)
+        sample.add_pre_exec_data(data)
 
     db_config = cfg.target_db.describe()
     sample.start_execution()
@@ -954,11 +991,14 @@ def _exec_ctl_loop(
         case _ as other:
             raise RuntimeError(f"Unhandled execution result: {other}")
 
+    if cfg.post_exec_callback and sample.last_successful():
+        data = cfg.post_exec_callback(sample.last_result())  # type: ignore
+        sample.add_post_exec_data(data)
+
+    # we must write after the post_exec_callback b/c the callback might add additional data to the
+    # result data frame
     if cfg.output and sample.last_successful():
         sample.write_progressive(cfg.output, cfg.output_args)
-
-    if cfg.post_exec_callback and sample.last_successful():
-        cfg.post_exec_callback(sample.last_result())
 
 
 def _workload_ctl_loop(
@@ -1032,8 +1072,8 @@ def execute_workload(
     training_data: Optional[TrainingData | TrainingDataRepository] = None,
     timeout: Optional[float] = None,
     exec_callback: Optional[Callable[[ExecutionResult], None]] = None,
-    pre_exec_callback: Optional[Callable[[SqlQuery], None]] = None,
-    post_exec_callback: Optional[Callable[[ExecutionResult], None]] = None,
+    pre_exec_callback: Optional[Callable[[SqlQuery], None | dict]] = None,
+    post_exec_callback: Optional[Callable[[ExecutionResult], None | dict]] = None,
     repetition_callback: Optional[Callable[[int], None]] = None,
     progressive_output: Optional[str | Path] = None,
     output_args: Optional[dict] = None,
@@ -1083,11 +1123,29 @@ def execute_workload(
         .. deprecated:: v0.21.1
             This callback is deprecated in favor of post_exec_callback. Both are functionally equivalent. This is really
             just a renaming to not cause confusion regarding the precise moment when the callback is executed.
-    pre_exec_callback : Optional[Callable[[SqlQuery], None]], optional
+    pre_exec_callback : Optional[Callable[[SqlQuery], None | dict]], optional
         An optional callback that is executed right before each query execution. This query includes all hinted optimization
         decisions (if any).
-    post_exec_callback : Optional[Callable[[ExecutionResult], None]], optional
+
+        The callback can either return *None*, or an arbitrary (JSON-serializable) dictionary. If it returns a dictionary, its keys
+        are included as additional columns in the resulting data frame. The following rules must be followed:
+
+        1. If the callback returns a dictionary, it must always do so.
+        2. The callback must always return a dictionary of the same shape (i.e. same keys). If some keys should sometimes not contain
+           values for whatever reason, appropriate placeholder/default values must be used. Selectively omitting a key (or an entire
+           dictionary) results in an error.
+        3. All values in the dictionary must be JSON-serializable
+    post_exec_callback : Optional[Callable[[ExecutionResult], None | dict]], optional
         An optional callback that is executed right after each query execution.
+
+        The callback can either return *None*, or an arbitrary (JSON-serializable) dictionary. If it returns a dictionary, its keys
+        are included as additional columns in the resulting data frame. The following rules must be followed:
+
+        1. If the callback returns a dictionary, it must always do so.
+        2. The callback must always return a dictionary of the same shape (i.e. same keys). If some keys should sometimes not contain
+           values for whatever reason, appropriate placeholder/default values must be used. Selectively omitting a key (or an entire
+           dictionary) results in an error.
+        3. All values in the dictionary must be JSON-serializable
     progressive_output : Optional[str  |  Path], optional
         If provided, results will be written to this file as soon as they are obtained. If the file already exists, it
         will be appended. Supported file formats are CSV, JSON, Parquet, and HDF. When writing to HDF, the output key must
@@ -1134,6 +1192,7 @@ def execute_workload(
           optimized, this will be *None*
         - *optimized_query* contains the optimized query that was actually executed on the database. If the query was not
           optimized, this will be *None*
+        - additional columns added by the pre-exec or post-exec callbacks
 
 
     Other Parameters
@@ -1172,7 +1231,7 @@ def execute_workload(
                 "Make sure to supply applicable samples via the training_data parameter!"
             )
         elif not missing_training_data:
-            optimizer.train_on_samples(training_data)  # type: ignore
+            optimizer.train_on_samples(training_data)
         else:
             # We have not received any training data, but the optimizer is also already trained.
             # Everything is in order.
