@@ -707,14 +707,12 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         The default implementation of this method does not work for queries that naturally contain cross products. If such a
         query is passed, no intermediates with tables from different partitions of the join graph are yielded.
         """
+        preds = query.predicates()
         for candidate_join in util.powerset(query.tables()):
-            if (
-                not candidate_join
-            ):  # skip empty set (which is an artefact of the powerset method)
+            if not candidate_join:
+                # skip empty set (which is an artefact of the powerset method)
                 continue
-            if not self.allow_cross_products and not query.predicates().joins_tables(
-                candidate_join
-            ):
+            if not self.allow_cross_products and not preds.joins_tables(candidate_join):
                 continue
             yield frozenset(candidate_join)
 

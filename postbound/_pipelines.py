@@ -712,7 +712,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
 
     Examples
     --------
-    >>> pipeline = pb.MultiStageOptimizationPipline(postgres_db)
+    >>> pipeline = pb.MultiStageOptimizationPipeline(postgres_db)
     >>> pipeline.load_settings(ues_settings)
     >>> pipeline.build()
     >>> pipeline.optimize_query(join_order_benchmark["1a"])

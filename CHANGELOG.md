@@ -35,6 +35,7 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   The bug occurred when a join computed its outer child in parallel. Instead of
   placing the parallel workers on that child, the hinting process placed them on
   the inner child.
+- Fix TableReference `with_alias()` dropping the schema.
 
 ## ⚠️ Deprecations
 

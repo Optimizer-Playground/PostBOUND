@@ -61,7 +61,7 @@ database system by a fixed factor:
             self,
             query: pb.SqlQuery,
             intermediate: pb.TableReference | Iterable[pb.TableReference]
-        ) -> pb.CardinalityEstimate:
+        ) -> pb.Cardinality:
             subquery = pb.transform.extract_query_fragment(query, intermediate)
             if subquery is None:
                 return pb.Cardinality.unknown()
