@@ -5,7 +5,7 @@ import math
 import warnings
 from typing import Literal, Optional, Union
 
-from .. import parser
+from .. import Cardinality, parser
 from .._core import (
     IntermediateOperator,
     JoinOperator,
@@ -156,14 +156,17 @@ def read_plan_params_json(json_data: dict | str) -> PlanParameterization:
     """
     json_data = json.loads(json_data) if isinstance(json_data, str) else json_data
     params = PlanParameterization()
-    params.cardinalities = {
-        frozenset(parser.load_table_json(tab)): card
-        for tab, card in json_data.get("cardinality_hints", {}).items()
-    }
-    params.parallel_workers = {
-        frozenset(parser.load_table_json(tab)): workers
-        for tab, workers in json_data.get("parallel_worker_hints", {}).items()
-    }
+
+    for hint in json_data.get("cardinalities", []):
+        parsed_intermediate = parser.load_table_json(hint["intermediate"])
+        parsed_card = Cardinality(hint["cardinality"])
+        params.add_cardinality(parsed_intermediate, parsed_card)
+
+    for hint in json_data.get("parallel_workers", []):
+        parsed_intermediate = parser.load_table_json(hint["intermediate"])
+        parsed_workers = hint["parallel_workers"]
+        params.set_workers(parsed_intermediate, parsed_workers)
+
     return params
 
 

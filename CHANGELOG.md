@@ -12,6 +12,14 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
+# Version 0.21.2
+
+## 🏥 Fixes
+
+- Fixed plan parameterizations not being JSON-serializable.
+
+---
+
 # Version 0.21.1
 
 ## 🐣 New features

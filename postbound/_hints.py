@@ -704,7 +704,7 @@ class PlanParameterization:
         """
 
     def add_cardinality(
-        self, tables: Iterable[TableReference], cardinality: Cardinality
+        self, tables: Iterable[TableReference], cardinality: Cardinality | int | float
     ) -> Self:
         """Assigns a specific cardinality hint to a (join of) tables.
 
@@ -712,7 +712,7 @@ class PlanParameterization:
         ----------
         tables : Iterable[TableReference]
             The tables for which the hint is generated. This can be an iterable of a single table, which denotes a scan hint.
-        cardinality : Cardinality
+        cardinality : Cardinality | int | float
             The estimated or known cardinality.
 
         Returns
@@ -865,8 +865,14 @@ class PlanParameterization:
 
     def __json__(self) -> jsondict:
         return {
-            "cardinality_hints": self.cardinalities,
-            "parallel_worker_hints": self.parallel_workers,
+            "cardinalities": [
+                {"intermediate": intermediate, "cardinality": card}
+                for intermediate, card in self.cardinalities.items()
+            ],
+            "parallel_workers": [
+                {"intermediate": intermediate, "workers": workers}
+                for intermediate, workers in self.parallel_workers.items()
+            ],
         }
 
     def __repr__(self) -> str:
