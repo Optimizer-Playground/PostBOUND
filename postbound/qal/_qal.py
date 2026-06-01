@@ -3699,12 +3699,12 @@ UnwrappedFilter = tuple[ColumnReference, LogicalOperator, object]
 
 def _attempt_filter_unwrap(
     predicate: AbstractPredicate,
-) -> tuple[ColumnReference, LogicalOperator, Any]:
-    """Extracts the main components of a simple filter predicate to make them more directly accessible.
+) -> tuple[ColumnReference, LogicalOperator, Any] | None:
+    """Extracts the main components of a simple filter, making them more directly accessible.
 
-    This is a preparatory step in order to create instances of `SimpleFilter`. Therefore, it only works for predicates
-    that match the requirements of "simple" filters. This boils down to being of the form ``<column> <operator> <values>``. If
-    this condition is not met, the unwrapping fails.
+    This is a preparatory step in order to create instances of `SimpleFilter`. Therefore, it only
+    works for predicates that match the requirements of "simple" filters. This boils down to being
+    of the form ``<column> <operator> <values>``. If this condition is not met, the unwrapping fails.
 
     Parameters
     ----------
@@ -3713,18 +3713,13 @@ def _attempt_filter_unwrap(
 
     Returns
     -------
-    tuple[ColumnReference, LogicalOperator, Any]
-        A triple consisting of column, operator and value(s) if the `predicate` could be unwrapped, or *None* otherwise.
+    tuple[ColumnReference, LogicalOperator, Any] | None
+        A triple consisting of column, operator and value(s) if the `predicate` could be unwrapped,
+        or *None* otherwise.
 
-    Raises
-    ------
-    ValueError
-        If `predicate` is not a base predicate
     """
     if not predicate.is_filter() or not predicate.is_base():
-        raise ValueError(
-            "Only base filter predicates can be unwrapped, not " + str(predicate)
-        )
+        return None
 
     match predicate:
         case BinaryPredicate(op, lhs, rhs):
@@ -3748,34 +3743,65 @@ def _attempt_filter_unwrap(
             return lhs, LogicalOperator.In, tuple(values)
 
         case _:
-            raise ValueError("Unknown predicate type: " + str(predicate))
+            return None
+
+
+def _unwrap_filter_or_raise(
+    predicate: AbstractPredicate,
+) -> tuple[ColumnReference, LogicalOperator, Any]:
+    """Tries to unwrap a filter predicate or raises an error if this is not possible.
+
+    See Also
+    --------
+    _attempt_filter_unwrap
+    """
+    unwrapped = _attempt_filter_unwrap(predicate)
+    if unwrapped is None:
+        raise ValueError(f"Could not simplify predicate {predicate}")
+    return unwrapped
 
 
 class SimpleFilter(AbstractPredicate):
-    """The intent behind this view is to provide more streamlined and direct access to filter predicates.
+    """A simple filter provides more streamlined and direct access to filter predicates.
 
-    A simple filter is a read-only predicate, i.e. it cannot be created on its own and has to be derived from a base predicate
-    (either a binary predicate, a *BETWEEN* predicate or an *IN* predicate). Afterward, it provides read-only access to the
-    predicate being filtered, the filter operation, as well as the values used to restrict the allowed column instances.
+    A simple filter is a read-only predicate, i.e. it cannot be created on its own and has to be
+    derived from a base predicate (either a binary predicate, a *BETWEEN* predicate, or an *IN*
+    predicate). Afterward, it provides read-only access to the predicate being filtered, the filter
+    operation, as well as the values used to restrict the allowed column instances.
+    All these attributes are made directly available instead of via hierarchies of `SqlExpression`
+    instances.
 
-    Note that not all base predicates can be represented as a simplified view. In order for the view to work, both the
-    column as well as the filter values cannot be modified by other expressions such as function calls or mathematical
-    expressions. However, cast expressions are tolerated and will simply be dropped. As a rule of thumb, if an expression
-    modifies a value (such as a function call), this cannot be unwrapped. Therefore, a filter approximately has to be of the
-    form ``<column reference> <operator> <static values>`` in order for the representation to work.
+    Note that not all base predicates can be represented as a simplified view. In order for the view
+    to work, both the column as well as the filter values cannot be modified by other expressions
+    such as function calls or mathematical expressions. However, cast expressions are tolerated and
+    will simply be dropped. As a rule of thumb, if an expression modifies a value (such as a function
+    call), this cannot be unwrapped. Therefore, a filter approximately has to be of the form
+    ``<column reference> <operator> <static values>`` in order for the representation to work.
 
-    The static methods `wrap`, `can_wrap` and `wrap_all` can serve as high-level access points into the view. The components
-    of the view are accessible via properties.
+    The static methods `attempt_wrap`, `wrap`, `can_wrap` and `wrap_all` serve as high-level access
+    points into the view. The components of the view are accessible via properties.
+    In general, using `attempt_wrap` and `wrap_all` should be sufficient for most purposes.
 
     Parameters
     ----------
-    predicate : AbstractPredicate
-        The predicate that should be simplified
+    column : ColumnReference | AbstractPredicate
+        The column being filtered.
 
-    Raises
-    ------
-    ValueError
-        If the `predicate` cannot be represented by a simplified view.
+        For legacy purposes, this can (counterintuitively) also be a full predicate. This is treated
+        as follows: if a predicate is given, all other parameters need to be omitted (they are
+        ignored either way). The predicate must be of simple form (see explanation above) and its
+        components will be automatically unwrapped and used as attribute values for the simplified
+        version. The introduction of the `attempt_wrap` method has made this mode unnecessary. It is
+        only available to keep backwards compatibility.
+    operation : LogicalOperator | None
+        The filter operation (e.g. *IN* or ``<>``). This cannot be *EXISTS* or *MISSING*, since
+        subqueries cannot be represented in simplified form. Passing *None* only works in legacy
+        mode.
+    value : Any
+        The filter value. Passing *None* is interpreted as SQL NULL.
+    predicate : AbstractPredicate | None
+        The original predicate that is represented by this simplified view. Passing *None* only
+        works in legacy mode.
 
     See Also
     --------
@@ -3783,27 +3809,41 @@ class SimpleFilter(AbstractPredicate):
 
     Examples
     --------
-    The best way to construct simplified views is to start with the `QueryPredicates` and extract the filter predicates,
-    e.g., by using ``views = SimpleFilter.wrap_all(query.predicates())`` or
-    ``filters = SimpleFilter.wrap_all(query.predicates().joins())``. Notice that especially the first conversion can be
-    "lossy": all join predicates are dropped. Likewise, all filters that are more complex such as disjunctions are ignored.
-    Alternatively, the `QueryPredicates` also provides a `simplify()` method that can be used to convert all predicates
-    (filters and joins) into their simplified counterparts.
+    The best way to construct simplified views is to start with the `QueryPredicates` and extract
+    the filter predicates, e.g., by using ``views = SimpleFilter.wrap_all(query.predicates())`` or
+    ``filters = SimpleFilter.wrap_all(query.predicates().joins())``. Notice that especially the
+    first conversion can be "lossy": all join predicates are dropped. Likewise, all filters that are
+    more complex such as disjunctions are ignored. Alternatively, the `QueryPredicates` also
+    provides a `simplify()` method that can be used to convert all predicates (filters and joins)
+    into their simplified counterparts.
 
-    The following predicates can be represented as a simplified view: ``R.a = 42``, ``R.b BETWEEN 1 AND 2`` or
-    ``R.c IN (11, 22, 33)``.
-    On the other hand, the following predicates cannot be represented b/c they involve advanced operations: ``R.a + 10 = 42``
-    (contains a mathematical expression) and ``some_udf(R.a) < 11 % 2`` (contains a function call and a mathematical
+    If a single predicate should be simplified, the ``attempt_wrap(predicate)`` usually works best.
+
+    The following predicates can be represented as a simplified view: ``R.a = 42``,
+    ``R.b BETWEEN 1 AND 2`` or ``R.c IN (11, 22, 33)``.
+    On the other hand, the following predicates cannot be represented b/c they involve advanced
+    operations: ``R.a + 10 = 42`` (contains a mathematical expression) and
+    ``some_udf(R.a) < 11 % 2`` (contains a function call, a predicate expressoin, and a mathematical
     expression).
 
     Notes
     -----
-    Simple filters can be used in *match* statements and provide *(column, operation, value)* as arguments.
+    Simple filters can be used in *match* statements and provide *(column, operation, value)* as
+    arguments.
     """
 
     @staticmethod
+    def attempt_wrap(predicate: AbstractPredicate) -> Optional[SimpleFilter]:
+        """Transforms a predicate into a simplified view. Returns *None* if that is not possible."""
+        unwrapped = _attempt_filter_unwrap(predicate)
+        if unwrapped is None:
+            return None
+        col, op, val = unwrapped
+        return SimpleFilter(col, op, val, predicate=predicate)
+
+    @staticmethod
     def wrap(predicate: AbstractPredicate) -> SimpleFilter:
-        """Transforms a specific predicate into a simplified view. Raises an error if that is not possible.
+        """Transforms a predicate into a simplified view. Raises an error if that is not possible.
 
         Parameters
         ----------
@@ -3820,7 +3860,10 @@ class SimpleFilter(AbstractPredicate):
         ValueError
             If the predicate cannot be represented as a simplified view.
         """
-        return SimpleFilter(predicate)
+        simplified = SimpleFilter.attempt_wrap(predicate)
+        if simplified is None:
+            raise ValueError(f"Could not simplify predicate {predicate}")
+        return simplified
 
     @staticmethod
     def can_wrap(predicate: AbstractPredicate) -> bool:
@@ -3836,18 +3879,8 @@ class SimpleFilter(AbstractPredicate):
         bool
             Whether a representation as a simplified view is possible.
         """
-        try:
-            _attempt_filter_unwrap(predicate)
-            return True
-        except ValueError:
-            return False
-        except Exception as e:
-            warnings.warn(
-                f"Unexpected error during filter unwrapping: {e}",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            return False
+        unwrapped = _attempt_filter_unwrap(predicate)
+        return unwrapped is not None
 
     @staticmethod
     def wrap_all(predicates: Iterable[AbstractPredicate]) -> Sequence[SimpleFilter]:
@@ -3858,26 +3891,38 @@ class SimpleFilter(AbstractPredicate):
         Parameters
         ----------
         predicates : Iterable[AbstractPredicate]
-            The predicates to represent as views. These can be arbitrary predicates, i.e. including joins and complex filters.
+            The predicates to represent as views. These can be arbitrary predicates, i.e. including
+            joins and complex filters.
 
         Returns
         -------
         Sequence[SimpleFilter]
-            The simplified views for all predicates that can be represented this way. The sequence of the views matches the
-            sequence in the `predicates`. If the representation fails for individual predicates, they simply do not appear in
-            the result. Therefore, this sequence may be empty if none of the predicates are valid  simplified views.
+            The simplified views for all predicates that can be represented this way. The sequence
+            of the views matches the sequence in the `predicates`. If the representation fails for
+            individual predicates, they simply do not appear in the result. Therefore, this sequence
+            may be empty if none of the predicates are valid  simplified views.
         """
-        views: list[SimpleFilter] = []
-        for pred in predicates:
-            try:
-                filter_view = SimpleFilter.wrap(pred)
-                views.append(filter_view)
-            except ValueError:
-                continue
-        return views
+        views: list[SimpleFilter | None] = [
+            SimpleFilter.attempt_wrap(pred) for pred in predicates
+        ]
+        return [v for v in views if v is not None]
 
-    def __init__(self, predicate: AbstractPredicate) -> None:
-        column, operation, value = _attempt_filter_unwrap(predicate)
+    def __init__(
+        self,
+        column: ColumnReference | AbstractPredicate,
+        operation: LogicalOperator | None = None,
+        value: Any = None,
+        *,
+        predicate: AbstractPredicate | None = None,
+    ) -> None:
+        if isinstance(column, AbstractPredicate):
+            predicate = column
+            column, operation, value = _unwrap_filter_or_raise(column)
+        if predicate is None:
+            raise ValueError("Original predicate must be given explicitly!")
+        if column is None or operation is None:  # value can be None for NULL filters[]
+            raise ValueError("Column, operation and value must be given explicitly!")
+
         self._column = column
         self._operation = operation
         self._value = value
@@ -3907,8 +3952,8 @@ class SimpleFilter(AbstractPredicate):
         Returns
         -------
         LogicalSqlOperators
-            the operator. This cannot be *EXISTS* or *MISSING*, since subqueries cannot be represented in simplified
-            views.
+            the operator. This cannot be *EXISTS* or *MISSING*, since subqueries cannot be
+            represented in simplified views.
         """
         return self._operation
 
@@ -3919,8 +3964,9 @@ class SimpleFilter(AbstractPredicate):
         Returns
         -------
         object | tuple[object] | Sequence[object]
-            The value. For a binary predicate, this is just the value itself. For a *BETWEEN* predicate, this is tuple of the
-            form ``(lower, upper)`` and for an *IN* predicate, this is a sequence of the allowed values.
+            The value. For a binary predicate, this is just the value itself. For a *BETWEEN*
+            predicate, this is tuple of the form ``(lower, upper)`` and for an *IN* predicate, this
+            is a sequence of the allowed values.
         """
         return self._value
 
@@ -3962,7 +4008,7 @@ class SimpleFilter(AbstractPredicate):
         **kwargs,
     ) -> VisitorResult:
         if _safe_recurse_expression_visitor(visitor):
-            return visitor.visit_predicate_expr(self, *args, **kwargs)
+            return visitor.visit_predicate_expr(self, *args, **kwargs)  # type: ignore
         return self._predicate.accept_visitor(visitor, *args, **kwargs)
 
     __hash__ = AbstractPredicate.__hash__
@@ -3977,31 +4023,66 @@ class SimpleFilter(AbstractPredicate):
         return str(self._predicate)
 
 
+def _unwrap_simple_join(
+    predicate: AbstractPredicate,
+) -> tuple[ColumnReference, ColumnReference] | None:
+    if not isinstance(predicate, BinaryPredicate) or not predicate.is_join():
+        return None
+    if not predicate.operation == LogicalOperator.Equal:
+        return None
+
+    lhs, rhs = (
+        _unwrap_expression(predicate.first_argument),
+        _unwrap_expression(predicate.second_argument),
+    )
+    if not isinstance(lhs, ColumnReference) or not isinstance(rhs, ColumnReference):
+        return None
+    return lhs, rhs
+
+
+def _unwrap_join_or_raise(
+    predicate: AbstractPredicate,
+) -> tuple[ColumnReference, ColumnReference]:
+    unwrapped = _unwrap_simple_join(predicate)
+    if unwrapped is None:
+        raise ValueError(f"Could not simplify join {predicate}")
+    return unwrapped
+
+
 class SimpleJoin(AbstractPredicate):
-    """The intent behind this view is to provide a more streamlined and direct access to join predicates.
+    """A simple join provides a more streamlined and direct access to join predicates.
 
-    A simple join is a read-only predicate, i.e. it cannot be created on its own and has to be derived from a binary equi
-    join predicate. Afterward, it provides read-only access to the partner columns that are joined.
+    A simple join is a read-only predicate, i.e. it cannot be created on its own and has to be
+    derived from a binary equi-join predicate. Afterward, it provides read-only access to the
+    partner columns that are joined.
 
-    Note that not all binary joins can be represented in a simplified view. In order for the view to work, the join must be an
-    equi-join, i.e. using `LogicalOperator.Equal`. Furthermore, both sides of the join have to cannot be modified by other
-    expressions such as function calls or mathematical expressions. However, cast expressions are tolerated and will simply be
-    dropped. As a rule of thumb, if an expression modifies a value (such as a function call), this cannot be unwrapped.
-    Therefore, a join approximately has to be of the form ``<first col> = <second col>`` in order for the representation to
-    work.
+    Note that not all binary joins can be represented in a simplified view. In order for the view to
+    work, the join must be an equi-join, i.e. using `LogicalOperator.Equal`. Furthermore, both sides
+    of the join have to cannot be modified by other expressions such as function calls or
+    mathematical expressions. However, cast expressions are tolerated and will simply be dropped. As
+    a rule of thumb, if an expression modifies a value (such as a function call), this cannot be
+    unwrapped. Therefore, a join approximately has to be of the form ``<first col> = <second col>``
+    in order for the representation to work.
 
-    The static methods `wrap`, `can_wrap` and `wrap_all` can serve as high-level access points into the view. The components
-    of the view are accessible via properties.
+    The static methods `attempt_wrap`, `wrap`, `can_wrap` and `wrap_all` serve as high-level access
+    points into the view. The components of the view are accessible via properties.
+    In general, using `attempt_wrap` and `wrap_all` should be sufficient for most purposes.
 
     Parameters
     ----------
-    predicate : AbstractPredicate
-        The predicate that should be simplified
+    lhs : ColumnReference | AbstractPredicate
+        The left-hand side of the join. For legacy purposes, this can (counterintuitively) also be a
+        full predicate. This is treated as follows: if a predicate is given, all other parameters
+        need to be omitted (they are ignored either way). The predicate must be of simple form (see
+        explanation above) and its components will be automatically unwrapped and used as attribute
+        values for the simplified version. The introduction of the `attempt_wrap` method has made
+        this mode unnecessary. It is only available to keep backwards compatibility.
+    rhs : ColumnReference | None
+        The right-hand side of the join. Passing *None* only works in legacy mode.
+    predicate : AbstractPredicate | None
+        The original predicate that is represented by this simplified view. Passing *None* only works
+        in legacy mode.
 
-    Raises
-    ------
-    ValueError
-        If the `predicate` cannot be represented by a simplified view.
 
     See Also
     --------
@@ -4009,17 +4090,27 @@ class SimpleJoin(AbstractPredicate):
 
     Examples
     --------
-    The best way to construct simplified views is to start with the `QueryPredicates` and extract the joins, e.g. by using
-    ``views = SimpleJoin.wrap_all(query.predicates())`` or ``joins = SimpleJoin.wrap_all(query.predicates().joins())``.
-    Notice that especially the first conversion can be "lossy": all filter predicates are dropped. Likewise, all joins that
-    are not equi-joins are ignored.
-    Alternatively, the `QueryPredicates` also provides a `simplify()` method that can be used to convert all predicates
-    (filters and joins) into their simplified counterparts.
+    The best way to construct simplified views is to start with the `QueryPredicates` and extract the
+    joins, e.g. by using ``views = SimpleJoin.wrap_all(query.predicates())`` or
+    ``joins = SimpleJoin.wrap_all(query.predicates().joins())``.
+    Notice that especially the first conversion can be "lossy": all filter predicates are dropped.
+    Likewise, all joins that are not equi-joins are ignored.
+    Alternatively, the `QueryPredicates` also provides a `simplify()` method that can be used to
+    convert all predicates (filters and joins) into their simplified counterparts.
 
     Notes
     -----
     Simple joins can be used in *match* statements and provide the `lhs` and `rhs` properties.
     """
+
+    @staticmethod
+    def attempt_wrap(predicate: AbstractPredicate) -> Optional[SimpleJoin]:
+        """Transforms a predicate into a simplified view. Returns *None* if that is not possible."""
+        unwrapped = _unwrap_simple_join(predicate)
+        if unwrapped is None:
+            return None
+        lhs, rhs = unwrapped
+        return SimpleJoin(lhs, rhs, predicate=predicate)
 
     @staticmethod
     def wrap(predicate: AbstractPredicate) -> SimpleJoin:
@@ -4040,7 +4131,10 @@ class SimpleJoin(AbstractPredicate):
         ValueError
             If the predicate cannot be represented as a simplified view.
         """
-        return SimpleJoin(predicate)
+        simplified = SimpleJoin.attempt_wrap(predicate)
+        if simplified is None:
+            raise ValueError(f"Could not simplify join {predicate}")
+        return simplified
 
     @staticmethod
     def can_wrap(predicate: AbstractPredicate) -> bool:
@@ -4056,15 +4150,8 @@ class SimpleJoin(AbstractPredicate):
         bool
             Whether a representation as a simplified view is possible.
         """
-        if not isinstance(predicate, BinaryPredicate) or not predicate.is_join():
-            return False
-        if not predicate.operation == LogicalOperator.Equal:
-            return False
-        lhs, rhs = (
-            _unwrap_expression(predicate.first_argument),
-            _unwrap_expression(predicate.second_argument),
-        )
-        return isinstance(lhs, ColumnReference) and isinstance(rhs, ColumnReference)
+        unwrapped = _unwrap_simple_join(predicate)
+        return unwrapped is not None
 
     @staticmethod
     def wrap_all(predicates: Iterable[AbstractPredicate]) -> Sequence[SimpleJoin]:
@@ -4075,42 +4162,35 @@ class SimpleJoin(AbstractPredicate):
         Parameters
         ----------
         predicates : Iterable[AbstractPredicate]
-            The predicates to represent as views. These can be arbitrary predicates, i.e. including filters and complex joins.
+            The predicates to represent as views. These can be arbitrary predicates, i.e. including
+            filters and complex joins.
 
         Returns
         -------
         Sequence[SimpleJoin]
-            The simplified views for all predicates that can be represented this way. The sequence of the views matches the
-            sequence in the `predicates`. If the representation fails for individual predicates, they simply do not appear in
-            the result. Therefore, this sequence may be empty if none of the predicates are valid simplified views.
+            The simplified views for all predicates that can be represented this way. The sequence of
+            the views matches the sequence in the `predicates`. If the representation fails for
+            individual predicates, they simply do not appear in the result. Therefore, this sequence
+            may be empty if none of the predicates are valid simplified views.
         """
-        views: list[SimpleJoin] = []
-        for pred in predicates:
-            try:
-                join_view = SimpleJoin.wrap(pred)
-                views.append(join_view)
-            except ValueError:
-                continue
-        return views
+        views: list[SimpleJoin | None] = [
+            SimpleJoin.attempt_wrap(pred) for pred in predicates
+        ]
+        return [v for v in views if v is not None]
 
-    def __init__(self, predicate: AbstractPredicate) -> None:
-        if not isinstance(predicate, BinaryPredicate) or not predicate.is_join():
-            raise ValueError(
-                "Only join predicates can be wrapped in a simple join view"
-            )
-        if not predicate.operation == LogicalOperator.Equal:
-            raise ValueError(
-                "Only equi inner joins can be wrapped in a simple join view"
-            )
+    def __init__(
+        self,
+        lhs: ColumnReference | AbstractPredicate,
+        rhs: ColumnReference | None = None,
+        *,
+        predicate: AbstractPredicate | None = None,
+    ) -> None:
+        if isinstance(lhs, AbstractPredicate):
+            predicate = lhs
+            lhs, rhs = _unwrap_join_or_raise(lhs)
 
-        lhs, rhs = (
-            _unwrap_expression(predicate.first_argument),
-            _unwrap_expression(predicate.second_argument),
-        )
-        if not isinstance(lhs, ColumnReference) or not isinstance(rhs, ColumnReference):
-            raise ValueError(
-                "Join predicates can only be wrapped if both sides are column references"
-            )
+        if lhs is None or rhs is None or predicate is None:
+            raise ValueError("None of lhs, rhs, and predicate may be None")
 
         self._lhs = lhs
         self._rhs = rhs
@@ -4147,18 +4227,27 @@ class SimpleJoin(AbstractPredicate):
 
     @overload
     def partner_of(self, other: TableReference) -> Optional[TableReference]:
-        """Provides the join partner of the given table. If the table is not joined, *None* is returned."""
+        """Provides the join partner of the given table.
+
+        If the table is not joined, *None* is returned.
+        """
         ...
 
     @overload
     def partner_of(self, other: ColumnReference) -> Optional[ColumnReference]:
-        """Provides the join partner of the given column. If the column is not joined, *None* is returned."""
+        """Provides the join partner of the given column.
+
+        If the column is not joined, *None* is returned.
+        """
         ...
 
     def partner_of(
         self, other: TableReference | ColumnReference
     ) -> Optional[TableReference | ColumnReference]:
-        """Provides the join partner of the given column or table. If the column or table is not joined, *None* is returned."""
+        """Provides the join partner of the given column or table.
+
+        If the column or table is not joined, *None* is returned.
+        """
         if not self.joins(other):
             return None
         if isinstance(other, TableReference):
@@ -4196,7 +4285,7 @@ class SimpleJoin(AbstractPredicate):
         **kwargs,
     ) -> VisitorResult:
         if _safe_recurse_expression_visitor(visitor):
-            return visitor.visit_predicate_expr(self, *args, **kwargs)
+            return visitor.visit_predicate_expr(self, *args, **kwargs)  # type: ignore
         return self._predicate.accept_visitor(visitor, *args, **kwargs)
 
     __hash__ = AbstractPredicate.__hash__
@@ -4340,15 +4429,16 @@ def _collect_join_predicates(predicate: AbstractPredicate) -> set[AbstractPredic
 class QueryPredicates:
     """The query predicates provide high-level access to all the different predicates in a query.
 
-    Generally speaking, this class provides the most user-friendly access into the predicate hierarchy and should be sufficient
-    for most use-cases. The provided methods revolve around identifying filter and join predicates easily, as well finding the
-    predicates that are specified on specific tables.
+    Generally speaking, this class provides the most user-friendly access into the predicate
+    hierarchy and should be sufficient for most use-cases. The provided methods revolve around
+    identifying filter and join predicates easily, as well finding the predicates that are specified
+    on specific tables.
 
     Parameters
     ----------
     root : Optional[AbstractPredicate]
-        The root predicate of the predicate hierarchy that should be represented by the `QueryPredicates`. Typically, this is
-        a conjunction of the actual predicates.
+        The root predicate of the predicate hierarchy that should be represented by the
+        `QueryPredicates`. Typically, this is a conjunction of the actual predicates.
     """
 
     @staticmethod
@@ -5821,19 +5911,33 @@ class BaseProjection:
         target_name: str = "",
         distinct: bool = False,
     ) -> BaseProjection:
-        pass
+        """Shorthand to create a projection with a COUNT() aggregation."""
+        fn = FunctionExpression.create_count(column, distinct=distinct)
+        return BaseProjection(fn, target_name)
 
     @staticmethod
     def create_min(
         column: ColumnReference | SqlExpression, *, target_name: str = ""
     ) -> BaseProjection:
-        pass
+        """Shorthand to create a projection with a MIN() aggregation."""
+        fn = FunctionExpression.create_min(column)
+        return BaseProjection(fn, target_name)
 
     @staticmethod
     def create_max(
         column: ColumnReference | SqlExpression, *, target_name: str = ""
     ) -> BaseProjection:
-        pass
+        """Shorthand to create a projection with a MAX() aggregation."""
+        fn = FunctionExpression.create_max(column)
+        return BaseProjection(fn, target_name)
+
+    @staticmethod
+    def create_sum(
+        column: ColumnReference | SqlExpression, *, target_name: str = ""
+    ) -> BaseProjection:
+        """Shorthand to create a projection with a SUM() aggregation."""
+        fn = FunctionExpression.create_sum(column)
+        return BaseProjection(fn, target_name)
 
     @staticmethod
     def column(col: ColumnReference, target_name: str = "") -> BaseProjection:
@@ -6021,15 +6125,62 @@ class Select(BaseClause):
         ]
         return Select(target_columns, distinct=distinct)
 
+    @staticmethod
+    def create_count(
+        column: ColumnReference | SqlExpression | None = None, *, target_name: str = ""
+    ) -> Select:
+        """Shorthand to create a SELECT clause with a single COUNT() expression.
+
+        If no column is given, defaults to a COUNT(*) expression.
+        """
+        if column is None:
+            return Select.count_star()
+        return Select(BaseProjection.create_count(column, target_name=target_name))
+
+    @staticmethod
+    def create_min(
+        column: ColumnReference | SqlExpression, *, target_name: str = ""
+    ) -> Select:
+        """Shorthand to create a SELECT clause with a single MIN() expression."""
+        return Select(BaseProjection.create_min(column, target_name=target_name))
+
+    @staticmethod
+    def create_max(
+        column: ColumnReference | SqlExpression, *, target_name: str = ""
+    ) -> Select:
+        """Shorthand to create a SELECT clause with a single MAX() expression."""
+        return Select(BaseProjection.create_max(column, target_name=target_name))
+
+    @staticmethod
+    def create_sum(
+        column: ColumnReference | SqlExpression, *, target_name: str = ""
+    ) -> Select:
+        """Shorthand to create a SELECT clause with a single SUM() expression."""
+        return Select(BaseProjection.create_sum(column, target_name=target_name))
+
     def __init__(
         self,
-        targets: BaseProjection | Sequence[BaseProjection],
+        targets: BaseProjection
+        | SqlExpression
+        | Sequence[BaseProjection | SqlExpression],
         *,
         distinct: Iterable[SqlExpression] | bool = False,
     ) -> None:
         if not targets:
             raise ValueError("At least one target must be specified")
-        self._targets = tuple(util.enlist(targets))
+
+        match targets:
+            case BaseProjection():
+                self._targets = (targets,)
+            case SqlExpression():
+                self._targets = (BaseProjection(targets),)
+            case Sequence():
+                self._targets = tuple(
+                    t if isinstance(t, BaseProjection) else BaseProjection(t)
+                    for t in targets
+                )
+            case _:
+                raise ValueError(f"Unexpected targets value: {targets}")
 
         match distinct:
             case True:
