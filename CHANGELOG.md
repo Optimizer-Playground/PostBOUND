@@ -17,8 +17,13 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 ## 🐣 New features
 
 - Added a lot of utilities to create QAL objects, specifically SELECT clauses.
-- Improved the creation of `SimpleFilter` and `SimpleJoin` predicates to make double checks
-  redundant. `attempt_wrap()` methods are now the preferred entry point into the simplification.
+- Improved the creation of `SimpleFilter` and `SimpleJoin` predicates to make double
+  checks redundant. `attempt_wrap()` methods are now the preferred entry point into
+  the simplification.
+
+## 📰 Updates
+
+- Added jsonize support for optimization pipelines, optimization stages, and databases.
 
 ## 🏥 Fixes
 

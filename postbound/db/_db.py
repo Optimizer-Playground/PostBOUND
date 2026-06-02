@@ -690,6 +690,9 @@ class Database(abc.ABC):
         )
         return f".query_cache_{identifier}.json"
 
+    def __json__(self) -> jsondict:
+        return self.describe()
+
     def __hash__(self) -> int:
         return hash(self._query_cache_name())
 

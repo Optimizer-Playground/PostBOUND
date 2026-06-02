@@ -316,6 +316,9 @@ class OptimizationPipeline(abc.ABC):
         """
         raise NotImplementedError
 
+    def __json__(self) -> jsondict:
+        return self.describe()
+
 
 class IntegratedOptimizationPipeline(OptimizationPipeline):
     """This pipeline is intended for algorithms that calculate the entire query plan in a single process.

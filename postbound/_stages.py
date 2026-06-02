@@ -367,6 +367,9 @@ class OptimizationStage:
         """
         return {"name": self.name}
 
+    def __json__(self) -> jsondict:
+        return self.describe()
+
     def __repr__(self) -> str:
         return str(self)
 
