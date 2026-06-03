@@ -28,6 +28,8 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 ## 🏥 Fixes
 
 - Fixed plan parameterizations not being JSON-serializable.
+- Fixed the shorthand method for creating _COUNT(\*)_ select clauses accepting a distinct
+  parameter instead of a target name.
 
 ---
 
@@ -63,7 +65,7 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 ## ⚠️ Deprecations
 
 - The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
-  favor of the more flexible _projection_ and _output_  parameters. However, we
+  favor of the more flexible _projection_ and _output_ parameters. However, we
   currently have no plans to remove the old API.
 - The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
   will be moved to the separate optimizer repository for version 0.22.0.
@@ -73,15 +75,15 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   functions for input.
 - `CompoundPredicate` will no longer be used to represent NOT predicates from
   version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
-- `MathExpression`  will no longer accept sequences of expressions as the second
+- `MathExpression` will no longer accept sequences of expressions as the second
   argument. To encode operations involving more than 2 operands, a hierarchy of
   binary math expressions should be used instead.
 - Databases will no longer support the database cache out-of-the-box. Instead,
   the cache will become a proper high-level component that can be used with any
   database. This change is planned for version 0.22.0
-- Renamed the _exec\_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
+- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
   This should prevent confusion regarding the precise timing of the callback execution,
-  especially since we have now also introduced a _pre\_exec\_callback_.
+  especially since we have now also introduced a _pre_exec_callback_.
 
 ---
 
@@ -107,7 +109,7 @@ the framework. Currently, these are planned for version 0.22.0.
   trained already. This allows to easily use data-driven and workload-driven optimization stages without any explicit
   action needed by the user.
 - The database interface now provides a shortcut `explain()` method to obtain the query plan for a given query. This can be
-   used instead of calling the optimizer and it's explain method.
+  used instead of calling the optimizer and it's explain method.
 - The database schema now provides a high-level API centered around iteration and dict-style access. This makes the repeated
   calls to different schema methods somewhat redundant.
 - Database statistics now also provide histograms.
@@ -160,8 +162,8 @@ the framework. Currently, these are planned for version 0.22.0.
 - The Postgres statistics interface now consistently supports table references with a schema.
 - Much improved handling of database schemas during query parsing. We now omit clear warnings in case the database pool
   looks weird.
-- The `QueryPreparation` API now provides the `projection` and `output` parameters to modify the SELECT* clause and the
-  type of results to gather for all queries in a more flexible and intuitive way (how did _explain=True_  and
+- The `QueryPreparation` API now provides the `projection` and `output` parameters to modify the SELECT\* clause and the
+  type of results to gather for all queries in a more flexible and intuitive way (how did _explain=True_ and
   _analyze=True_ interact?).
   The old API using _analyze=True_, etc. is now deprecated in favor of these new parameters.
 - Column references now provide a `drop_table_alias()` method to obtain a normalized-ish representation of the column.
@@ -203,7 +205,7 @@ the framework. Currently, these are planned for version 0.22.0.
 ## ⚠️ Deprecations
 
 - The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in favor of the more flexible _projection_
-  and _output_  parameters. However, we currently have no plans to remove the old API.
+  and _output_ parameters. However, we currently have no plans to remove the old API.
 - The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and will be moved to the separate optimizer
   repository for version 0.22.0.
 - `Workload.read()` is deprecated in favor of `read_workload()`. The old method will be removed in version 0.22.0.

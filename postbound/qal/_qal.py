@@ -6304,24 +6304,21 @@ class Select(BaseClause):
     """
 
     @staticmethod
-    def count_star(
-        *, distinct: Iterable[SqlExpression] | bool = False
-    ) -> Select:
+    def count_star(*, target_name: str = "") -> Select:
         """Shortcut method to create a ``SELECT COUNT(*)`` clause.
 
         Parameters
         ----------
-        distinct : Iterable[SqlExpression] | bool
-            Whether a duplicate elimination should be performed. By default, this is *False* indicating no duplicate
-            elimination. If *True*, rows are eliminated based on all columns. Alternatively, a *DISTINCT ON* clause can be
-            created by specifying the columns that should be used for duplicate elimination.
+        target_name : str, optional
+            An optional name under which the column should be accessible
+            (e.g., ``COUNT(*) AS freq``).
 
         Returns
         -------
         Select
             The clause
         """
-        return Select(BaseProjection.count_star(), distinct=distinct)
+        return Select(BaseProjection.count_star(target_name))
 
     @staticmethod
     def star(*, distinct: Iterable[SqlExpression] | bool = False) -> Select:
