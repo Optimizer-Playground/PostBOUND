@@ -30,6 +30,9 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 - Fixed plan parameterizations not being JSON-serializable.
 - Fixed the shorthand method for creating _COUNT(\*)_ select clauses accepting a distinct
   parameter instead of a target name.
+- Fixed `as_predicate()` creating star expressions instead of literal star-strings.
+  For example, the predicate _foo = '\*'_ was wrongly turned into the (illegal) predicate
+  _foo = \*_ (note the missing quotes).
 
 ---
 

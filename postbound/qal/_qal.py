@@ -1981,7 +1981,7 @@ class ExpressionCollector(SqlExpressionVisitor[set[SqlExpression]]):
         )
 
 
-def as_expression(value: object) -> SqlExpression:
+def as_expression(value: object, *, allow_star: bool = True) -> SqlExpression:
     """Transforms the given value into the most appropriate `SqlExpression` instance.
 
     This is a heuristic utility method that applies the following rules:
@@ -1996,6 +1996,11 @@ def as_expression(value: object) -> SqlExpression:
     ----------
     value : object
         The object to be transformed into an expression
+    allow_star : bool, optional
+        Whether a literal \\* argument should be treated as an SQL \\* (as in
+        *SELECT \\**) expression or as a string literal (as in *SELECT '\\*'*).
+        By default, it is treated as the expression rather than the string
+        literal.
 
     Returns
     -------
@@ -2010,7 +2015,7 @@ def as_expression(value: object) -> SqlExpression:
     elif isinstance(value, SqlQuery):
         return SubqueryExpression(value)
 
-    if value == "*":
+    if value == "*" and allow_star:
         return StarExpression()
     return StaticValueExpression(value)
 
@@ -3713,12 +3718,17 @@ def as_predicate(
         else:
             lower, upper, *__ = arguments
         return BetweenPredicate(
-            column, (as_expression(lower), as_expression(upper))
+            column,
+            (
+                as_expression(lower, allow_star=False),
+                as_expression(upper, allow_star=False),
+            ),
         )
     elif operation == LogicalOperator.In:
         arguments = util.flatten(arguments)
         return InPredicate(
-            column, [as_expression(value) for value in arguments]
+            column,
+            [as_expression(value, allow_star=False) for value in arguments],
         )
     elif len(arguments) != 1:
         raise ValueError(
@@ -3726,7 +3736,9 @@ def as_predicate(
         )
 
     argument = arguments[0]
-    return BinaryPredicate(operation, column, as_expression(argument))
+    return BinaryPredicate(
+        operation, column, as_expression(argument, allow_star=False)
+    )
 
 
 def determine_join_equivalence_classes(
