@@ -1386,7 +1386,7 @@ class WindowExpression(SqlExpression):
     window_function : FunctionExpression | str
         The window function to be applied. If this is a string, it will be wrapped in a plain
         function expression.
-    partitioning : Optional[Sequence[SqlExpression]], optional
+    partitioning : Optional[Sequence[SqlExpression | ColumnReference]], optional
         The expressions used for partitioning the window. Defaults to None.
     ordering : Optional[OrderBy], optional
         The ordering of the window. Defaults to None.
@@ -1398,12 +1398,20 @@ class WindowExpression(SqlExpression):
         self,
         window_function: FunctionExpression | str,
         *,
-        partitioning: Optional[Sequence[SqlExpression]] = None,
+        partitioning: Optional[
+            Sequence[SqlExpression | ColumnReference]
+        ] = None,
         ordering: Optional[OrderBy] = None,
         filter_condition: Optional[AbstractPredicate] = None,
     ) -> None:
         if isinstance(window_function, str):
             window_function = FunctionExpression(window_function)
+        if isinstance(partitioning, Sequence):
+            partitioning = [
+                ColumnExpression(p) if isinstance(p, ColumnReference) else p
+                for p in partitioning
+            ]
+
         self._window_function = window_function
         self._partitioning = tuple(partitioning) if partitioning else tuple()
         self._ordering = ordering
@@ -6164,7 +6172,9 @@ class BaseProjection:
     def create_window(
         fn: FunctionExpression | str,
         *,
-        partitioning: Optional[Sequence[SqlExpression]] = None,
+        partitioning: Optional[
+            Sequence[SqlExpression | ColumnReference]
+        ] = None,
         ordering: Optional[OrderBy] = None,
         filter_condition: Optional[AbstractPredicate] = None,
         target_name: str = "",
