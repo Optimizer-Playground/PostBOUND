@@ -7,7 +7,14 @@ import functools
 import itertools
 import numbers
 import warnings
-from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from types import NoneType
 from typing import (
     Any,
@@ -952,6 +959,7 @@ class FunctionExpression(SqlExpression):
         function: str,
         arguments: Optional[Sequence[SqlExpression]] = None,
         *,
+        keyword_args: Optional[Mapping[str, SqlExpression]] = None,
         distinct: bool = False,
         filter_where: Optional[AbstractPredicate] = None,
     ) -> None:
@@ -968,16 +976,38 @@ class FunctionExpression(SqlExpression):
         self._arguments: tuple[SqlExpression, ...] = (
             () if arguments is None else tuple(arguments)
         )
+        self._kw_args: Mapping[str, SqlExpression] = (
+            {} if keyword_args is None else dict(keyword_args)
+        )
         self._distinct = distinct
         self._filter_expr = filter_where
 
+        kw_hashable = tuple((k, v) for k, v in self._kw_args.items())
         hash_val = hash(
-            (self._function, self._distinct, self._arguments, self._filter_expr)
+            (
+                self._function,
+                self._distinct,
+                self._arguments,
+                kw_hashable,
+                self._filter_expr,
+            )
         )
         super().__init__(hash_val)
 
-    __slots__ = ("_function", "_arguments", "_distinct", "_filter_expr")
-    __match_args__ = ("function", "arguments", "distinct", "filter_where")
+    __slots__ = (
+        "_function",
+        "_arguments",
+        "_kw_args",
+        "_distinct",
+        "_filter_expr",
+    )
+    __match_args__ = (
+        "function",
+        "arguments",
+        "keyword_args",
+        "distinct",
+        "filter_where",
+    )
 
     @property
     def function(self) -> str:
@@ -1000,6 +1030,15 @@ class FunctionExpression(SqlExpression):
             The arguments. Can be empty if no arguments are passed (but will never be *None*).
         """
         return self._arguments
+
+    @property
+    def keyword_args(self) -> Mapping[str, SqlExpression]:
+        """Get all keyword arguments that are supplied to the function.
+
+        The order in the mapping matches the order of occurrence in the
+        function call.
+        """
+        return self._kw_args
 
     @property
     def distinct(self) -> bool:
@@ -1044,15 +1083,19 @@ class FunctionExpression(SqlExpression):
 
     def tables(self) -> set[TableReference]:
         args_tables = util.set_union(arg.tables() for arg in self.arguments)
+        kwargs_tables = util.set_union(
+            arg.tables() for arg in self.keyword_args.values()
+        )
         filter_tables = (
             self._filter_expr.tables() if self._filter_expr else set()
         )
-        return args_tables | filter_tables
+        return args_tables | kwargs_tables | filter_tables
 
     def columns(self) -> set[ColumnReference]:
-        all_columns = set()
-        for arg in self.arguments:
-            all_columns |= arg.columns()
+        all_columns = util.set_union(arg.columns() for arg in self.arguments)
+        all_columns |= util.set_union(
+            arg.columns() for arg in self.keyword_args.values()
+        )
         if self._filter_expr:
             all_columns |= self._filter_expr.columns()
         return all_columns
@@ -1061,12 +1104,14 @@ class FunctionExpression(SqlExpression):
         all_columns = []
         for arg in self.arguments:
             all_columns.extend(arg.itercolumns())
+        for arg in self.keyword_args.values():
+            all_columns.extend(arg.itercolumns())
         if self._filter_expr:
             all_columns.extend(self._filter_expr.itercolumns())
         return all_columns
 
     def iterchildren(self) -> Iterable[SqlExpression]:
-        return list(self.arguments)
+        return list(self.arguments) + list(self._kw_args.values())
 
     def accept_visitor(
         self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
@@ -1080,12 +1125,18 @@ class FunctionExpression(SqlExpression):
             isinstance(other, type(self))
             and self.function == other.function
             and self.arguments == other.arguments
+            and self.keyword_args == other.keyword_args
             and self.distinct == other.distinct
             and self.filter_where == other.filter_where
         )
 
     def __str__(self) -> str:
         args_str = ", ".join(str(arg) for arg in self._arguments)
+        if self.keyword_args:
+            keywords = [f"{kw} {val}" for kw, val in self.keyword_args.items()]
+            keyword_str = " ".join(keywords)
+            args_str = f"{args_str} {keyword_str}" if args_str else keyword_str
+
         distinct_str = "DISTINCT " if self._distinct else ""
         if len(self._arguments) > 1 and self._distinct:
             # Postgres, DuckDB (and others?) require brackets around the arguments if DISTINCT is used with multiple arguments,
@@ -1093,6 +1144,7 @@ class FunctionExpression(SqlExpression):
             # Notice that this is NOT documented in the aggregate syntax under
             # https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-AGGREGATES
             args_str = f"({args_str})"
+
         parameterization = f"({distinct_str}{args_str})"
         filter_str = (
             f" FILTER (WHERE {self._filter_expr})" if self._filter_expr else ""
@@ -1216,9 +1268,8 @@ class ArrayAccessExpression(FunctionExpression):
         )
 
         args = [
-            arg
+            StaticValueExpression.null() if arg is None else arg
             for arg in (array_expr, idx, lower_idx, upper_idx)
-            if arg is not None
         ]
         super().__init__("ARRAY_GET", args)
 
@@ -1873,6 +1924,11 @@ class SqlExpressionVisitor(abc.ABC, Generic[VisitorResult]):
 
     def visit_array_access_expr(
         self, expr: ArrayAccessExpression, *args, **kwargs
+    ) -> VisitorResult:
+        return self.visit_function_expr(expr, *args, **kwargs)
+
+    def visit_substring_expr(
+        self, expr: SubstringExpression, *args, **kwargs
     ) -> VisitorResult:
         return self.visit_function_expr(expr, *args, **kwargs)
 

@@ -208,10 +208,13 @@ def explicit_to_implicit(source_query: ExplicitSqlQuery) -> ImplicitSqlQuery:
             ):
                 join_working_set.append(current_table_source.left)
                 join_working_set.append(current_table_source.right)
-                additional_predicates.append(current_table_source.join_condition)
+                additional_predicates.append(
+                    current_table_source.join_condition
+                )
             case _:
                 raise ValueError(
-                    "Unsupported table source type: " + str(type(current_table_source))
+                    "Unsupported table source type: "
+                    + str(type(current_table_source))
                 )
 
     final_from_clause = ImplicitFromClause.create_for(complete_from_tables)
@@ -273,7 +276,11 @@ def _get_predicate_fragment(
     ``R.a > 100 AND R.a = 42``.
     """
     if not isinstance(predicate, CompoundPredicate):
-        return predicate if predicate.tables().issubset(referenced_tables) else None
+        return (
+            predicate
+            if predicate.tables().issubset(referenced_tables)
+            else None
+        )
 
     compound_predicate: CompoundPredicate = predicate
     child_fragments = [
@@ -383,7 +390,9 @@ def extract_query_fragment(
         else []
     )
     cte_clause = (
-        CommonTableExpression(cte_fragment, recursive=source_query.cte_clause.recursive)
+        CommonTableExpression(
+            cte_fragment, recursive=source_query.cte_clause.recursive
+        )
         if cte_fragment
         else None
     )
@@ -399,7 +408,9 @@ def extract_query_fragment(
         orderby_clause = None
 
     if isinstance(source_query, SetQuery):
-        left_query = extract_query_fragment(source_query.left_query, referenced_tables)
+        left_query = extract_query_fragment(
+            source_query.left_query, referenced_tables
+        )
         right_query = extract_query_fragment(
             source_query.right_query, referenced_tables
         )
@@ -423,7 +434,8 @@ def extract_query_fragment(
 
             if select_fragment:
                 select_clause = Select(
-                    select_fragment, distinct=source_query.select_clause.is_distinct()
+                    select_fragment,
+                    distinct=source_query.select_clause.is_distinct(),
                 )
             else:
                 select_clause = Select.star(
@@ -587,9 +599,13 @@ def move_into_subquery(
         in the rest of the query. This level of renaming is currently not accounted for.
     """
     if not query.from_clause:
-        raise ValueError("Cannot create a subquery for a query without a FROM clause")
+        raise ValueError(
+            "Cannot create a subquery for a query without a FROM clause"
+        )
     if any(table.virtual for table in query.tables()):
-        raise ValueError("Cannot move into subquery for queries with virtual tables")
+        raise ValueError(
+            "Cannot move into subquery for queries with virtual tables"
+        )
 
     tables = set(tables)
 
@@ -599,7 +615,9 @@ def move_into_subquery(
 
     predicates = query.predicates()
     all_referenced_columns = util.set_union(
-        clause.columns() for clause in query.clauses() if not isinstance(clause, From)
+        clause.columns()
+        for clause in query.clauses()
+        if not isinstance(clause, From)
     )
     columns_from_subquery_tables = {
         column for column in all_referenced_columns if column.table in tables
@@ -611,7 +629,9 @@ def move_into_subquery(
             "Cannot create subquery: subquery tables export columns of the same name"
         )
 
-    subquery_name = subquery_name if subquery_name else _default_subquery_name(tables)
+    subquery_name = (
+        subquery_name if subquery_name else _default_subquery_name(tables)
+    )
     subquery_table = TableReference.create_virtual(subquery_name)
     renamed_columns = {
         column: ColumnReference(column.name, subquery_table)
@@ -647,10 +667,14 @@ def move_into_subquery(
     update_from_clause = ImplicitFromClause.create_for(
         updated_from_sources + [subquery_table_source]
     )
-    updated_predicate = query.where_clause.predicate if query.where_clause else None
+    updated_predicate = (
+        query.where_clause.predicate if query.where_clause else None
+    )
     for predicate in subquery_predicates:
         updated_predicate = remove_predicate(updated_predicate, predicate)
-    updated_where_clause = Where(updated_predicate) if updated_predicate else None
+    updated_where_clause = (
+        Where(updated_predicate) if updated_predicate else None
+    )
 
     updated_query = drop_clause(query, [From, Where])
     updated_query = add_clause(
@@ -717,7 +741,9 @@ def as_star_query(source_query: QueryType) -> QueryType:
     """
     select = Select.star()
     query_clauses = [
-        clause for clause in source_query.clauses() if not isinstance(clause, Select)
+        clause
+        for clause in source_query.clauses()
+        if not isinstance(clause, Select)
     ]
     return build_query(query_clauses + [select])
 
@@ -741,7 +767,9 @@ def as_count_star_query(source_query: QueryType) -> QueryType:
     """
     select = Select.count_star()
     query_clauses = [
-        clause for clause in source_query.clauses() if not isinstance(clause, Select)
+        clause
+        for clause in source_query.clauses()
+        if not isinstance(clause, Select)
     ]
     return build_query(query_clauses + [select])
 
@@ -816,7 +844,8 @@ def as_explain_analyze(query: SelectQueryType) -> SelectQueryType:
 
 
 def remove_predicate(
-    predicate: Optional[AbstractPredicate], predicate_to_remove: AbstractPredicate
+    predicate: Optional[AbstractPredicate],
+    predicate_to_remove: AbstractPredicate,
 ) -> Optional[AbstractPredicate]:
     """Drops a specific predicate from the predicate hierarchy.
 
@@ -843,14 +872,22 @@ def remove_predicate(
         return predicate
 
     if predicate.operation == CompoundOperator.Not:
-        updated_child = remove_predicate(predicate.children, predicate_to_remove)
-        return CompoundPredicate.create_not(updated_child) if updated_child else None
+        updated_child = remove_predicate(
+            predicate.children, predicate_to_remove
+        )
+        return (
+            CompoundPredicate.create_not(updated_child)
+            if updated_child
+            else None
+        )
 
     updated_children = [
         remove_predicate(child_pred, predicate_to_remove)
         for child_pred in predicate.children
     ]
-    updated_children = [child_pred for child_pred in updated_children if child_pred]
+    updated_children = [
+        child_pred for child_pred in updated_children if child_pred
+    ]
     if not updated_children:
         return None
     elif len(updated_children) == 1:
@@ -883,7 +920,9 @@ def add_clause(
     clauses_to_add = util.enlist(clauses_to_add)
     new_clause_types = {type(clause) for clause in clauses_to_add}
     remaining_clauses = [
-        clause for clause in query.clauses() if type(clause) not in new_clause_types
+        clause
+        for clause in query.clauses()
+        if type(clause) not in new_clause_types
     ]
     return build_query(remaining_clauses + list(clauses_to_add))
 
@@ -899,7 +938,9 @@ drop_clause
 """
 
 
-def drop_clause[T: SelectStatement](query: T, clauses_to_drop: ClauseDescription) -> T:
+def drop_clause[T: SelectStatement](
+    query: T, clauses_to_drop: ClauseDescription
+) -> T:
     """Removes specific clauses from a query.
 
     The clauses can be denoted in two different ways: either as the raw type of the clause, or as an instance of the same
@@ -937,7 +978,9 @@ def drop_clause[T: SelectStatement](query: T, clauses_to_drop: ClauseDescription
         for drop in clauses_to_drop
     }
     remaining_clauses = [
-        clause for clause in query.clauses() if type(clause) not in clauses_to_drop
+        clause
+        for clause in query.clauses()
+        if type(clause) not in clauses_to_drop
     ]
     return build_query(remaining_clauses)
 
@@ -1034,11 +1077,15 @@ def _replace_expression_in_predicate(
         renamed_vals = [replacement(val) for val in predicate.values]
         return InPredicate(renamed_col, renamed_vals)
     elif isinstance(predicate, UnaryPredicate):
-        return UnaryPredicate(replacement(predicate.column), predicate.operation)
+        return UnaryPredicate(
+            replacement(predicate.column), predicate.operation
+        )
     elif isinstance(predicate, CompoundPredicate):
         if predicate.operation == CompoundOperator.Not:
             renamed_children = [
-                _replace_expression_in_predicate(predicate.children, replacement)
+                _replace_expression_in_predicate(
+                    predicate.children, replacement
+                )
             ]
         else:
             renamed_children = [
@@ -1112,7 +1159,8 @@ def _replace_expression_in_table_source(
             )
         case ValuesTableSource():
             replaced_values = [
-                tuple([replacement(val) for val in row]) for row in table_source.rows
+                tuple([replacement(val) for val in row])
+                for row in table_source.rows
             ]
             return ValuesTableSource(
                 replaced_values,
@@ -1129,7 +1177,8 @@ def _replace_expression_in_table_source(
 
 
 def _replace_expressions_in_clause(
-    clause: Optional[ClauseType], replacement: Callable[[SqlExpression], SqlExpression]
+    clause: Optional[ClauseType],
+    replacement: Callable[[SqlExpression], SqlExpression],
 ) -> Optional[ClauseType]:
     """Handler to update all expressions in a clause.
 
@@ -1182,7 +1231,9 @@ def _replace_expressions_in_clause(
             )
             replaced_queries.append(replaced_cte)
 
-        return CommonTableExpression(replaced_queries, recursive=clause.recursive)
+        return CommonTableExpression(
+            replaced_queries, recursive=clause.recursive
+        )
     elif isinstance(clause, Select):
         replaced_targets = [
             BaseProjection(replacement(proj.expression), proj.target_name)
@@ -1204,15 +1255,21 @@ def _replace_expressions_in_clause(
         ]
         return From(replaced_contents)
     elif isinstance(clause, Where):
-        return Where(_replace_expression_in_predicate(clause.predicate, replacement))
+        return Where(
+            _replace_expression_in_predicate(clause.predicate, replacement)
+        )
     elif isinstance(clause, GroupBy):
         replaced_cols = [replacement(col) for col in clause.group_columns]
         return GroupBy(replaced_cols, clause.distinct)
     elif isinstance(clause, Having):
-        return Having(_replace_expression_in_predicate(clause.condition, replacement))
+        return Having(
+            _replace_expression_in_predicate(clause.condition, replacement)
+        )
     elif isinstance(clause, OrderBy):
         replaced_cols = [
-            OrderByExpression(replacement(col.column), col.ascending, col.nulls_first)
+            OrderByExpression(
+                replacement(col.column), col.ascending, col.nulls_first
+            )
             for col in clause.expressions
         ]
         return OrderBy(replaced_cols)
@@ -1221,7 +1278,9 @@ def _replace_expressions_in_clause(
     elif isinstance(clause, UnionClause):
         replaced_left = replace_expressions(clause.left_query, replacement)
         replaced_right = replace_expressions(clause.right_query, replacement)
-        return UnionClause(replaced_left, replaced_right, union_all=clause.union_all)
+        return UnionClause(
+            replaced_left, replaced_right, union_all=clause.union_all
+        )
     elif isinstance(clause, IntersectClause):
         replaced_left = replace_expressions(clause.left_query, replacement)
         replaced_right = replace_expressions(clause.right_query, replacement)
@@ -1235,7 +1294,8 @@ def _replace_expressions_in_clause(
 
 
 def replace_expressions(
-    query: SelectQueryType, replacement: Callable[[SqlExpression], SqlExpression]
+    query: SelectQueryType,
+    replacement: Callable[[SqlExpression], SqlExpression],
 ) -> SelectQueryType:
     """Updates all expressions in a query.
 
@@ -1359,7 +1419,9 @@ def replace_predicate(
         replaced_having = None
 
     candidate_clauses = [replaced_where, replaced_having]
-    return replace_clause(query, [clause for clause in candidate_clauses if clause])
+    return replace_clause(
+        query, [clause for clause in candidate_clauses if clause]
+    )
 
 
 def rename_columns_in_query[T: SelectStatement](
@@ -1385,15 +1447,23 @@ def rename_columns_in_query[T: SelectStatement](
         If the query is of no known type. This indicates that this method is missing a handler for a specific query type that
         was added later on.
     """
-    renamed_cte = rename_columns_in_clause(query.cte_clause, available_renamings)
-    renamed_having = rename_columns_in_clause(query.having_clause, available_renamings)
+    renamed_cte = rename_columns_in_clause(
+        query.cte_clause, available_renamings
+    )
+    renamed_having = rename_columns_in_clause(
+        query.having_clause, available_renamings
+    )
     renamed_orderby = rename_columns_in_clause(
         query.orderby_clause, available_renamings
     )
 
     if isinstance(query, SetQuery):
-        renamed_left = rename_columns_in_query(query.left_query, available_renamings)
-        renamed_right = rename_columns_in_query(query.right_query, available_renamings)
+        renamed_left = rename_columns_in_query(
+            query.left_query, available_renamings
+        )
+        renamed_right = rename_columns_in_query(
+            query.right_query, available_renamings
+        )
         return SetQuery(
             renamed_left,
             renamed_right,
@@ -1405,9 +1475,15 @@ def rename_columns_in_query[T: SelectStatement](
             explain_clause=query.explain,
         )
 
-    renamed_select = rename_columns_in_clause(query.select_clause, available_renamings)
-    renamed_from = rename_columns_in_clause(query.from_clause, available_renamings)
-    renamed_where = rename_columns_in_clause(query.where_clause, available_renamings)
+    renamed_select = rename_columns_in_clause(
+        query.select_clause, available_renamings
+    )
+    renamed_from = rename_columns_in_clause(
+        query.from_clause, available_renamings
+    )
+    renamed_where = rename_columns_in_clause(
+        query.where_clause, available_renamings
+    )
     renamed_groupby = rename_columns_in_clause(
         query.groupby_clause, available_renamings
     )
@@ -1534,12 +1610,16 @@ def rename_columns_in_expression(
             else None
         )
         renamed_lower = (
-            rename_columns_in_expression(expression.lower_index, available_renamings)
+            rename_columns_in_expression(
+                expression.lower_index, available_renamings
+            )
             if expression.lower_index
             else None
         )
         renamed_upper = (
-            rename_columns_in_expression(expression.upper_index, available_renamings)
+            rename_columns_in_expression(
+                expression.upper_index, available_renamings
+            )
             if expression.upper_index
             else None
         )
@@ -1554,8 +1634,23 @@ def rename_columns_in_expression(
             rename_columns_in_expression(arg, available_renamings)
             for arg in expression.arguments
         ]
+        renamed_kwargs = {
+            kw: rename_columns_in_expression(arg, available_renamings)
+            for kw, arg in expression.keyword_args.items()
+        }
+        renamed_filter = (
+            rename_columns_in_predicate(
+                expression.filter_where, available_renamings
+            )
+            if expression.filter_where
+            else None
+        )
         return FunctionExpression(
-            expression.function, renamed_arguments, distinct=expression.distinct
+            expression.function,
+            renamed_arguments,
+            keyword_args=renamed_kwargs,
+            distinct=expression.distinct,
+            filter_where=renamed_filter,
         )
     elif isinstance(expression, SubqueryExpression):
         return SubqueryExpression(
@@ -1616,7 +1711,9 @@ def rename_columns_in_expression(
         renamed_child = rename_columns_in_expression(
             expression.expression, available_renamings
         )
-        return QuantifierExpression(renamed_child, quantifier=expression.quantifier)
+        return QuantifierExpression(
+            renamed_child, quantifier=expression.quantifier
+        )
     elif isinstance(expression, ArrayExpression):
         renamed_elements = [
             rename_columns_in_expression(elem, available_renamings)
@@ -1710,7 +1807,11 @@ def rename_columns_in_predicate(
         )
     elif isinstance(predicate, CompoundPredicate):
         renamed_children = (
-            [rename_columns_in_predicate(predicate.children, available_renamings)]
+            [
+                rename_columns_in_predicate(
+                    predicate.children, available_renamings
+                )
+            ]
             if predicate.operation == CompoundOperator.Not
             else [
                 rename_columns_in_predicate(child, available_renamings)
@@ -1759,7 +1860,9 @@ def _rename_columns_in_table_source(
                 table_source.query, available_renamings
             )
             return SubqueryTableSource(
-                renamed_subquery, table_source.target_name, lateral=table_source.lateral
+                renamed_subquery,
+                table_source.target_name,
+                lateral=table_source.lateral,
             )
 
         case JoinTableSource():
@@ -1781,7 +1884,8 @@ def _rename_columns_in_table_source(
 
         case ValuesTableSource():
             if not any(
-                col.belongs_to(table_source.table) for col in available_renamings
+                col.belongs_to(table_source.table)
+                for col in available_renamings
             ):
                 return table_source
 
@@ -1853,15 +1957,21 @@ def rename_columns_in_clause(
 
         for cte in clause.queries:
             if not isinstance(cte, ValuesWithQuery):
-                new_query = rename_columns_in_query(cte.query, available_renamings)
+                new_query = rename_columns_in_query(
+                    cte.query, available_renamings
+                )
                 renamed_ctes.append(
                     WithQuery(
-                        new_query, cte.target_table, materialized=cte.materialized
+                        new_query,
+                        cte.target_table,
+                        materialized=cte.materialized,
                     )
                 )
                 continue
 
-            if not any(col.belongs_to(cte.target_table) for col in available_renamings):
+            if not any(
+                col.belongs_to(cte.target_table) for col in available_renamings
+            ):
                 continue
 
             renamed_cte = cte
@@ -1893,7 +2003,9 @@ def rename_columns_in_clause(
     if isinstance(clause, Select):
         renamed_targets = [
             BaseProjection(
-                rename_columns_in_expression(proj.expression, available_renamings),
+                rename_columns_in_expression(
+                    proj.expression, available_renamings
+                ),
                 proj.target_name,
             )
             for proj in clause.targets
@@ -1914,7 +2026,9 @@ def rename_columns_in_clause(
         ]
         return From(renamed_sources)
     elif isinstance(clause, Where):
-        return Where(rename_columns_in_predicate(clause.predicate, available_renamings))
+        return Where(
+            rename_columns_in_predicate(clause.predicate, available_renamings)
+        )
     elif isinstance(clause, GroupBy):
         renamed_cols = [
             rename_columns_in_expression(col, available_renamings)
@@ -1938,16 +2052,30 @@ def rename_columns_in_clause(
     elif isinstance(clause, Limit):
         return clause
     elif isinstance(clause, UnionClause):
-        renamed_left = rename_columns_in_query(clause.left_query, available_renamings)
-        renamed_right = rename_columns_in_query(clause.right_query, available_renamings)
-        return UnionClause(renamed_left, renamed_right, union_all=clause.union_all)
+        renamed_left = rename_columns_in_query(
+            clause.left_query, available_renamings
+        )
+        renamed_right = rename_columns_in_query(
+            clause.right_query, available_renamings
+        )
+        return UnionClause(
+            renamed_left, renamed_right, union_all=clause.union_all
+        )
     elif isinstance(clause, IntersectClause):
-        renamed_left = rename_columns_in_query(clause.left_query, available_renamings)
-        renamed_right = rename_columns_in_query(clause.right_query, available_renamings)
+        renamed_left = rename_columns_in_query(
+            clause.left_query, available_renamings
+        )
+        renamed_right = rename_columns_in_query(
+            clause.right_query, available_renamings
+        )
         return IntersectClause(renamed_left, renamed_right)
     elif isinstance(clause, ExceptClause):
-        renamed_left = rename_columns_in_query(clause.left_query, available_renamings)
-        renamed_right = rename_columns_in_query(clause.right_query, available_renamings)
+        renamed_left = rename_columns_in_query(
+            clause.left_query, available_renamings
+        )
+        renamed_right = rename_columns_in_query(
+            clause.right_query, available_renamings
+        )
         return ExceptClause(renamed_left, renamed_right)
     else:
         raise ValueError("Unknown clause: " + str(clause))
@@ -1998,7 +2126,9 @@ class _TableReferenceRenamer(
             target_table = self._rename_table(cte.target_table)
 
             ctes.append(
-                WithQuery(nested_query, target_table, materialized=cte.materialized)
+                WithQuery(
+                    nested_query, target_table, materialized=cte.materialized
+                )
             )
 
         return CommonTableExpression(ctes, recursive=clause.recursive)
@@ -2008,7 +2138,9 @@ class _TableReferenceRenamer(
 
         for proj in clause:
             renamed_expression = proj.expression.accept_visitor(self)
-            projections.append(BaseProjection(renamed_expression, proj.target_name))
+            projections.append(
+                BaseProjection(renamed_expression, proj.target_name)
+            )
 
         return Select(projections, distinct=clause.distinct_specifier())
 
@@ -2017,7 +2149,9 @@ class _TableReferenceRenamer(
         intersect = used_identifieres & self._renaming_targets
         match clause:
             case ImplicitFromClause(tables):
-                renamed_tables = [self._rename_table_source(src) for src in tables]
+                renamed_tables = [
+                    self._rename_table_source(src) for src in tables
+                ]
                 if not intersect:
                     return ImplicitFromClause(renamed_tables)
 
@@ -2050,7 +2184,9 @@ class _TableReferenceRenamer(
                         f"Renaming targets {intersect} is already present in the query. "
                         "This is currently not supported."
                     )
-                renamed_items = [self._rename_table_source(item) for item in items]
+                renamed_items = [
+                    self._rename_table_source(item) for item in items
+                ]
                 return From(renamed_items)
 
             case _:
@@ -2086,7 +2222,9 @@ class _TableReferenceRenamer(
     def visit_limit_clause(self, clause: Limit, *args, **kwargs) -> Limit:
         return clause
 
-    def visit_union_clause(self, clause: UnionClause, *args, **kwargs) -> UnionClause:
+    def visit_union_clause(
+        self, clause: UnionClause, *args, **kwargs
+    ) -> UnionClause:
         renamed_lhs = clause.left_query.accept_visitor(self)
         renamed_rhs = clause.right_query.accept_visitor(self)
         return UnionClause(renamed_lhs, renamed_rhs, union_all=clause.union_all)
@@ -2168,7 +2306,9 @@ class _TableReferenceRenamer(
     ) -> StaticValueExpression:
         return expr
 
-    def visit_cast_expr(self, expr: CastExpression, *args, **kwargs) -> CastExpression:
+    def visit_cast_expr(
+        self, expr: CastExpression, *args, **kwargs
+    ) -> CastExpression:
         renamed_child = expr.casted_expression.accept_visitor(self)
         renamed_params = (
             [param.accept_visitor(self) for param in expr.type_params]
@@ -2182,14 +2322,17 @@ class _TableReferenceRenamer(
             array_type=expr.array_type,
         )
 
-    def visit_math_expr(self, expr: MathExpression, *args, **kwargs) -> MathExpression:
+    def visit_math_expr(
+        self, expr: MathExpression, *args, **kwargs
+    ) -> MathExpression:
         renamed_lhs = expr.first_arg.accept_visitor(self)
 
         if isinstance(expr.second_arg, SqlExpression):
             renamed_rhs = expr.second_arg.accept_visitor(self)
         elif expr.second_arg is not None:
             renamed_rhs = [
-                nested_expr.accept_visitor(self) for nested_expr in expr.second_arg
+                nested_expr.accept_visitor(self)
+                for nested_expr in expr.second_arg
             ]
         else:
             renamed_rhs = None
@@ -2206,12 +2349,19 @@ class _TableReferenceRenamer(
         self, expr: FunctionExpression, *args, **kwargs
     ) -> FunctionExpression:
         renamed_args = [arg.accept_visitor(self) for arg in expr.arguments]
+        renamed_kwargs = {
+            kw: arg.accept_visitor(self)
+            for kw, arg in expr.keyword_args.items()
+        }
         renamed_filter = (
-            expr.filter_where.accept_visitor(self) if expr.filter_where else None
+            expr.filter_where.accept_visitor(self)
+            if expr.filter_where
+            else None
         )
         return FunctionExpression(
             expr.function,
             renamed_args,
+            keyword_args=renamed_kwargs,
             distinct=expr.distinct,
             filter_where=renamed_filter,
         )
@@ -2223,16 +2373,24 @@ class _TableReferenceRenamer(
         renamed_subquery = build_query(subquery_comps.values())
         return SubqueryExpression(renamed_subquery)
 
-    def visit_star_expr(self, expr: StarExpression, *args, **kwargs) -> StarExpression:
-        renamed_table = self._rename_table(expr.from_table) if expr.from_table else None
+    def visit_star_expr(
+        self, expr: StarExpression, *args, **kwargs
+    ) -> StarExpression:
+        renamed_table = (
+            self._rename_table(expr.from_table) if expr.from_table else None
+        )
         return StarExpression(from_table=renamed_table)
 
     def visit_window_expr(
         self, expr: WindowExpression, *args, **kwargs
     ) -> WindowExpression:
         renamed_window_func = expr.window_function.accept_visitor(self)
-        renamed_partition = [part.accept_visitor(self) for part in expr.partitioning]
-        renamed_ordering = expr.ordering.accept_visitor(self) if expr.ordering else None
+        renamed_partition = [
+            part.accept_visitor(self) for part in expr.partitioning
+        ]
+        renamed_ordering = (
+            expr.ordering.accept_visitor(self) if expr.ordering else None
+        )
         renamed_filter = (
             expr.filter_condition.accept_visitor(self)
             if expr.filter_condition
@@ -2245,7 +2403,9 @@ class _TableReferenceRenamer(
             filter_condition=renamed_filter,
         )
 
-    def visit_case_expr(self, expr: CaseExpression, *args, **kwargs) -> CaseExpression:
+    def visit_case_expr(
+        self, expr: CaseExpression, *args, **kwargs
+    ) -> CaseExpression:
         renamed_cases: list[tuple[AbstractPredicate, SqlExpression]] = []
 
         for condition, value in expr.cases:
@@ -2260,7 +2420,9 @@ class _TableReferenceRenamer(
         )
 
         renamed_default = (
-            expr.else_expression.accept_visitor(self) if expr.else_expression else None
+            expr.else_expression.accept_visitor(self)
+            if expr.else_expression
+            else None
         )
         return CaseExpression(
             renamed_cases, simple_expr=renamed_simple, else_expr=renamed_default
@@ -2282,7 +2444,9 @@ class _TableReferenceRenamer(
         self, expr: ArrayAccessExpression, *args, **kwargs
     ) -> ArrayAccessExpression:
         renamed_array = expr.array.accept_visitor(self)
-        renamed_idx = expr.lower_index.accept_visitor(self) if expr.index else None
+        renamed_idx = (
+            expr.lower_index.accept_visitor(self) if expr.index else None
+        )
         renamed_lower = (
             expr.lower_index.accept_visitor(self) if expr.lower_index else None
         )
@@ -2312,13 +2476,17 @@ class _TableReferenceRenamer(
                 nested_renamings = subquery.accept_visitor(self)
                 nested_query = build_query(nested_renamings.values())
                 target_table = self._rename_table(target_name)
-                return SubqueryTableSource(nested_query, target_table, lateral=lateral)
+                return SubqueryTableSource(
+                    nested_query, target_table, lateral=lateral
+                )
 
             case JoinTableSource(lhs, rhs, join_condition, join_type):
                 renamed_lhs = self._rename_table_source(lhs)
                 renamed_rhs = self._rename_table_source(rhs)
                 renamed_condition = (
-                    join_condition.accept_visitor(self) if join_condition else None
+                    join_condition.accept_visitor(self)
+                    if join_condition
+                    else None
                 )
                 return JoinTableSource(
                     renamed_lhs,
@@ -2329,12 +2497,16 @@ class _TableReferenceRenamer(
 
             case ValuesTableSource(rows, alias, columns):
                 renamed_alias = self._rename_table(alias)
-                return ValuesTableSource(rows, alias=renamed_alias, columns=columns)
+                return ValuesTableSource(
+                    rows, alias=renamed_alias, columns=columns
+                )
 
             case FunctionTableSource(function, alias):
                 renamed_function = function.accept_visitor(self)
                 renamed_alias = self._rename_table(alias) if alias else ""
-                return FunctionTableSource(renamed_function, alias=renamed_alias)
+                return FunctionTableSource(
+                    renamed_function, alias=renamed_alias
+                )
 
             case _:
                 raise ValueError("Unknown table source type: " + str(source))
@@ -2345,7 +2517,9 @@ class _TableReferenceRenamer(
     @overload
     def _rename_table(self, table: str) -> str: ...
 
-    def _rename_table(self, table: str | TableReference) -> str | TableReference:
+    def _rename_table(
+        self, table: str | TableReference
+    ) -> str | TableReference:
         """Helper method to rename a specific table reference independent of its specific representation."""
         if isinstance(table, TableReference):
             return self._renamings.get(table, table)
@@ -2429,13 +2603,17 @@ def rename_table[T: SelectStatement](
     # Despite the convenient _TableReferenceRenamer, we still need to do a little bit of manual gathering/traversal to support
     # column prefixes.
     necessary_renamings: dict[ColumnReference, ColumnReference] = {}
-    for column in filter(lambda c: c.table in tabs_to_rename, source_query.columns()):
+    for column in filter(
+        lambda c: c.table in tabs_to_rename, source_query.columns()
+    ):
         new_column_name = (
             f"{column.table.identifier()}_{column.name}"
             if prefix_column_names
             else column.name
         )
-        necessary_renamings[column] = ColumnReference(new_column_name, target_table)
+        necessary_renamings[column] = ColumnReference(
+            new_column_name, target_table
+        )
 
     renamed_cols = rename_columns_in_query(source_query, necessary_renamings)
 
@@ -2468,7 +2646,9 @@ def merge_tables[T: SelectStatement](
 
     tables = set(tables)
     cols_to_rename: dict[ColumnReference, ColumnReference] = {
-        col: col.bind_to(target) for col in query.columns() if col.table in tables
+        col: col.bind_to(target)
+        for col in query.columns()
+        if col.table in tables
     }
     merged = rename_columns_in_query(query, cols_to_rename)
     for tab in tables:

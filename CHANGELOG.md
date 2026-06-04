@@ -16,6 +16,10 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 🐣 New features
 
+- Added a new (optional) argument to function expressions to represent keyword arguments.
+  Specifically, this allows to now create functions like
+  `substring(foo FROM 3 FOR 42)`. Note that parser support is still limited and will be
+  added on a per-function basis
 - Added a lot of utilities to create QAL objects, specifically SELECT clauses.
 - Improved the creation of `SimpleFilter` and `SimpleJoin` predicates to make double
   checks redundant. `attempt_wrap()` methods are now the preferred entry point into
