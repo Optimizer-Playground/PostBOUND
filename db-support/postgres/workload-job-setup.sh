@@ -128,7 +128,9 @@ elif [[ "$OS_TYPE" = "Linux" ]]; then
 else
     NCORES=1
 fi
-pg_restore $PG_CONN -d "$DB_NAME" -j "$NCORES" "$SRC_FILE"
+MAX_CONN="$(psql -t -c 'show max_connections' | tr -d '[:space:]')"
+NJOBS="$((NCORES < MAX_CONN ? NCORES : MAX_CONN - 1))"
+pg_restore $PG_CONN -n public -O -d "$DB_NAME" -j "$NJOBS" "$SRC_FILE"
 
 if [ $SKIP_VACUUM == "false" ] ; then
     echo ".. Vacuuming database"

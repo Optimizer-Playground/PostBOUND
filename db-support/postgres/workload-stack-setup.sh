@@ -6,7 +6,6 @@ DB_NAME=stack
 WD=$(pwd)
 TARGET_DIR=$WD/../stack_data
 PG_CONN="-U $(whoami)"
-CORES=$(($(nproc --all) / 2))
 FORCE_CREATION="false"
 SKIP_EXTENSIONS="false"
 SKIP_VACUUM="false"
@@ -29,13 +28,13 @@ show_help() {
 }
 
 attempt_pg_ext_install() {
-    EXTENSION=$1
-    AVAILABLE_EXTS=$(psql $PG_CONN $DB_NAME -t -c "SELECT name FROM pg_available_extensions" | grep "$EXTENSION" || true)
+    EXTENSION="$1"
+    AVAILABLE_EXTS="$(psql $PG_CONN $DB_NAME -t -c "SELECT name FROM pg_available_extensions" | grep "$EXTENSION" || true)"
     if [ -z "$AVAILABLE_EXTS" ] ; then
         echo ".. Extension $EXTENSION not available, skipping"
         return
     fi
-    psql $PG_CONN $DB_NAME -c "CREATE EXTENSION IF NOT EXISTS $EXTENSION;"
+    psql $PG_CONN "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS $EXTENSION;"
 }
 
 while [ $# -gt 0 ] ; do
@@ -86,7 +85,7 @@ while [ $# -gt 0 ] ; do
     esac
 done
 
-EXISTING_DBS=$(psql $PG_CONN -l | grep " $DB_NAME " || true)
+EXISTING_DBS="$(psql $PG_CONN -l | grep " $DB_NAME " || true)"
 
 if [ ! -z "$EXISTING_DBS" ] && [ $FORCE_CREATION = "false" ] ; then
     echo ".. Stack database exists, doing nothing"
@@ -94,21 +93,21 @@ if [ ! -z "$EXISTING_DBS" ] && [ $FORCE_CREATION = "false" ] ; then
 fi
 
 if [ ! -z "$EXISTING_DBS" ] ; then
-    dropdb $PG_CONN $DB_NAME
+    dropdb $PG_CONN "$DB_NAME"
 fi
 
 echo ".. Initializing Stack data dir at $TARGET_DIR"
-mkdir -p $TARGET_DIR
+mkdir -p "$TARGET_DIR"
 
-if [ -f $TARGET_DIR/stack_dump ] ;  then
+if [ -f "$TARGET_DIR/stack_dump" ] ;  then
     echo ".. Re-using existing Stack dump"
 else
     echo ".. Downloading Stack database dump"
-    curl --location "https://www.dropbox.com/s/55bxfhilcu19i33/so_pg13?dl=1" --output $TARGET_DIR/stack_dump
+    curl --location "https://www.dropbox.com/s/55bxfhilcu19i33/so_pg13?dl=1" --output "$TARGET_DIR/stack_dump"
 fi
 
 echo ".. Creating Stack database"
-createdb $PG_CONN $DB_NAME
+createdb $PG_CONN "$DB_NAME"
 
 if [ $SKIP_EXTENSIONS == "false" ] ; then
     attempt_pg_ext_install "pg_buffercache"
@@ -119,20 +118,30 @@ else
     echo ".. Skipping extension generation"
 fi
 
+OS_TYPE="$(uname)"
+if [[ "$OS_TYPE" = "Darwin" ]]; then
+    NCORES="$(sysctl -n hw.logicalcpu)"
+elif [[ "$OS_TYPE" = "Linux" ]]; then
+    NCORES="$(nproc)"
+else
+    NCORES=1
+fi
+MAX_CONN="$(psql -t -c 'show max_connections' | tr -d '[:space:]')"
+NJOBS="$((NCORES < MAX_CONN ? NCORES : MAX_CONN - 1))"
+
 echo ".. Loading Stack dump"
-pg_restore $PG_CONN -O -x --exit-on-error --jobs=$CORES --dbname=$DB_NAME $TARGET_DIR/stack_dump
+pg_restore $PG_CONN -O -x --exit-on-error --jobs="$NJOBS" --dbname="$DB_NAME" "$TARGET_DIR/stack_dump"
 
 if [ $SKIP_VACUUM == "false" ] ; then
     echo ".. Vacuuming database"
-    psql $PG_CONN $DB_NAME -c "VACUUM ANALYZE;"
+    psql $PG_CONN "$DB_NAME" -c "VACUUM ANALYZE;"
 else
     echo ".. Skipping vacuuming"
 fi
 
 if [ $CLEANUP == "true" ] ; then
     echo ".. Removing data files"
-    rm -rf $TARGET_DIR
+    rm -rf "$TARGET_DIR"
 fi
 
 echo ".. Done"
-cd $WD

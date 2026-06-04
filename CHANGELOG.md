@@ -33,6 +33,8 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 - Fixed `as_predicate()` creating star expressions instead of literal star-strings.
   For example, the predicate _foo = '\*'_ was wrongly turned into the (illegal) predicate
   _foo = \*_ (note the missing quotes).
+- Fixed database setup scripts for Postgres breaking if the number of CPU cores exceeded the
+  number of allowed connections.
 
 ---
 
