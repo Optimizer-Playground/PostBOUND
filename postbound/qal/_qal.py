@@ -29,6 +29,7 @@ from typing import (
 
 import networkx as nx
 
+
 from .. import util
 from .._base import T
 from .._core import ColumnReference, TableReference, VisitorResult, quote
@@ -600,6 +601,12 @@ class MathExpression(SqlExpression):
                 self._second_arg = None
             case Sequence():
                 self._second_arg = util.simplify(second_argument)
+                warnings.warn(
+                    "Passing a sequence of expressions is deprecated and will be removed in "
+                    "v0.22.0. To encode operations involving more than two operands, a"
+                    "hierarchy of binary expressions should be used instead.",
+                    category=DeprecationWarning,
+                )
                 if isinstance(self._second_arg, Sequence):
                     self._second_arg = tuple(self._second_arg)
             case _:
@@ -967,7 +974,9 @@ class FunctionExpression(SqlExpression):
             () if arguments is None else tuple(arguments)
         )
         self._kw_args: Mapping[str, SqlExpression] = (
-            {} if keyword_args is None else dict(keyword_args)
+            {}
+            if keyword_args is None
+            else {k.upper(): v for k, v in keyword_args.items()}
         )
         self._distinct = distinct
         self._filter_expr = filter_where
@@ -1996,16 +2005,27 @@ class ExpressionCollector(SqlExpressionVisitor[set[SqlExpression]]):
         )
 
 
-def as_expression(value: object, *, allow_star: bool = True) -> SqlExpression:
+def as_expression(
+    value: object,
+    *args,
+    allow_star: bool = True,
+    keyword_args: Optional[Mapping[str, object]] = None,
+    **kwargs,
+) -> SqlExpression:
     """Transforms the given value into the most appropriate `SqlExpression` instance.
 
     This is a heuristic utility method that applies the following rules:
 
+    - If args, kwargs, or keyword_args are given, a function expression is created. All args become
+      positional arguments, all kwargs and keyword_args become keyword arguments (with keyword_args
+      preceding kwargs). Each parameter passes through `as_expression` itself.
+    - All instances of `SqlExpression` are left unmodified.
     - `ColumnReference` becomes `ColumnExpression`
     - `SqlQuery` becomes `SubqueryExpression`
-    - the star-string ``*`` becomes a `StarExpression`
+    - The star-string ``*`` becomes a `StarExpression` if `allow_star` is enabled, otherwise
+      it becomes a static value of the literal "star-string" ('\\*')
 
-    All other values become a `StaticValueExpression`.
+    All other values become a `StaticValueExpression` of that value.
 
     Parameters
     ----------
@@ -2016,18 +2036,41 @@ def as_expression(value: object, *, allow_star: bool = True) -> SqlExpression:
         *SELECT \\**) expression or as a string literal (as in *SELECT '\\*'*).
         By default, it is treated as the expression rather than the string
         literal.
+    keyword_args : Optional[Mapping[str, object]], optional
+        Keyword parameters for the function. These can be used in addition to kwargs to specify
+        keywords that are also reserved Python keywords. In the function signature, keyword args
+        are inserted before kwargs.
+    args
+        Positional parameters for the function
+    kwargs
+        Keyword parameters for the function. In the function signature, keyword args are inserted
+        before kwargs.
 
     Returns
     -------
     SqlExpression
         The most appropriate expression object according to the transformation rules
     """
+    kwargs.update(keyword_args or {})
+
+    if args or kwargs:
+        if not isinstance(value, str):
+            raise ValueError(
+                "Unexpected parameter combination: args and kwargs imply a "
+                "FunctionExpression, but the value was no string. "
+                f"Got value = {value} and parameters {args}, {kwargs}"
+            )
+        args = tuple(as_expression(arg, allow_star=allow_star) for arg in args)
+        kwargs = {k: as_expression(v, allow_star=allow_star) for k, v in kwargs.items()}
+        return FunctionExpression(value, args, keyword_args=kwargs)
+
     if isinstance(value, SqlExpression):
         return value
 
     if isinstance(value, ColumnReference):
         return ColumnExpression(value)
-    elif isinstance(value, SqlQuery):
+
+    if isinstance(value, SqlQuery):
         return SubqueryExpression(value)
 
     if value == "*" and allow_star:
@@ -6094,6 +6137,26 @@ class BaseProjection:
             filter_condition=filter_condition,
         )
         return BaseProjection(window, target_name)
+
+    @staticmethod
+    def create_function(
+        fn: str,
+        *,
+        args: Optional[Sequence[SqlExpression]] = None,
+        kwargs: Optional[Mapping[str, SqlExpression]] = None,
+        distinct: bool = False,
+        filter_where: Optional[AbstractPredicate] = None,
+        target_name: str = "",
+    ) -> BaseProjection:
+        """Shorthand to create a project for an (arbitrary) function.
+
+        All parameters (except for the target name) are passed to the corresponding
+        `FunctionExpression`, see its documentation for details.
+        """
+        expr = FunctionExpression(
+            fn, args, keyword_args=kwargs, distinct=distinct, filter_where=filter_where
+        )
+        return BaseProjection(expr, target_name)
 
     @staticmethod
     def column(col: ColumnReference, target_name: str = "") -> BaseProjection:

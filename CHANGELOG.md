@@ -21,6 +21,7 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   `substring(foo FROM 3 FOR 42)`. Note that parser support is still limited and
   will be added on a per-function basis.
 - Added a lot of utilities to create QAL objects, specifically SELECT clauses.
+- `as_expression()` can now be used to create function expressions.
 - Added an `as_query()` utility similar to `as_expression()` or `as_predicate()`.
   It has a slightly nicer API than the existing `build_query()`.
 - Improved the creation of `SimpleFilter` and `SimpleJoin` predicates to make double
