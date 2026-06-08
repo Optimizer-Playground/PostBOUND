@@ -64,3 +64,6 @@ include = ["postbound*"]
 
 [tool.uv.sources]
 tables = { git = "https://github.com/PyTables/PyTables" }
+
+[tool.ty.src]
+exclude = ["vol-postbound/**"]

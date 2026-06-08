@@ -183,6 +183,9 @@ pb-venv/
 # PyCharm
 .idea/
 
+# Zed
+.zed/
+
 # MacOS
 .DS_Store
 
@@ -205,6 +208,10 @@ stats_data/
 
 # Build artifacts
 dist/
+generated/
 results/
 docs/build/
 docs/source/generated/
+
+# Docker artifacts
+vol-*/
