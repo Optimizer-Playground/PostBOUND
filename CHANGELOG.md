@@ -18,9 +18,11 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 - Added a new (optional) argument to function expressions to represent keyword arguments.
   Specifically, this allows to now create functions like
-  `substring(foo FROM 3 FOR 42)`. Note that parser support is still limited and will be
-  added on a per-function basis
+  `substring(foo FROM 3 FOR 42)`. Note that parser support is still limited and
+  will be added on a per-function basis.
 - Added a lot of utilities to create QAL objects, specifically SELECT clauses.
+- Added an `as_query()` utility similar to `as_expression()` or `as_predicate()`.
+  It has a slightly nicer API than the existing `build_query()`.
 - Improved the creation of `SimpleFilter` and `SimpleJoin` predicates to make double
   checks redundant. `attempt_wrap()` methods are now the preferred entry point into
   the simplification.
@@ -32,13 +34,13 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 ## 🏥 Fixes
 
 - Fixed plan parameterizations not being JSON-serializable.
-- Fixed the shorthand method for creating _COUNT(\*)_ select clauses accepting a distinct
-  parameter instead of a target name.
+- Fixed the shorthand method for creating _COUNT(\*)_ select clauses accepting a
+  distinct parameter instead of a target name.
 - Fixed `as_predicate()` creating star expressions instead of literal star-strings.
-  For example, the predicate _foo = '\*'_ was wrongly turned into the (illegal) predicate
-  _foo = \*_ (note the missing quotes).
-- Fixed database setup scripts for Postgres breaking if the number of CPU cores exceeded the
-  number of allowed connections.
+  For example, the predicate _foo = '\*'_ was wrongly turned into the (illegal)
+  predicate _foo = \*_ (note the missing quotes).
+- Fixed database setup scripts for Postgres breaking if the number of CPU cores
+  exceeded the number of allowed connections.
 
 ---
 
