@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PostBOUND"
-version = "0.21.2"
+version = "0.21.3.dev0"
 authors = [{ name = "Rico Bergmann", email = "rico.bergmann1@tu-dresden.de" }]
 description = "PostBOUND is a research framework to prototype and benchmark database query optimizers"
 readme = "README.md"

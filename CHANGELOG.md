@@ -18,6 +18,11 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 - The `read_df` and `write_df` utilities now work for SQLite databases
 
+## 🏥 Fixes
+
+- Fixed `execute_query` in the Postgres interface raising an error for
+  queries that do (correctly) not return a result set (e.g. _SET_)
+
 ---
 
 # Version 0.21.2

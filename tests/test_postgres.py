@@ -26,7 +26,8 @@ PGHintPlanRestrictions = PostgresConfiguration(
 class QueryExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
-            config_file=f"{pg_connect_dir}/.psycopg_connection_stats", private=True
+            config_file=f"{pg_connect_dir}/.psycopg_connection_stats",
+            private=True,
         )
         self.stats = pb.workloads.stats()
 
@@ -51,7 +52,9 @@ class QueryExecutionTests(unittest.TestCase):
         vanilla_runtime = self.pg_instance.last_query_runtime()
 
         timeout = 0.5 * vanilla_runtime
-        result_set = self.pg_instance.execute_with_timeout(query, timeout=timeout)
+        result_set = self.pg_instance.execute_with_timeout(
+            query, timeout=timeout
+        )
         self.assertIs(result_set, None)
 
         result_set = self.pg_instance.execute_with_timeout(
@@ -65,7 +68,8 @@ class QueryExecutionTests(unittest.TestCase):
 class StatsSchemaTests(unittest.TestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
-            config_file=f"{pg_connect_dir}/.psycopg_connection_stats", private=True
+            config_file=f"{pg_connect_dir}/.psycopg_connection_stats",
+            private=True,
         )
         self.stats = pb.workloads.stats()
 
@@ -76,7 +80,8 @@ class StatsSchemaTests(unittest.TestCase):
 class JobHintingTests(regression_suite.PlanTestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
-            config_file=f"{pg_connect_dir}/.psycopg_connection_job", private=True
+            config_file=f"{pg_connect_dir}/.psycopg_connection_job",
+            private=True,
         )
         self.job = pb.workloads.job()
 
@@ -91,7 +96,9 @@ class JobHintingTests(regression_suite.PlanTestCase):
                 hinted_query = self.pg_instance.hinting().generate_hints(
                     query, native_plan
                 )
-                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
+                explicit_plan = self.pg_instance.optimizer().query_plan(
+                    hinted_query
+                )
                 self.assertEqual(native_plan, explicit_plan)
 
     def test_pg_hint_plan_backend(self) -> None:
@@ -106,7 +113,9 @@ class JobHintingTests(regression_suite.PlanTestCase):
                 hinted_query = self.pg_instance.hinting().generate_hints(
                     query, native_plan
                 )
-                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
+                explicit_plan = self.pg_instance.optimizer().query_plan(
+                    hinted_query
+                )
                 self.assertEqual(native_plan, explicit_plan)
 
 
@@ -114,7 +123,8 @@ class JobHintingTests(regression_suite.PlanTestCase):
 class StatsHintingTests(regression_suite.PlanTestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
-            config_file=f"{pg_connect_dir}/.psycopg_connection_stats", private=True
+            config_file=f"{pg_connect_dir}/.psycopg_connection_stats",
+            private=True,
         )
         self.stats = pb.workloads.stats()
 
@@ -129,7 +139,9 @@ class StatsHintingTests(regression_suite.PlanTestCase):
                 hinted_query = self.pg_instance.hinting().generate_hints(
                     query, native_plan
                 )
-                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
+                explicit_plan = self.pg_instance.optimizer().query_plan(
+                    hinted_query
+                )
                 self.assertEqual(native_plan, explicit_plan)
 
     def test_pg_hint_plan_backend(self) -> None:
@@ -144,7 +156,9 @@ class StatsHintingTests(regression_suite.PlanTestCase):
                 hinted_query = self.pg_instance.hinting().generate_hints(
                     query, native_plan
                 )
-                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
+                explicit_plan = self.pg_instance.optimizer().query_plan(
+                    hinted_query
+                )
                 self.assertEqual(native_plan, explicit_plan)
 
     def test_pglab_parallel(self) -> None:
@@ -170,10 +184,28 @@ class StatsHintingTests(regression_suite.PlanTestCase):
                     ),
                 ),
                 pb.QueryPlan(
-                    "Index Scan", operator=pb.ScanOperator.IndexScan, base_table=users
+                    "Index Scan",
+                    operator=pb.ScanOperator.IndexScan,
+                    base_table=users,
                 ),
             ],
         )
 
         hinted_plan = self.pg_instance.explain(query, plan=plan)
         self.assertQueryExecutionPlansEqual(plan, hinted_plan)
+
+
+@regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
+class RegressionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.pg_instance = pb.postgres.connect(
+            config_file=f"{pg_connect_dir}/.psycopg_connection_stats",
+            private=True,
+        )
+        self.stats = pb.workloads.stats()
+
+    def test_execute_no_result_set(self) -> None:
+        res = self.pg_instance.execute_query("SET geqo TO off")
+        self.assertIsNone(
+            res, "Queries that do not provide a result set should return None"
+        )
