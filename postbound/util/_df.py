@@ -13,6 +13,9 @@ def read_df(path: Path | str, **kwargs) -> pd.DataFrame:
     """Reads a Pandas `DataFrame` from a file, inferring the file format from the file extension.
 
     All additional arguments are passed directly to the respective Pandas read function.
+
+    For SQLite databases, you must specify the table name using the 'table' or
+    'relation' argument, e.g. ``read_df("data.db", table="my_table")``.
     """
     path = Path(path)
     match path.suffix.lower():
@@ -30,6 +33,17 @@ def read_df(path: Path | str, **kwargs) -> pd.DataFrame:
             return pd.read_feather(path, **kwargs)
         case ".orc":
             return pd.read_orc(path, **kwargs)
+        case ".db" | ".sqlite" | ".sqlite3":
+            import sqlite3
+
+            if "table" not in kwargs and "relation" not in kwargs:
+                raise ValueError(
+                    "For SQLite databases, you must specify the table name "
+                    "using the 'table' or 'relation' argument."
+                )
+            tab = kwargs.pop("table", None) or kwargs.pop("relation", None)
+            with sqlite3.connect(path) as conn:
+                return pd.read_sql_table(tab, conn, **kwargs)
         case _:
             raise ValueError(f"Unsupported file format: {path.suffix}")
 
@@ -71,5 +85,10 @@ def write_df(
             df.to_feather(path, **kwargs)
         case ".orc":
             df.to_orc(path, **kwargs)
+        case ".db" | ".sqlite" | ".sqlite3":
+            import sqlite3
+
+            with sqlite3.connect(path) as conn:
+                df.to_sql("data", conn, index=index, **kwargs)
         case _:
             raise ValueError(f"Unsupported file format: {path.suffix}")

@@ -16,6 +16,14 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 🐣 New features
 
+- The `read_df` and `write_df` utilities now work for SQLite databases
+
+---
+
+# Version 0.21.2
+
+## 🐣 New features
+
 - Added a new (optional) argument to function expressions to represent keyword arguments.
   Specifically, this allows to now create functions like
   `substring(foo FROM 3 FOR 42)`. Note that parser support is still limited and
