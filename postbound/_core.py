@@ -5,7 +5,15 @@ import math
 import re
 from enum import Enum
 from numbers import Number
-from typing import Optional, SupportsFloat, SupportsIndex, TypeGuard, TypeVar
+from typing import (
+    Literal,
+    Optional,
+    SupportsFloat,
+    SupportsIndex,
+    TypeGuard,
+    TypeVar,
+    overload,
+)
 
 from .util._errors import StateError
 from .util.jsonize import jsondict
@@ -689,7 +697,9 @@ class TableReference:
         if not full_name and not alias:
             raise ValueError("Full name or alias required")
         if schema and not full_name:
-            raise ValueError("Schema can only be set if a full name is provided")
+            raise ValueError(
+                "Schema can only be set if a full name is provided"
+            )
 
         self._schema = schema if schema else ""
         self._full_name = full_name if full_name else ""
@@ -820,6 +830,10 @@ class TableReference:
             else quote(self._full_name)
         )
 
+    def column(self, name: str) -> BoundColumnReference:
+        """Creates a new column that is bound to this table."""
+        return BoundColumnReference(name, self)
+
     def drop_alias(self) -> TableReference:
         """Removes the alias from the current table if there is one. Returns the tabel as-is otherwise.
 
@@ -861,6 +875,23 @@ class TableReference:
 
         return TableReference(
             self.full_name, alias, virtual=self.virtual, schema=self._schema
+        )
+
+    def with_schema(self, schema: str) -> TableReference:
+        """Creates a new table reference for the same table but with a different schema.
+
+        Parameters
+        ----------
+        schema : str
+            The new schema
+
+        Returns
+        -------
+        TableReference
+            The updated table reference
+        """
+        return TableReference(
+            self.full_name, self.alias, virtual=self.virtual, schema=schema
         )
 
     def make_virtual(self) -> TableReference:
@@ -1003,7 +1034,9 @@ class ColumnReference:
         """
         return col.is_bound()
 
-    def __init__(self, name: str, table: Optional[TableReference] = None) -> None:
+    def __init__(
+        self, name: str, table: Optional[TableReference] = None
+    ) -> None:
         if not name:
             raise ValueError("Column name is required")
         self._name = name
@@ -1012,9 +1045,19 @@ class ColumnReference:
         self._hash_val = hash((self._normalized_name, self._table))
 
         if self._table:
-            self._sql_repr = f"{quote(self._table.identifier())}.{quote(self._name)}"
+            self._sql_repr = (
+                f"{quote(self._table.identifier())}.{quote(self._name)}"
+            )
         else:
             self._sql_repr = quote(self._name)
+
+    @overload
+    def __new__(
+        cls, name: str, table: TableReference
+    ) -> BoundColumnReference: ...
+
+    @overload
+    def __new__(cls, name: str, table: Literal[None]) -> ColumnReference: ...
 
     def __new__(
         cls, name: str, table: Optional[TableReference] = None
@@ -1023,7 +1066,13 @@ class ColumnReference:
             return super().__new__(cls)
         return BoundColumnReference(name, table)
 
-    __slots__ = ("_name", "_table", "_normalized_name", "_hash_val", "_sql_repr")
+    __slots__ = (
+        "_name",
+        "_table",
+        "_normalized_name",
+        "_hash_val",
+        "_sql_repr",
+    )
     __match_args__ = ("name", "table")
 
     @property
