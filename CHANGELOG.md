@@ -16,8 +16,8 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 🐣 New features
 
+- Table references can now keep track of their catalog
 - The `read_df` and `write_df` utilities now work for SQLite databases
-- Added a bunch of utilities to create modified table references
 
 ## 🏥 Fixes
 

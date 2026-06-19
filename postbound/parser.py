@@ -1510,9 +1510,10 @@ def _pglast_parse_rangevar(rangevar: dict) -> TableReference:
         The parsed table reference.
     """
     name = rangevar["relname"]
-    alias = rangevar["alias"]["aliasname"] if "alias" in rangevar else None
+    alias = rangevar["alias"]["aliasname"] if "alias" in rangevar else ""
     schema = rangevar.get("schemaname", "")
-    return TableReference(name, alias, schema=schema)
+    catalog = rangevar.get("catalogname", "")
+    return TableReference(name, alias, schema=schema, catalog=catalog)
 
 
 def _pglast_is_values_list(pglast_data: dict) -> bool:
@@ -2538,7 +2539,8 @@ def load_table_json(json_data):
         json_data.get("full_name", ""),
         json_data.get("alias", ""),
         virtual=json_data.get("virtual", False),
-        schema=json_data.get("schemaname", None),
+        schema=json_data.get("schema", ""),
+        catalog=json_data.get("catalog", ""),
     )
 
 

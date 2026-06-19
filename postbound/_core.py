@@ -656,6 +656,9 @@ class TableReference:
     schema : str, optional
         The schema in which the table is located. Defaults to an empty string if the table is in the default schema or the
         schema is unknown.
+    catalog : str, optional
+        The catalog in which the table is located. Defaults to an empty string if the table is in the default catalog or the
+        catalog is unknown.
 
     Raises
     ------
@@ -665,7 +668,11 @@ class TableReference:
 
     @staticmethod
     def create_virtual(
-        alias: str, *, full_name: str = "", schema: str = ""
+        alias: str,
+        *,
+        full_name: str = "",
+        schema: str = "",
+        catalog: str = "",
     ) -> TableReference:
         """Generates a new virtual table reference with the given alias.
 
@@ -678,13 +685,18 @@ class TableReference:
         schema : str, optional
             The schema in which the table is located. Defaults to an empty string if the table is in the default schema or the
             schema is unknown.
+        catalog : str, optional
+            The catalog in which the table is located. Defaults to an empty string if the table is in the default catalog or the
+            catalog is unknown.
 
         Returns
         -------
         TableReference
             The virtual table reference
         """
-        return TableReference(full_name, alias, virtual=True, schema=schema)
+        return TableReference(
+            full_name, alias, virtual=True, schema=schema, catalog=catalog
+        )
 
     def __init__(
         self,
@@ -693,6 +705,7 @@ class TableReference:
         *,
         virtual: bool = False,
         schema: str = "",
+        catalog: str = "",
     ) -> None:
         if not full_name and not alias:
             raise ValueError("Full name or alias required")
@@ -700,7 +713,14 @@ class TableReference:
             raise ValueError(
                 "Schema can only be set if a full name is provided"
             )
+        if catalog and not full_name:
+            raise ValueError(
+                "Catalog can only be set if a full name is provided"
+            )
 
+        # NB: we use conditional assignments to protect against accidental
+        # None parameters
+        self._catalog = catalog if catalog else ""
         self._schema = schema if schema else ""
         self._full_name = full_name if full_name else ""
         self._alias = alias if alias else ""
@@ -708,6 +728,7 @@ class TableReference:
 
         self._identifier = self._alias if self._alias else self._full_name
 
+        self._normalized_catalog = normalize(self._catalog)
         self._normalized_schema = normalize(self._schema)
         self._normalized_full_name = normalize(self._full_name)
         self._normalized_alias = normalize(self._alias)
@@ -717,29 +738,33 @@ class TableReference:
                 self._normalized_full_name,
                 self._normalized_alias,
                 self._normalized_schema,
+                self._normalized_catalog,
             )
         )
 
-        table_txt = (
-            f"{quote(self._schema)}.{quote(self._full_name)}"
-            if self._schema
-            else quote(self._full_name)
-        )
+        txt_components: list[str] = []
+        if self._catalog:
+            txt_components.append(quote(self._catalog))
+        if self._schema:
+            txt_components.append(quote(self._schema))
+        txt_components.append(quote(self._full_name))
+        table_txt = ".".join(txt_components)
+
         if table_txt and self._alias:
             self._sql_repr = f"{table_txt} AS {quote(self._alias)}"
         elif self._alias:
             self._sql_repr = quote(self._alias)
-        elif self._full_name:
-            self._sql_repr = table_txt
         else:
             raise ValueError("Full name or alias required")
 
     __slots__ = (
+        "_catalog",
         "_schema",
         "_full_name",
         "_alias",
         "_virtual",
         "_identifier",
+        "_normalized_catalog",
         "_normalized_schema",
         "_normalized_full_name",
         "_normalized_alias",
@@ -747,7 +772,7 @@ class TableReference:
         "_hash_val",
         "_sql_repr",
     )
-    __match_args__ = ("full_name", "alias", "virtual", "schema")
+    __match_args__ = ("full_name", "alias", "virtual", "schema", "catalog")
 
     @property
     def full_name(self) -> str:
@@ -798,6 +823,17 @@ class TableReference:
 
         return self._schema
 
+    @property
+    def catalog(self) -> str:
+        """Get the catalog in which this table is located.
+
+        Returns
+        -------
+        str
+            The catalog or an empty string if the catalog is either unknown or the table is located in the default catalog.
+        """
+        return self._catalog
+
     def identifier(self) -> str:
         """Provides a shorthand key that columns can use to refer to this table reference.
 
@@ -813,7 +849,7 @@ class TableReference:
         return self._identifier
 
     def qualified_name(self) -> str:
-        """Provides the fully qualified name (i.e. including the schema) of this table.
+        """Provides the fully qualified name (i.e. including schema or catalog) of this table.
 
         Notice that virtual tables do not have a qualified name, since they do not correspond to a physical table.
 
@@ -824,13 +860,16 @@ class TableReference:
         """
         if self.virtual:
             raise VirtualTableError(self)
-        return (
-            f"{quote(self._schema)}.{quote(self._full_name)}"
-            if self._schema
-            else quote(self._full_name)
-        )
 
-    def column(self, name: str) -> BoundColumnReference:
+        name_components: list[str] = []
+        if self._catalog:
+            name_components.append(quote(self._catalog))
+        if self._schema:
+            name_components.append(quote(self._schema))
+        name_components.append(quote(self._full_name))
+        return ".".join(name_components)
+
+    def assign_column(self, name: str) -> BoundColumnReference:
         """Creates a new column that is bound to this table."""
         return BoundColumnReference(name, self)
 
@@ -850,7 +889,9 @@ class TableReference:
         """
         if self.virtual:
             raise StateError("An alias cannot be dropped from a virtual table!")
-        return TableReference(self.full_name, schema=self._schema)
+        return TableReference(
+            self.full_name, schema=self._schema, catalog=self._catalog
+        )
 
     def with_alias(self, alias: str) -> TableReference:
         """Creates a new table reference for the same table but with a different alias.
@@ -874,7 +915,11 @@ class TableReference:
             raise StateError("Cannot add an alias to a table without full name")
 
         return TableReference(
-            self.full_name, alias, virtual=self.virtual, schema=self._schema
+            self._full_name,
+            alias,
+            virtual=self._virtual,
+            schema=self._schema,
+            catalog=self._catalog,
         )
 
     def with_schema(self, schema: str) -> TableReference:
@@ -891,7 +936,32 @@ class TableReference:
             The updated table reference
         """
         return TableReference(
-            self.full_name, self.alias, virtual=self.virtual, schema=schema
+            self._full_name,
+            self._alias,
+            virtual=self.virtual,
+            schema=schema,
+            catalog=self._catalog,
+        )
+
+    def with_catalog(self, catalog: str) -> TableReference:
+        """Creates a new table reference for the same table but with a different catalog.
+
+        Parameters
+        ----------
+        catalog : str
+            The new catalog
+
+        Returns
+        -------
+        TableReference
+            The updated table reference
+        """
+        return TableReference(
+            self._full_name,
+            self._alias,
+            virtual=self._virtual,
+            schema=self._schema,
+            catalog=catalog,
         )
 
     def make_virtual(self) -> TableReference:
@@ -903,7 +973,11 @@ class TableReference:
             The updated table reference
         """
         return TableReference(
-            self.full_name, self.alias, virtual=True, schema=self._schema
+            self.full_name,
+            self.alias,
+            virtual=True,
+            schema=self._schema,
+            catalog=self._catalog,
         )
 
     def update(
@@ -912,13 +986,17 @@ class TableReference:
         full_name: Optional[str] = None,
         alias: Optional[str] = None,
         virtual: Optional[bool] = None,
-        schema: Optional[str] = "",
+        schema: Optional[str] = None,
+        catalog: Optional[str] = None,
     ) -> TableReference:
         full_name = self._full_name if full_name is None else full_name
         alias = self._alias if alias is None else alias
         virtual = self._virtual if virtual is None else virtual
         schema = self._schema if schema is None else schema
-        return TableReference(full_name, alias, virtual=virtual, schema=schema)
+        catalog = self._catalog if catalog is None else catalog
+        return TableReference(
+            full_name, alias, virtual=virtual, schema=schema, catalog=catalog
+        )
 
     def __json__(self) -> object:
         return {
@@ -926,6 +1004,7 @@ class TableReference:
             "alias": self._alias,
             "virtual": self._virtual,
             "schema": self._schema,
+            "catalog": self._catalog,
         }
 
     def __lt__(self, other: object) -> bool:
@@ -942,12 +1021,13 @@ class TableReference:
             and self._normalized_full_name == other._normalized_full_name
             and self._normalized_alias == other._normalized_alias
             and self._normalized_schema == other._normalized_schema
+            and self._normalized_catalog == other._normalized_catalog
         )
 
     def __repr__(self) -> str:
         return (
             f"TableReference(full_name='{self.full_name}', alias='{self.alias}', "
-            f"virtual={self.virtual}, schema='{self.schema}')"
+            f"virtual={self.virtual}, schema='{self.schema}', catalog='{self.catalog}')"
         )
 
     def __str__(self) -> str:
