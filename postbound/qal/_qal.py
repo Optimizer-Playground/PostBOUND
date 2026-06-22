@@ -29,7 +29,6 @@ from typing import (
 
 import networkx as nx
 
-
 from .. import util
 from .._base import T
 from .._core import ColumnReference, TableReference, VisitorResult, quote
@@ -784,9 +783,10 @@ class ColumnExpression(SqlExpression):
     """
 
     @staticmethod
-    def of(column_name: str) -> ColumnExpression:
+    def of(column_name: str, *, table: str | TableReference) -> ColumnExpression:
         """Shortcut method to create a new column reference + expression."""
-        return ColumnExpression(ColumnReference(column_name))
+        table = TableReference(table) if isinstance(table, str) else table
+        return ColumnExpression(ColumnReference(column_name, table))
 
     def __init__(self, column: ColumnReference) -> None:
         if column is None:
@@ -2007,18 +2007,12 @@ class ExpressionCollector(SqlExpressionVisitor[set[SqlExpression]]):
 
 def as_expression(
     value: object,
-    *args,
     allow_star: bool = True,
-    keyword_args: Optional[Mapping[str, object]] = None,
-    **kwargs,
 ) -> SqlExpression:
     """Transforms the given value into the most appropriate `SqlExpression` instance.
 
     This is a heuristic utility method that applies the following rules:
 
-    - If args, kwargs, or keyword_args are given, a function expression is created. All args become
-      positional arguments, all kwargs and keyword_args become keyword arguments (with keyword_args
-      preceding kwargs). Each parameter passes through `as_expression` itself.
     - All instances of `SqlExpression` are left unmodified.
     - `ColumnReference` becomes `ColumnExpression`
     - `SqlQuery` becomes `SubqueryExpression`
@@ -2036,34 +2030,19 @@ def as_expression(
         *SELECT \\**) expression or as a string literal (as in *SELECT '\\*'*).
         By default, it is treated as the expression rather than the string
         literal.
-    keyword_args : Optional[Mapping[str, object]], optional
-        Keyword parameters for the function. These can be used in addition to kwargs to specify
-        keywords that are also reserved Python keywords. In the function signature, keyword args
-        are inserted before kwargs.
-    args
-        Positional parameters for the function
-    kwargs
-        Keyword parameters for the function. In the function signature, keyword args are inserted
-        before kwargs.
 
     Returns
     -------
     SqlExpression
         The most appropriate expression object according to the transformation rules
+
+    Examples
+    --------
+    >>> as_expression(ColumnReference("a"))
+    a
+    >>> as_expression("a")
+    'a'
     """
-    kwargs.update(keyword_args or {})
-
-    if args or kwargs:
-        if not isinstance(value, str):
-            raise ValueError(
-                "Unexpected parameter combination: args and kwargs imply a "
-                "FunctionExpression, but the value was no string. "
-                f"Got value = {value} and parameters {args}, {kwargs}"
-            )
-        args = tuple(as_expression(arg, allow_star=allow_star) for arg in args)
-        kwargs = {k: as_expression(v, allow_star=allow_star) for k, v in kwargs.items()}
-        return FunctionExpression(value, args, keyword_args=kwargs)
-
     if isinstance(value, SqlExpression):
         return value
 
@@ -2076,6 +2055,60 @@ def as_expression(
     if value == "*" and allow_star:
         return StarExpression()
     return StaticValueExpression(value)
+
+
+def as_func_expr(func_name: str, *args, **kwargs) -> FunctionExpression:
+    """Utility to create a function expression from a function name and arbitrary arguments.
+
+    All positional arguments are automatically transformed into the appropriate expression using
+    `as_expression` with one notable exception: mapping types (e.g., dictionaries) are instead
+    treated as collections of keyword arguments (see below). This allows to specify keyword
+    arguments that are not allowed as keyword arguments in Python.
+
+    All keyword arguments are treated as keyword arguments for the function expression. Their values
+    are transformed using `as_expression` whereas the keys become the keywords.
+
+    Examples
+    --------
+
+    >>> as_func_expr("sum", ColumnReference("a"))
+    sum(a)
+    >>> as_func_expr("substring", ColumnReference("a"), {"from": 1, "for": 3})
+    substring(a FROM 1 FOR 3)
+    """
+    positional_args: list[SqlExpression] = []
+    keyword_args: dict[str, SqlExpression] = {}
+
+    for arg in args:
+        if isinstance(arg, Mapping):
+            parsed_args = {key: as_expression(val) for key, val in arg.items()}
+            keyword_args.update(parsed_args)
+        else:
+            positional_args.append(as_expression(arg))
+
+    parsed_kwargs = {key: as_expression(val) for key, val in kwargs.items()}
+    keyword_args.update(parsed_kwargs)
+
+    return FunctionExpression(func_name, positional_args, keyword_args=keyword_args)
+
+
+def as_math_expr(
+    lhs: object, operator: MathOperator | str, rhs: object
+) -> MathExpression:
+    """Utility to create a binary math expression.
+
+    The left-hand side and right-hand side arguments are transformed using `as_expression`. The
+    operator can be specified as a full operator object, or as the corresponding string value.
+
+    Examples
+    --------
+    >>> as_math_expr(ColumnReference("a"), "+", ColumnReference("b"))
+    a + b
+    >>> as_math_expr(ColumnReference("a"), MathOperator.Subtract, 42)
+    a - 42
+    """
+    operator = MathOperator(operator) if isinstance(operator, str) else operator
+    return MathExpression(operator, as_expression(lhs), as_expression(rhs))
 
 
 def _normalize_join_pair(
@@ -6651,6 +6684,12 @@ class DirectTableSource(TableSource):
     table : TableReference
         The table that is sourced
     """
+
+    @staticmethod
+    def create_for(table_name: str, alias: str = "") -> DirectTableSource:
+        """Shorthand to create a direct table source from a table name and an optional alias."""
+        table = TableReference(table_name, alias=alias)
+        return DirectTableSource(table)
 
     def __init__(self, table: TableReference) -> None:
         self._table = table
