@@ -1539,6 +1539,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
     def __getitem__(self, key):
         match key:
             case ColumnReference():
+                key = key.drop_table_alias()
                 return ColumnInfo(
                     column=key,
                     table=key.table,
@@ -1548,6 +1549,8 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                     primary_key=self.is_primary_key(key),
                 )
             case TableReference():
+                key = key.drop_alias()
+
                 schema_graph = self.as_graph()
                 col_infos = [self[col] for col in self.columns(key)]
                 outgoing_fks = set_union(

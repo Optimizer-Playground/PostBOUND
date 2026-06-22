@@ -23,7 +23,8 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 - Fixed `execute_query` in the Postgres interface raising an error for
   queries that do (correctly) not return a result set (e.g. _SET_)
-
+- Fixed table-based access of the database schema being sensitive to the
+  alias of a table.
 ---
 
 # Version 0.21.2
