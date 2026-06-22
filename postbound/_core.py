@@ -710,13 +710,9 @@ class TableReference:
         if not full_name and not alias:
             raise ValueError("Full name or alias required")
         if schema and not full_name:
-            raise ValueError(
-                "Schema can only be set if a full name is provided"
-            )
+            raise ValueError("Schema can only be set if a full name is provided")
         if catalog and not full_name:
-            raise ValueError(
-                "Catalog can only be set if a full name is provided"
-            )
+            raise ValueError("Catalog can only be set if a full name is provided")
 
         # NB: we use conditional assignments to protect against accidental
         # None parameters
@@ -752,6 +748,8 @@ class TableReference:
 
         if table_txt and self._alias:
             self._sql_repr = f"{table_txt} AS {quote(self._alias)}"
+        elif table_txt:
+            self._sql_repr = table_txt
         elif self._alias:
             self._sql_repr = quote(self._alias)
         else:
@@ -1114,9 +1112,7 @@ class ColumnReference:
         """
         return col.is_bound()
 
-    def __init__(
-        self, name: str, table: Optional[TableReference] = None
-    ) -> None:
+    def __init__(self, name: str, table: Optional[TableReference] = None) -> None:
         if not name:
             raise ValueError("Column name is required")
         self._name = name
@@ -1125,16 +1121,15 @@ class ColumnReference:
         self._hash_val = hash((self._normalized_name, self._table))
 
         if self._table:
-            self._sql_repr = (
-                f"{quote(self._table.identifier())}.{quote(self._name)}"
-            )
+            self._sql_repr = f"{quote(self._table.identifier())}.{quote(self._name)}"
         else:
             self._sql_repr = quote(self._name)
 
     @overload
-    def __new__(
-        cls, name: str, table: TableReference
-    ) -> BoundColumnReference: ...
+    def __new__(cls, name: str) -> ColumnReference: ...
+
+    @overload
+    def __new__(cls, name: str, table: TableReference) -> BoundColumnReference: ...
 
     @overload
     def __new__(cls, name: str, table: Literal[None]) -> ColumnReference: ...
