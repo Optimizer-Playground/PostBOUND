@@ -1156,7 +1156,7 @@ requires-dist = [
     { name = "pandas", specifier = "~=2.3" },
     { name = "pglast", specifier = "~=7.10" },
     { name = "psycopg", extras = ["binary"], specifier = "~=3.2" },
-    { name = "quacklab", marker = "extra == 'duckdb'", specifier = "~=1.4" },
+    { name = "quacklab", marker = "extra == 'duckdb'", specifier = "~=1.5" },
     { name = "seaborn", marker = "extra == 'vis'", specifier = "~=0.13" },
     { name = "tqdm", specifier = "~=4.67" },
 ]
@@ -1374,16 +1374,16 @@ wheels = [
 
 [[package]]
 name = "quacklab"
-version = "1.4.1"
+version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/da/42/168dea4c0bb164f88199b2750b12aff14f03cdd14bd486545c2bc469f954/quacklab-1.4.1.tar.gz", hash = "sha256:ceed81c7333f528e25dc30cf08bbb80442e61d8cf95a4c207b70a0b352af9867", size = 22968246, upload-time = "2026-01-21T15:15:30.464Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/b1/83a14f1dae1feb73c5405c1a7b1a412d4bc17d48d949c40a2564349e51f0/quacklab-1.5.0.tar.gz", hash = "sha256:2c835bf2ec9ff77b85cf96272fba036501e0b9c7d260cd152ce32d1af348a3e3", size = 22765122, upload-time = "2026-06-12T19:04:30.244Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/40/52ce795932cdd8117bfe626a64dcc04b7f763b6ff16cc6ba6a63364b57c6/quacklab-1.4.1-cp312-cp312-macosx_26_0_arm64.whl", hash = "sha256:f5778794f6bec1a3369da00bbb98f0707bad6e5020a09c69f348592a83b8e31e", size = 14475990, upload-time = "2026-01-21T15:35:47.9Z" },
-    { url = "https://files.pythonhosted.org/packages/38/b6/a6607fa86de91936359bf28c52212727abfc375536379675fbbb89a3ebb0/quacklab-1.4.1-cp312-cp312-manylinux_2_39_x86_64.whl", hash = "sha256:e1629907da431057372a6054a1a5785e54fe81f7771019251739962fed90e5a1", size = 21183680, upload-time = "2026-01-21T15:16:02.253Z" },
-    { url = "https://files.pythonhosted.org/packages/94/e4/0f36f5c14e150c6ff365bff096aee0bc7028d497de13d5deb56cd267c44a/quacklab-1.4.1-cp313-cp313-macosx_26_0_arm64.whl", hash = "sha256:f67864213557d5e8def0bc75bc5f16ce7c24f241c7055ade874ac1562285cf7c", size = 14476413, upload-time = "2026-01-21T15:35:13.157Z" },
-    { url = "https://files.pythonhosted.org/packages/89/af/cf37f56275d7e2cff5be120b321e543dea6218f7214c31150b5da5a0f740/quacklab-1.4.1-cp313-cp313-manylinux_2_39_x86_64.whl", hash = "sha256:c8d70ecd234500e3e3493703fb355043fe58f9b9c394ebd4a3658c5c18ae8c87", size = 21184763, upload-time = "2026-01-21T15:15:52.763Z" },
-    { url = "https://files.pythonhosted.org/packages/8b/31/dc49f49b9ab0a5b8350f0fc1e974d8df2450ba4a59bd06c888112651f978/quacklab-1.4.1-cp314-cp314-macosx_26_0_arm64.whl", hash = "sha256:1b1581265efcb9f2677304b7ff3273e1ceb142f80bbeac072c57d932e66551a8", size = 14486841, upload-time = "2026-01-21T15:35:28.975Z" },
-    { url = "https://files.pythonhosted.org/packages/a9/43/7ef0c0729152966d67b197d9ed55aea10df75b0399c0292e5b30f808b540/quacklab-1.4.1-cp314-cp314-manylinux_2_39_x86_64.whl", hash = "sha256:23e62bdfe8391df3bd7f7382c7e0608cc4df11159cde4026dc66fcab342e9e81", size = 21187385, upload-time = "2026-01-21T15:16:27.071Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/0d/3c0232ea9b3b0de9800e4fbbf847775d058f0bb9656ee9bfddd91726fe6a/quacklab-1.5.0-cp312-cp312-macosx_26_0_arm64.whl", hash = "sha256:70ac47e1cdb4af356638c640f4d7698f494a8d62719ac9b0e7b5d86d210b2ae5", size = 16682616, upload-time = "2026-06-12T19:04:36.873Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/a2/50e4fc961a398bddfa5ee1b87ab2b0dfe8f4169766bf2bae9a0f101af9a9/quacklab-1.5.0-cp312-cp312-manylinux_2_39_x86_64.whl", hash = "sha256:bacb9f0d7c81518e307963a163fd4168673c220e11c5d2a58ef295ace1655a56", size = 22259604, upload-time = "2026-06-13T13:12:07.085Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/36/6b3d48a05b5dd8427efb1f41a69197851ff592d299bce9fb4c57ef63d2b2/quacklab-1.5.0-cp313-cp313-macosx_26_0_arm64.whl", hash = "sha256:1a48b9219a82259d3bc59d5c265ac7dc4b03a8bb2e60f9432df73b13a92e405f", size = 16681798, upload-time = "2026-06-12T19:04:50.569Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/96/b1863935f24682fc399ad0e00670fd8ee5c3d6686080be88d252c8192a64/quacklab-1.5.0-cp313-cp313-manylinux_2_39_x86_64.whl", hash = "sha256:cc111c3aa62f98419266833ea642a0f7e2441569448467912e983dab48364df7", size = 22259414, upload-time = "2026-06-13T13:12:23.205Z" },
+    { url = "https://files.pythonhosted.org/packages/27/39/711d997eb05fd0f65af84bbfe95f2a1c9d6c2f965d5951bdfeaac0999e44/quacklab-1.5.0-cp314-cp314-macosx_26_0_arm64.whl", hash = "sha256:e751db219f03d3661dd5c81c44f79d343e2ac19d718bdad6dc225ed42d6926be", size = 16686640, upload-time = "2026-06-12T19:04:43.339Z" },
+    { url = "https://files.pythonhosted.org/packages/91/95/707ed248ab083927f9fb04cb144df2f42d44857eebaf1797695400e833af/quacklab-1.5.0-cp314-cp314-manylinux_2_39_x86_64.whl", hash = "sha256:964fc63b8ad47a6c01c072c9ca58df1744423f988b73d0f3c976aa5ee672b642", size = 22261708, upload-time = "2026-06-13T13:12:14.765Z" },
 ]
 
 [[package]]
