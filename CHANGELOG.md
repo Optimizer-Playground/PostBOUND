@@ -12,13 +12,15 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-# Version 0.21.2
+# Version 0.21.3
 
 ## 🐣 New features
 
 - Table references can now keep track of their catalog.
 - Added two new utilities for created QAL objects. `as_func_expr()` and `as_math_expr()`.
 - The `read_df` and `write_df` utilities now work for SQLite databases.
+- `write_df` now allows to append to existing files. Support is currently limited
+  to CSV files, but we plan to expand this to other formats in the future.
 
 ## 🏥 Fixes
 

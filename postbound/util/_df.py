@@ -38,8 +38,7 @@ def read_df(path: Path | str, **kwargs) -> pd.DataFrame:
 
             if "table" not in kwargs and "relation" not in kwargs:
                 raise ValueError(
-                    "For SQLite databases, you must specify the table name "
-                    "using the 'table' or 'relation' argument."
+                    "For SQLite databases, you must specify the table name using the 'table' or 'relation' argument."
                 )
             tab = kwargs.pop("table", None) or kwargs.pop("relation", None)
             with sqlite3.connect(path) as conn:
@@ -49,18 +48,30 @@ def read_df(path: Path | str, **kwargs) -> pd.DataFrame:
 
 
 def write_df(
-    df: pd.DataFrame, path: Path | str, *, index: bool = False, **kwargs
+    df: pd.DataFrame,
+    path: Path | str,
+    *,
+    index: bool = False,
+    append: bool = False,
+    **kwargs,
 ) -> None:
     """Writes a Pandas `DataFrame` to a file, inferring the file format from the file extension.
 
-    In addition to the automatic dispatch based on the file type, this function performs the following preprocessing steps:
+    In addition to the automatic dispatch based on the file type, this function performs the following preprocessing
+    steps:
 
     1. It ensures that the parent directory of the target file exists, creating it if necessary.
     2. It transforms all complex objects in the data frame into their JSON representation
 
     All additional arguments are passed directly to the respective Pandas write function.
+
+    Please note that append-export is currently only supported for CSV files. We are working on adding support for other
+    file formats in the future.
     """
     path = Path(path)
+    if append and path.suffix != ".csv":
+        raise ValueError("Appending is currently only supported for CSV files.")
+
     path.parent.mkdir(parents=True, exist_ok=True)
 
     for col in df.columns:
@@ -72,6 +83,8 @@ def write_df(
 
     match path.suffix.lower():
         case ".csv":
+            if append and path.exists():
+                df.to_csv(path, index=index, mode="a", **kwargs)
             df.to_csv(path, index=index, **kwargs)
         case ".parquet":
             df.to_parquet(path, **kwargs)
