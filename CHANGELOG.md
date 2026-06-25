@@ -17,7 +17,9 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 ## 🐣 New features
 
 - Table references can now keep track of their catalog.
+- Database schemas now have a utility `is_string_column()` function
 - Added two new utilities for created QAL objects. `as_func_expr()` and `as_math_expr()`.
+  As a consequence, `as_expression()` can no longer create function expressions.
 - The `read_df` and `write_df` utilities now work for SQLite databases.
 - `write_df` now allows to append to existing files. Support is currently limited
   to CSV files, but we plan to expand this to other formats in the future.

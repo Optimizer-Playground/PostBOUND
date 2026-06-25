@@ -80,9 +80,7 @@ class Cursor(Protocol):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def execute(
-        self, operation: str, parameters: Optional[dict | Sequence] = None
-    ) -> Optional[Cursor]:
+    def execute(self, operation: str, parameters: Optional[dict | Sequence] = None) -> Optional[Cursor]:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -169,9 +167,7 @@ class PrewarmingSupport(Protocol):
 class TimeoutSupport(Protocol):
     """Marks database systems that support executing queries with a timeout."""
 
-    def execute_with_timeout(
-        self, query: SqlQuery | str, *, timeout: float = 60.0
-    ) -> Optional[ResultSet]:
+    def execute_with_timeout(self, query: SqlQuery | str, *, timeout: float = 60.0) -> Optional[ResultSet]:
         """Executes a query with a specific timeout.
 
         For query execution, we use the following rules in contrast to `Database.execute_query`:
@@ -202,9 +198,7 @@ class TimeoutSupport(Protocol):
 class StopwatchSupport(Protocol):
     """Marks the database systems that support measurement of query execution times."""
 
-    def time_query(
-        self, query: SqlQuery | str, *, timeout: Optional[float] = None
-    ) -> float:
+    def time_query(self, query: SqlQuery | str, *, timeout: Optional[float] = None) -> float:
         """Determines the execution time of a query.
 
         The execution time is measured from the moment the query is passed to the internal cursor (i.e. including sending the
@@ -278,9 +272,7 @@ def simplify_result_set(result_set: ResultSet | None) -> Any:
 
     result_structure = result_set[0]  # what do the result tuples look like?
     if len(result_structure) == 1:  # do we have just one column?
-        result_set = [
-            row[0] for row in result_set
-        ]  # if it is just one column, unwrap it
+        result_set = [row[0] for row in result_set]  # if it is just one column, unwrap it
 
     if len(result_set) == 1:  # if it is just one row, unwrap it
         return result_set[0]
@@ -499,9 +491,7 @@ class Database(abc.ABC):
         Calling this method is equivalent to calling ``.optimizer().query_plan()`` on the query, but it also allows to
         directly pass hints for the plan generation. These are passed as-is to the hinting backend.
         """
-        needs_hinting = any(
-            hint is not None for hint in [plan, join_order, physical_ops, plan_params]
-        )
+        needs_hinting = any(hint is not None for hint in [plan, join_order, physical_ops, plan_params])
         if needs_hinting:
             query = self.hinting().generate_hints(
                 query,
@@ -697,10 +687,7 @@ class Database(abc.ABC):
         return hash(self._query_cache_name())
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self._query_cache_name() == other._query_cache_name()
-        )
+        return isinstance(other, type(self)) and self._query_cache_name() == other._query_cache_name()
 
     def __repr__(self) -> str:
         return str(self)
@@ -848,9 +835,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         table = table if isinstance(table, TableReference) else TableReference(table)
         if table.virtual:
             raise VirtualTableError(table)
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT column_name
             FROM information_schema.columns
@@ -952,9 +937,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                 return candidate
 
         if expect_match:
-            raise ValueError(
-                f"Column '{column}' not found in any of the candidate tables: {candidate_tables}"
-            )
+            raise ValueError(f"Column '{column}' not found in any of the candidate tables: {candidate_tables}")
         return None
 
     def is_primary_key(self, column: ColumnReference) -> bool:
@@ -985,9 +968,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT ccu.column_name
             FROM information_schema.table_constraints tc
@@ -1014,9 +995,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
 
         return result_set is not None
 
-    def primary_key_column(
-        self, table: TableReference | str
-    ) -> Optional[BoundColumnReference]:
+    def primary_key_column(self, table: TableReference | str) -> Optional[BoundColumnReference]:
         """Determines the primary key column of a specific table.
 
         Parameters
@@ -1035,9 +1014,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         *information_schema.table_constraints* and *information_schema.constraint_column_usage* views.
         """
         table = table if isinstance(table, TableReference) else TableReference(table)
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT ccu.column_name
             FROM information_schema.table_constraints tc
@@ -1064,9 +1041,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if not result_set:
             return None
         elif len(result_set) > 1:
-            raise ValueError(
-                f"Table {table} has multiple primary key columns: {result_set}"
-            )
+            raise ValueError(f"Table {table} has multiple primary key columns: {result_set}")
         col = result_set[0][0]
         return BoundColumnReference(col, table)
 
@@ -1106,9 +1081,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
 
         # The query template is much more complicated here, due to the different semantics of the constraint_column_usage
         # view. For UNIQUE constraints, the column is the column that is constrained. However, for foreign keys, the column
@@ -1188,9 +1161,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = f"""
             SELECT ccu.table_schema, ccu.table_name, ccu.column_name
             FROM information_schema.table_constraints tc
@@ -1220,10 +1191,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         result_set = cur.fetchall()
         assert result_set is not None
 
-        return {
-            BoundColumnReference(row[1], TableReference(row[0], schema=table.schema))
-            for row in result_set
-        }
+        return {BoundColumnReference(row[1], TableReference(row[0], schema=table.schema)) for row in result_set}
 
     def has_index(self, column: ColumnReference) -> bool:
         """Checks, whether there is any index structure available on a column
@@ -1285,9 +1253,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
 
         # The query template is much more complicated here, due to the different semantics of the constraint_column_usage
         # view. For UNIQUE constraints, the column is the column that is constrained. However, for foreign keys, the column
@@ -1369,9 +1335,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT data_type
             FROM information_schema.columns
@@ -1391,6 +1355,25 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         assert result_set
 
         return result_set[0]
+
+    def is_string_column(self, column: ColumnReference) -> bool:
+        """Checks, whether a specific column is of a string type."""
+        dtype = self.datatype(column).lower()
+        return dtype in {
+            "char",
+            "char varying",
+            "character",
+            "character varying",
+            "longtext",
+            "mediumtext",
+            "nchar",
+            "nchar2",
+            "nvarchar",
+            "nvarchar2",
+            "text",
+            "tinytext",
+            "varchar",
+        }
 
     def is_nullable(self, column: ColumnReference) -> bool:
         """Checks, whether a specific column may contain NULL values.
@@ -1419,9 +1402,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
-        schema_placeholder = (
-            self._prep_placeholder if table.schema else "current_schema()"
-        )
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT is_nullable
             FROM information_schema.columns
@@ -1553,12 +1534,8 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
 
                 schema_graph = self.as_graph()
                 col_infos = [self[col] for col in self.columns(key)]
-                outgoing_fks = set_union(
-                    edge[2] for edge in schema_graph.out_edges(key, data="foreign_keys")
-                )
-                incoming_fks = set_union(
-                    edge[2] for edge in schema_graph.in_edges(key, data="foreign_keys")
-                )
+                outgoing_fks = set_union(edge[2] for edge in schema_graph.out_edges(key, data="foreign_keys"))
+                incoming_fks = set_union(edge[2] for edge in schema_graph.in_edges(key, data="foreign_keys"))
                 return TableInfo(
                     table=key,
                     columns=col_infos,
@@ -1672,16 +1649,12 @@ class MostCommonValues[T]:
     def frequency_of(self, value: T, *, bound_missing: Literal[True]) -> int: ...
 
     @overload
-    def frequency_of(
-        self, value: T, *, bound_missing: Literal[False]
-    ) -> Optional[int]: ...
+    def frequency_of(self, value: T, *, bound_missing: Literal[False]) -> Optional[int]: ...
 
     @overload
     def frequency_of(self, value: T, *, default: int) -> int: ...
 
-    def frequency_of(
-        self, value: T, *, default: int | None = None, bound_missing: bool = False
-    ) -> Optional[int]:
+    def frequency_of(self, value: T, *, default: int | None = None, bound_missing: bool = False) -> Optional[int]:
         """Load the frequency of a specific value.
 
         Parameters
@@ -1963,9 +1936,7 @@ class Histogram[T: SupportsRichComparison[T]]:
         return str(self)
 
     def __str__(self) -> str:
-        buckets = ", ".join(
-            f"{bound} ({freq})" for bound, freq in zip(self._bounds, self._frequencies)
-        )
+        buckets = ", ".join(f"{bound} ({freq})" for bound, freq in zip(self._bounds, self._frequencies))
         return f"Histogram(buckets=[{buckets}], lower={self._lower})"
 
 
@@ -2048,19 +2019,13 @@ class DatabaseStatistics(abc.ABC):
     ) -> int: ...
 
     @overload
-    def total_rows(
-        self, table: TableReference, *, emulated: Literal[False, None]
-    ) -> Optional[int]: ...
+    def total_rows(self, table: TableReference, *, emulated: Literal[False, None]) -> Optional[int]: ...
 
     @overload
-    def total_rows(
-        self, table: TableReference, *, emulated: Optional[bool]
-    ) -> Optional[bool]: ...
+    def total_rows(self, table: TableReference, *, emulated: Optional[bool]) -> Optional[bool]: ...
 
     @overload
-    def total_rows(
-        self, table: TableReference, *, cache_enabled: Optional[bool]
-    ) -> Optional[int]: ...
+    def total_rows(self, table: TableReference, *, cache_enabled: Optional[bool]) -> Optional[int]: ...
 
     @overload
     def total_rows(
@@ -2125,9 +2090,7 @@ class DatabaseStatistics(abc.ABC):
         if table.virtual:
             raise VirtualTableError(table)
         if emulated or (emulated is None and self.emulated):
-            return self._calculate_total_rows(
-                table, cache_enabled=self._determine_caching_behavior(cache_enabled)
-            )
+            return self._calculate_total_rows(table, cache_enabled=self._determine_caching_behavior(cache_enabled))
         else:
             return self._retrieve_total_rows_from_stats(table)
 
@@ -2174,9 +2137,7 @@ class DatabaseStatistics(abc.ABC):
     ) -> Optional[int]: ...
 
     @overload
-    def num_distinct(
-        self, column: ColumnReference, *, cache_enabled: Optional[bool]
-    ) -> Optional[int]: ...
+    def num_distinct(self, column: ColumnReference, *, cache_enabled: Optional[bool]) -> Optional[int]: ...
 
     @overload
     def num_distinct(
@@ -2255,24 +2216,16 @@ class DatabaseStatistics(abc.ABC):
     def min_max(self, column: ColumnReference) -> Optional[tuple[Any, Any]]: ...
 
     @overload
-    def min_max(
-        self, column: ColumnReference, *, emulated: Literal[True]
-    ) -> tuple[Any, Any]: ...
+    def min_max(self, column: ColumnReference, *, emulated: Literal[True]) -> tuple[Any, Any]: ...
 
     @overload
-    def min_max(
-        self, column: ColumnReference, *, emulated: Literal[False, None]
-    ) -> Optional[tuple[Any, Any]]: ...
+    def min_max(self, column: ColumnReference, *, emulated: Literal[False, None]) -> Optional[tuple[Any, Any]]: ...
 
     @overload
-    def min_max(
-        self, column: ColumnReference, *, emulated: Optional[bool]
-    ) -> Optional[tuple[Any, Any]]: ...
+    def min_max(self, column: ColumnReference, *, emulated: Optional[bool]) -> Optional[tuple[Any, Any]]: ...
 
     @overload
-    def min_max(
-        self, column: ColumnReference, *, cache_enabled: Optional[bool]
-    ) -> Optional[tuple[Any, Any]]: ...
+    def min_max(self, column: ColumnReference, *, cache_enabled: Optional[bool]) -> Optional[tuple[Any, Any]]: ...
 
     @overload
     def min_max(
@@ -2340,9 +2293,7 @@ class DatabaseStatistics(abc.ABC):
         elif column.table.virtual:
             raise VirtualTableError(column.table)
         if emulated or (emulated is None and self.emulated):
-            return self._calculate_min_max_values(
-                column, cache_enabled=self._determine_caching_behavior(cache_enabled)
-            )
+            return self._calculate_min_max_values(column, cache_enabled=self._determine_caching_behavior(cache_enabled))
         else:
             return self._retrieve_min_max_values_from_stats(column)
 
@@ -2403,34 +2354,22 @@ class DatabaseStatistics(abc.ABC):
     def histogram(self, column: ColumnReference) -> Optional[Histogram]: ...
 
     @overload
-    def histogram(
-        self, column: ColumnReference, *, n_bins: Optional[int]
-    ) -> Optional[Histogram]: ...
+    def histogram(self, column: ColumnReference, *, n_bins: Optional[int]) -> Optional[Histogram]: ...
 
     @overload
-    def histogram(
-        self, column: ColumnReference, *, interpolation: HistogramApproximation
-    ) -> Optional[Histogram]: ...
+    def histogram(self, column: ColumnReference, *, interpolation: HistogramApproximation) -> Optional[Histogram]: ...
 
     @overload
-    def histogram(
-        self, column: ColumnReference, *, emulated: Literal[True]
-    ) -> Histogram: ...
+    def histogram(self, column: ColumnReference, *, emulated: Literal[True]) -> Histogram: ...
 
     @overload
-    def histogram(
-        self, column: ColumnReference, *, emulated: Literal[False, None]
-    ) -> Optional[Histogram]: ...
+    def histogram(self, column: ColumnReference, *, emulated: Literal[False, None]) -> Optional[Histogram]: ...
 
     @overload
-    def histogram(
-        self, column: ColumnReference, *, emulated: Optional[bool]
-    ) -> Optional[Histogram]: ...
+    def histogram(self, column: ColumnReference, *, emulated: Optional[bool]) -> Optional[Histogram]: ...
 
     @overload
-    def histogram(
-        self, column: ColumnReference, *, cache_enabled: Optional[bool]
-    ) -> Optional[Histogram]: ...
+    def histogram(self, column: ColumnReference, *, cache_enabled: Optional[bool]) -> Optional[Histogram]: ...
 
     @overload
     def histogram(
@@ -2442,9 +2381,7 @@ class DatabaseStatistics(abc.ABC):
     ) -> Optional[Histogram]: ...
 
     @overload
-    def histogram(
-        self, column: ColumnReference, *, n_bins: Optional[int], emulated: Literal[True]
-    ) -> Histogram: ...
+    def histogram(self, column: ColumnReference, *, n_bins: Optional[int], emulated: Literal[True]) -> Histogram: ...
 
     @overload
     def histogram(
@@ -2687,23 +2624,15 @@ class DatabaseStatistics(abc.ABC):
         if use_emulation and not n_bins:
             raise ValueError("n_bins must be set for emulated histograms.")
         if not use_emulation and n_bins:
-            warnings.warn(
-                "n_bins is ignored if the histogram is loaded from stats", stacklevel=2
-            )
+            warnings.warn("n_bins is ignored if the histogram is loaded from stats", stacklevel=2)
 
         if use_emulation:
             assert n_bins is not None
-            return self._calculate_histogram(
-                column, n_bins, interpolation=interpolation, cache_enabled=cache_enabled
-            )
+            return self._calculate_histogram(column, n_bins, interpolation=interpolation, cache_enabled=cache_enabled)
         else:
-            return self._retrieve_histogram_from_stats(
-                column, interpolation=interpolation
-            )
+            return self._retrieve_histogram_from_stats(column, interpolation=interpolation)
 
-    def _calculate_total_rows(
-        self, table: TableReference, *, cache_enabled: Optional[bool] = None
-    ) -> int:
+    def _calculate_total_rows(self, table: TableReference, *, cache_enabled: Optional[bool] = None) -> int:
         """Retrieves the total number of rows of a table by issuing a *COUNT(\\*)* query against the live database.
 
         The table is assumed to be non-virtual.
@@ -2727,9 +2656,7 @@ class DatabaseStatistics(abc.ABC):
             cache_enabled=self._determine_caching_behavior(cache_enabled),
         )
 
-    def _calculate_distinct_values(
-        self, column: BoundColumnReference, *, cache_enabled: Optional[bool] = None
-    ) -> int:
+    def _calculate_distinct_values(self, column: BoundColumnReference, *, cache_enabled: Optional[bool] = None) -> int:
         """Retrieves the number of distinct column values by issuing a *COUNT(\\*)* / *GROUP BY* query over that
         column against the live database.
 
@@ -2748,9 +2675,7 @@ class DatabaseStatistics(abc.ABC):
         int
             The number of distinct values in the column
         """
-        query_template = "SELECT COUNT(DISTINCT {col}) FROM {tab}".format(
-            col=column.name, tab=column.table.full_name
-        )
+        query_template = "SELECT COUNT(DISTINCT {col}) FROM {tab}".format(col=column.name, tab=column.table.full_name)
         return self._db.execute_query(
             query_template,
             cache_enabled=self._determine_caching_behavior(cache_enabled),
@@ -2777,9 +2702,7 @@ class DatabaseStatistics(abc.ABC):
         tuple[Any, Any]
             A tuple of *(min, max)*
         """
-        query_template = "SELECT MIN({col}), MAX({col}) FROM {tab}".format(
-            col=column.name, tab=column.table.full_name
-        )
+        query_template = "SELECT MIN({col}), MAX({col}) FROM {tab}".format(col=column.name, tab=column.table.full_name)
         return self._db.execute_query(
             query_template,
             cache_enabled=self._determine_caching_behavior(cache_enabled),
@@ -2822,9 +2745,7 @@ class DatabaseStatistics(abc.ABC):
                 SELECT {col}, COUNT(*) AS n
                 FROM {tab}
                 GROUP BY {col}
-                ORDER BY n DESC, {col}""".format(
-                col=column.name, tab=column.table.full_name
-            )
+                ORDER BY n DESC, {col}""".format(col=column.name, tab=column.table.full_name)
         else:
             query_template = textwrap.dedent(
                 """
@@ -2866,9 +2787,7 @@ class DatabaseStatistics(abc.ABC):
         )
         assert result_set
 
-        lo, bounds, buckets = _infer_histogram_bounds(
-            result_set, n_bins=n_bins, n_rows=n_rows
-        )
+        lo, bounds, buckets = _infer_histogram_bounds(result_set, n_bins=n_bins, n_rows=n_rows)
         return Histogram(
             bounds,
             buckets,
@@ -2898,9 +2817,7 @@ class DatabaseStatistics(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _retrieve_distinct_values_from_stats(
-        self, column: BoundColumnReference
-    ) -> Optional[int]:
+    def _retrieve_distinct_values_from_stats(self, column: BoundColumnReference) -> Optional[int]:
         """Queries the DBMS-internal metadata for the number of distinct values of the column.
 
         The column is assumed to be bound to a (non-virtual) table.
@@ -2921,9 +2838,7 @@ class DatabaseStatistics(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _retrieve_min_max_values_from_stats(
-        self, column: BoundColumnReference
-    ) -> Optional[tuple[Any, Any]]:
+    def _retrieve_min_max_values_from_stats(self, column: BoundColumnReference) -> Optional[tuple[Any, Any]]:
         """Queries the DBMS-internal metadata for the minimum / maximum value in a column.
 
         The column is assumed to be bound to a (non-virtual) table.
@@ -2975,9 +2890,7 @@ class DatabaseStatistics(abc.ABC):
     ) -> Optional[Histogram]:
         raise NotImplementedError
 
-    def _determine_caching_behavior(
-        self, local_cache_enabled: Optional[bool]
-    ) -> Optional[bool]:
+    def _determine_caching_behavior(self, local_cache_enabled: Optional[bool]) -> Optional[bool]:
         """Utility to quickly figure out which caching behavior to use.
 
         This method is intended to be called by the top-level methods that provide statistics and enable a selective
@@ -2993,9 +2906,7 @@ class DatabaseStatistics(abc.ABC):
         Optional[bool]
             Whether caching should be enabled or the determined by the actual database interface.
         """
-        return (
-            self.cache_enabled if local_cache_enabled is None else local_cache_enabled
-        )
+        return self.cache_enabled if local_cache_enabled is None else local_cache_enabled
 
     def __repr__(self) -> str:
         return str(self)
@@ -3289,9 +3200,7 @@ class DatabasePool:
             If there are multiple database instances registered in the pool
         """
         if self.n_databases() != 1:
-            raise ValueError(
-                f"Expected exactly one database in the pool, but found {self.n_databases()}."
-            )
+            raise ValueError(f"Expected exactly one database in the pool, but found {self.n_databases()}.")
         return util.dicts.value(self._pool)
 
     def any_database(self) -> Database:
@@ -3393,9 +3302,7 @@ class UnsupportedDatabaseFeatureError(RuntimeError):
     """
 
     def __init__(self, database: Database, feature: str | PhysicalOperator) -> None:
-        super().__init__(
-            f"Database {database.system_name} does not support feature {feature}"
-        )
+        super().__init__(f"Database {database.system_name} does not support feature {feature}")
         self.database = database
         self.feature = feature
 
