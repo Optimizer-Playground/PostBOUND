@@ -96,11 +96,7 @@ class DuckDBInterface(Database):
         raw: bool = False,
         timeout: Optional[float] = None,
     ) -> Any:
-        if (
-            isinstance(query, SqlQuery)
-            and query.hints
-            and query.hints.preparatory_statements
-        ):
+        if isinstance(query, SqlQuery) and query.hints and query.hints.preparatory_statements:
             for preparatory_statement in query.hints.preparatory_statements:
                 self._cur.execute(preparatory_statement)
             query = transform.drop_hints(query, preparatory_statements_only=True)
@@ -124,18 +120,14 @@ class DuckDBInterface(Database):
             end_time = time.perf_counter_ns()
 
             raw_result = self._cur.fetchall()
-            self._last_query_runtime = (
-                end_time - start_time
-            ) / 10**9  # convert to seconds
+            self._last_query_runtime = (end_time - start_time) / 10**9  # convert to seconds
 
         if cache_enabled:
             self._query_cache[query] = raw_result
 
         return raw_result if raw else simplify_result_set(raw_result)
 
-    def execute_with_timeout(
-        self, query: SqlQuery | str, *, timeout: float = 60.0
-    ) -> Optional[ResultSet]:
+    def execute_with_timeout(self, query: SqlQuery | str, *, timeout: float = 60.0) -> Optional[ResultSet]:
         if isinstance(query, SqlQuery):
             query = self._hinting.format_query(query)
 
@@ -237,23 +229,33 @@ class DuckDBSchema(DatabaseSchema):
         super().__init__(db, prep_placeholder="?")
         self._tables: set[TableReference] = set()
 
-    def tables(self, *, include_system_tables: bool = False) -> set[TableReference]:
+    def tables(
+        self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
+    ) -> set[TableReference]:
         if self._tables:
             return self._tables
 
-        cur = self._db.cursor()
-        cur.execute(
-            """
+        catalog_placeholder = "?" if catalog else "current_database()"
+        schema_placeholder = "?" if schema else "current_schema()"
+        query_template = f"""
             SELECT table_name
             FROM duckdb_tables()
-            WHERE database_name = current_database()
-                AND schema_name = current_schema();
-            """
-        )
+            WHERE lower(database_name) = lower({catalog_placeholder})
+                AND lower(schema_name) = lower({schema_placeholder})
+        """
+
+        params: list[str] = []
+        if catalog:
+            params.append(catalog)
+        if schema:
+            params.append(schema)
+
+        cur = self._db.cursor()
+        cur.execute(query_template, parameters=params)
         result_set = cur.fetchall()
         assert result_set is not None
 
-        tables = {TableReference(row[0]) for row in result_set}
+        tables = {TableReference(row[0], catalog=catalog, schema=schema) for row in result_set}
         self._tables = tables
         return self._tables
 
@@ -261,18 +263,20 @@ class DuckDBSchema(DatabaseSchema):
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
 
+        catalog_placeholder = "?" if column.table.catalog else "current_database()"
         schema_placeholder = "?" if column.table.schema else "current_schema()"
-
         query_template = textwrap.dedent(f"""
             SELECT ddbi.index_name
             FROM duckdb_indexes() ddbi
-            WHERE ddbi.table_name = ?
-                AND ltrim(rtrim(ddbi.expressions, ']'), '[') = ?
-                AND ddbi.database_name = current_database()
-                AND ddbi.schema_name = {schema_placeholder}
+            WHERE lower(ddbi.table_name) = lower(?)
+                AND lower(ltrim(rtrim(ddbi.expressions, ']'), '[')) = lower(?)
+                AND lower(ddbi.database_name) = lower({catalog_placeholder})
+                AND lower(ddbi.schema_name) = lower({schema_placeholder})
             """)
 
         params = [column.table.full_name, column.name]
+        if column.table.catalog:
+            params.append(column.table.catalog)
         if column.table.schema:
             params.append(column.table.schema)
 
@@ -286,6 +290,7 @@ class DuckDBSchema(DatabaseSchema):
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
 
+        catalog_placeholder = "?" if column.table.catalog else "current_database()"
         schema_placeholder = "?" if column.table.schema else "current_schema()"
 
         # The query template is much more complicated here, due to the different semantics of the constraint_column_usage
@@ -297,10 +302,10 @@ class DuckDBSchema(DatabaseSchema):
         query_template = textwrap.dedent(f"""
             SELECT ddbi.index_name
             FROM duckdb_indexes() ddbi
-            WHERE ddbi.table_name = ?
-                AND ltrim(rtrim(ddbi.expressions, ']'), '[') = ?
-                AND ddbi.database_name = current_database()
-                AND ddbi.schema_name = {schema_placeholder}
+            WHERE lower(ddbi.table_name) = lower(?)
+                AND lower(ltrim(rtrim(ddbi.expressions, ']'), '[')) = lower(?)
+                AND lower(ddbi.database_name) = lower({catalog_placeholder})
+                AND lower(ddbi.schema_name) = lower({schema_placeholder})
             UNION
             SELECT tc.constraint_name
             FROM information_schema.table_constraints tc
@@ -310,21 +315,21 @@ class DuckDBSchema(DatabaseSchema):
                     AND tc.table_schema = ccu.table_schema
                     AND tc.table_catalog = ccu.table_catalog
             WHERE tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
-                AND ccu.table_name = ?
-                AND ccu.column_name = ?
-                AND ccu.table_catalog = current_database()
-                AND ccu.table_schema = {schema_placeholder}
+                AND lower(ccu.table_name) = lower(?)
+                AND lower(ccu.column_name) = lower(?)
+                AND lower(ccu.table_catalog) = lower({catalog_placeholder})
+                AND lower(ccu.table_schema) = lower({schema_placeholder})
             """)
 
         # Due to the UNION query, we need to repeat the placeholders. While the implementation is definitely not elegant,
         # this solution is arguably better than relying on named parameters which might or might not be supported by the
         # target database.
         params = [column.table.full_name, column.name]
+        if column.table.catalog:
+            params.append(column.table.catalog)
         if column.table.schema:
             params.append(column.table.schema)
-        params.extend([column.table.full_name, column.name])
-        if column.table.schema:
-            params.append(column.table.schema)
+        params *= 2  # repeat the parameters for the second part of the query
 
         cur = self._db.cursor()
         cur.execute(query_template, params)
@@ -337,20 +342,23 @@ class DuckDBSchema(DatabaseSchema):
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
 
+        catalog_placeholder = "?" if column.table.catalog else "current_database()"
         schema_placeholder = "?" if column.table.schema else "current_schema()"
         query_template = f"""
             SELECT referenced_table, referenced_column_names
             FROM duckdb_constraints
-            WHERE database_name = current_database()
-                AND schema_name = {schema_placeholder}
-                AND table_name = ?
-                AND constraint_column_names = array_value(?)
+            WHERE lower(table_name) = lower(?)
+                AND lower(constraint_column_names) = lower(array_value(?))
+                AND lower(database_name) = lower({catalog_placeholder})
+                AND lower(schema_name) = lower({schema_placeholder})
                 AND constraint_type = 'FOREIGN KEY';
         """
 
         params = [column.table.full_name, column.name]
+        if column.table.catalog:
+            params.append(column.table.catalog)
         if column.table.schema:
-            params = [column.table.schema] + params
+            params.append(column.table.schema)
 
         cur = self._db.cursor()
         cur.execute(query_template, params)
@@ -397,17 +405,20 @@ class DuckDBStatistics(DatabaseStatistics):
         )
 
     def _retrieve_total_rows_from_stats(self, table: TableReference) -> Optional[int]:
+        catalog_placeholder = "?" if table.catalog else "current_database()"
         schema_placeholder = "?" if table.schema else "current_schema()"
 
         query_template = textwrap.dedent(f"""
             SELECT estimated_size
             FROM duckdb_tables()
-            WHERE table_name = ?
-                AND database_name = current_database()
-                AND schema_name = {schema_placeholder}
+            WHERE lower(table_name) = lower(?)
+                AND lower(database_name) = lower({catalog_placeholder})
+                AND lower(schema_name) = lower({schema_placeholder})
             """)
 
         params = [table.full_name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
 
@@ -420,18 +431,12 @@ class DuckDBStatistics(DatabaseStatistics):
 
         return result_set[0] if result_set[0] is not None else None
 
-    def _retrieve_distinct_values_from_stats(
-        self, column: BoundColumnReference
-    ) -> Optional[int]:
+    def _retrieve_distinct_values_from_stats(self, column: BoundColumnReference) -> Optional[int]:
         if self.enable_emulation_fallback:
             return self._calculate_distinct_values(column)
-        raise UnsupportedDatabaseFeatureError(
-            self._db, "distinct value count statistics."
-        )
+        raise UnsupportedDatabaseFeatureError(self._db, "distinct value count statistics.")
 
-    def _retrieve_min_max_values_from_stats(
-        self, column: BoundColumnReference
-    ) -> Optional[tuple[Any, Any]]:
+    def _retrieve_min_max_values_from_stats(self, column: BoundColumnReference) -> Optional[tuple[Any, Any]]:
         if self.enable_emulation_fallback:
             return self._calculate_min_max_values(column)
         raise UnsupportedDatabaseFeatureError(self._db, "min/max value statistics.")
@@ -447,15 +452,11 @@ class DuckDBStatistics(DatabaseStatistics):
         self, column: BoundColumnReference, *, interpolation: HistogramApproximation
     ) -> Optional[Histogram]:
         if self.enable_emulation_fallback:
-            return self._calculate_histogram(
-                column, n_bins=100, interpolation=interpolation
-            )
+            return self._calculate_histogram(column, n_bins=100, interpolation=interpolation)
         raise UnsupportedDatabaseFeatureError(self._db, "histogram statistics.")
 
 
-def _bind_node_to_table(
-    scan_node: dict, *, query: SqlQuery
-) -> Optional[TableReference]:
+def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> Optional[TableReference]:
     tables = query.tables()
     relname = scan_node.get("extra_info", {}).get("Table", "")
     if not relname:
@@ -472,25 +473,17 @@ def _bind_node_to_table(
     # to avoid parsing the filter predicates backwards, we use a simple trigram-based heuristic here:
     # for each base table we extract the filter predicates from the query and compare them with the filters
     # that are applied in the scan node. Than, we select the table whith the highest overlap.
-    query_filters = {
-        candidate: str(query.filters_for(candidate)) for candidate in candidate_tables
-    }
-    query_filters = {
-        candidate: "".join(pred.split()) for candidate, pred in query_filters.items()
-    }
+    query_filters = {candidate: str(query.filters_for(candidate)) for candidate in candidate_tables}
+    query_filters = {candidate: "".join(pred.split()) for candidate, pred in query_filters.items()}
 
     plan_filter: str = scan_node.get("extra_info", {}).get("Filters", "")
     plan_filter = "".join(plan_filter.split())
 
     node_trigram = set(stats.trigrams(plan_filter))
-    filter_trigrams = {
-        candidate: set(stats.trigrams(pred))
-        for candidate, pred in query_filters.items()
-    }
+    filter_trigrams = {candidate: set(stats.trigrams(pred)) for candidate, pred in query_filters.items()}
 
     scores = {
-        candidate: stats.jaccard(node_trigram, pred_trigram)
-        for candidate, pred_trigram in filter_trigrams.items()
+        candidate: stats.jaccard(node_trigram, pred_trigram) for candidate, pred_trigram in filter_trigrams.items()
     }
     score_ranking = sorted(scores.values(), reverse=True)
     if 0.99 * score_ranking[0] <= score_ranking[1]:
@@ -503,9 +496,7 @@ def _bind_node_to_table(
     return best_match
 
 
-def parse_duckdb_plan(
-    raw_plan: dict | str, *, query: Optional[SqlQuery] = None
-) -> QueryPlan:
+def parse_duckdb_plan(raw_plan: dict | str, *, query: Optional[SqlQuery] = None) -> QueryPlan:
     """Parses a DuckDB query plan from its JSON representation.
 
     The query can be supplied to help with binding scan nodes to their corresponding tables (see Notes).
@@ -522,15 +513,11 @@ def parse_duckdb_plan(
 
     node_type = raw_plan.get("name") or raw_plan.get("operator_name")
     if not node_type:
-        assert len(raw_plan["children"]) == 1, (
-            "Expected a single child for the root operator"
-        )
+        assert len(raw_plan["children"]) == 1, "Expected a single child for the root operator"
         return parse_duckdb_plan(raw_plan["children"][0], query=query)
 
     if node_type == "EXPLAIN" or node_type == "EXPLAIN_ANALYZE":
-        assert len(raw_plan["children"]) == 1, (
-            "Expected a single child for EXPLAIN operator"
-        )
+        assert len(raw_plan["children"]) == 1, "Expected a single child for EXPLAIN operator"
         return parse_duckdb_plan(raw_plan["children"][0], query=query)
 
     extras: dict = raw_plan.get("extra_info", {})
@@ -552,9 +539,7 @@ def parse_duckdb_plan(
             pass
 
     if node_type in ScanOperator:
-        base_table = (
-            _bind_node_to_table(raw_plan, query=query) if query is not None else None
-        )
+        base_table = _bind_node_to_table(raw_plan, query=query) if query is not None else None
     else:
         base_table = None
 
@@ -563,9 +548,7 @@ def parse_duckdb_plan(
     )  # Estimated Cardinality is a string for some reason..
     card_act = raw_plan.get("operator_cardinality", math.nan)
 
-    children = [
-        parse_duckdb_plan(child, query=query) for child in raw_plan.get("children", [])
-    ]
+    children = [parse_duckdb_plan(child, query=query) for child in raw_plan.get("children", [])]
 
     own_runtime = raw_plan.get("operator_timing", math.nan)
     total_runtime = own_runtime + sum(child.execution_time for child in children)
@@ -600,27 +583,19 @@ class DuckDBOptimizer(OptimizerInterface):
 
         raw_explain = result_set[1]
         parsed = json.loads(raw_explain)
-        return parse_duckdb_plan(
-            parsed[0], query=query if isinstance(query, SqlQuery) else None
-        )
+        return parse_duckdb_plan(parsed[0], query=query if isinstance(query, SqlQuery) else None)
 
     @overload
     def analyze_plan(self, query: SqlQuery) -> QueryPlan: ...
 
     @overload
-    def analyze_plan(
-        self, query: SqlQuery, *, timeout: float
-    ) -> Optional[QueryPlan]: ...
+    def analyze_plan(self, query: SqlQuery, *, timeout: float) -> Optional[QueryPlan]: ...
 
-    def analyze_plan(
-        self, query: SqlQuery, *, timeout: Optional[float] = None
-    ) -> Optional[QueryPlan]:
+    def analyze_plan(self, query: SqlQuery, *, timeout: Optional[float] = None) -> Optional[QueryPlan]:
         query = transform.as_explain_analyze(query)
 
         try:
-            result_set = self._db.execute_query(
-                query, cache_enabled=False, raw=True, timeout=timeout
-            )[0]
+            result_set = self._db.execute_query(query, cache_enabled=False, raw=True, timeout=timeout)[0]
         except TimeoutError:
             return None
         assert len(result_set) == 2
@@ -717,12 +692,8 @@ class HintParts:
         HintParts
             A new hint parts object that contains the hints from both source objects
         """
-        merged_settings = self.settings + [
-            setting for setting in other.settings if setting not in self.settings
-        ]
-        merged_hints = (
-            self.hints + [""] + [hint for hint in other.hints if hint not in self.hints]
-        )
+        merged_settings = self.settings + [setting for setting in other.settings if setting not in self.settings]
+        merged_hints = self.hints + [""] + [hint for hint in other.hints if hint not in self.hints]
         return HintParts(merged_settings, merged_hints)
 
     def __bool__(self) -> bool:
@@ -743,21 +714,12 @@ class DuckDBHintService(HintService):
         plan_parameters: Optional[PlanParameterization] = None,
     ) -> SqlQuery:
         adapted_query = query
-        if adapted_query.limit_clause and not isinstance(
-            adapted_query.limit_clause, PostgresLimitClause
-        ):
-            adapted_query = transform.replace_clause(
-                adapted_query, PostgresLimitClause(adapted_query.limit_clause)
-            )
+        if adapted_query.limit_clause and not isinstance(adapted_query.limit_clause, PostgresLimitClause):
+            adapted_query = transform.replace_clause(adapted_query, PostgresLimitClause(adapted_query.limit_clause))
 
-        has_partial_hints = any(
-            param is not None
-            for param in (join_order, physical_operators, plan_parameters)
-        )
+        has_partial_hints = any(param is not None for param in (join_order, physical_operators, plan_parameters))
         if plan is not None and has_partial_hints:
-            raise ValueError(
-                "Can only hint an entire query plan, or individual parts, not both."
-            )
+            raise ValueError("Can only hint an entire query plan, or individual parts, not both.")
 
         if plan is not None:
             join_order = jointree_from_plan(plan)

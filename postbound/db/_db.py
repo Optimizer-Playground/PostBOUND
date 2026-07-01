@@ -776,11 +776,17 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         self._db = db
         self._prep_placeholder = prep_placeholder
 
-    def tables(self, *, include_system_tables: bool = False) -> set[TableReference]:
-        """Fetches all user-defined tables that are contained in the current database.
+    def tables(
+        self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
+    ) -> set[TableReference]:
+        """Fetches all tables in the database.
 
         Parameters
         ----------
+        catalog : str, optional
+            The catalog (i.e. database name) to search for tables. By default, the current catalog is used.
+        schema : str, optional
+            The schema to search for tables. By default, the current schema is used.
         include_system_tables : bool, optional
             Whether system tables should also be included. By default, only user-defined tables are returned.
 
@@ -793,17 +799,27 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         -----
         **Hint for implementors:** the default implementation of this method relies on the *information_schema.tables* view.
         """
+        catalog_placeholder = self._prep_placeholder if catalog else "current_database()"
+        schema_placeholder = self._prep_placeholder if schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT table_name
             FROM information_schema.tables
-            WHERE table_catalog = {self._prep_placeholder}
-                AND table_schema = current_schema()
+            WHERE lower(table_catalog) = lower({catalog_placeholder})
+                AND lower(table_schema) = lower({schema_placeholder})
             """)
+
+        params = []
+        if catalog:
+            params.append(catalog)
+        if schema:
+            params.append(schema)
+
         cur = self._db.cursor()
-        cur.execute(query_template, (self._db.database_name(),))
+        cur.execute(query_template, params)
         result_set = cur.fetchall()
         assert result_set is not None
-        return set(TableReference(row[0]) for row in result_set)
+
+        return {TableReference(row[0], catalog=catalog, schema=schema) for row in result_set}
 
     def columns(self, table: TableReference | str) -> Sequence[BoundColumnReference]:
         """Fetches all columns of the given table.
@@ -836,21 +852,27 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if table.virtual:
             raise VirtualTableError(table)
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         query_template = textwrap.dedent(f"""
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_name = {self._prep_placeholder}
-                AND table_catalog = current_database()
-                AND table_schema = {schema_placeholder}
+            WHERE lower(table_name) = lower({self._prep_placeholder})
+                AND lower(table_catalog) = lower({catalog_placeholder})
+                AND lower(table_schema) = lower({schema_placeholder})
             ORDER BY ordinal_position
             """)
+
         params = [table.full_name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
+
         cur = self._db.cursor()
         cur.execute(query_template, params)
         result_set = cur.fetchall()
         assert result_set is not None
+
         return [BoundColumnReference(row[0], table) for row in result_set]
 
     def is_view(self, table: TableReference | str) -> bool:
@@ -877,23 +899,31 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         """
         if isinstance(table, TableReference) and table.virtual:
             raise VirtualTableError(table)
-        table = table if isinstance(table, str) else table.full_name
-        db_name = self._db.database_name()
+        table = TableReference(table) if isinstance(table, str) else table
 
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
+        schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT table_type
             FROM information_schema.tables
-            WHERE table_catalog = {self._prep_placeholder}
-                AND table_name = {self._prep_placeholder}
-                AND table_catalog = current_database()
+            WHERE lower(table_name) = lower({self._prep_placeholder})
+                AND lower(table_catalog) = lower({catalog_placeholder})
+                AND lower(table_schema) = lower({schema_placeholder})
             """)
-        cur = self._db.cursor()
-        cur.execute(query_template, (db_name, table))
-        result_set = cur.fetchall()
 
+        params = [table.full_name]
+        if table.catalog:
+            params.append(table.catalog)
+        if table.schema:
+            params.append(table.schema)
+
+        cur = self._db.cursor()
+        cur.execute(query_template, params)
+        result_set = cur.fetchall()
         assert result_set is not None
+
         if not result_set:
-            raise ValueError(f"Table '{table}' not found in database '{db_name}'")
+            raise ValueError(f"Table '{table}' not found")
         table_type = result_set[0][0]
         return table_type == "VIEW"
 
@@ -968,6 +998,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT ccu.column_name
@@ -978,14 +1009,16 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                     AND tc.table_schema = ccu.table_schema
                     AND tc.table_name = ccu.table_name
                     AND tc.constraint_catalog = ccu.constraint_catalog
-            WHERE tc.table_name = {self._prep_placeholder}
-                AND ccu.column_name = {self._prep_placeholder}
+            WHERE lower(tc.table_name) = lower({self._prep_placeholder})
+                AND lower(ccu.column_name) = lower({self._prep_placeholder})
+                AND lower(tc.table_catalog) = lower({catalog_placeholder})
+                AND lower(tc.table_schema) = lower({schema_placeholder})
                 AND tc.constraint_type = 'PRIMARY KEY'
-                AND tc.table_catalog = current_database()
-                AND tc.table_schema = {schema_placeholder};
             """)
 
         params = [table.full_name, column.name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
 
@@ -1014,6 +1047,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         *information_schema.table_constraints* and *information_schema.constraint_column_usage* views.
         """
         table = table if isinstance(table, TableReference) else TableReference(table)
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT ccu.column_name
@@ -1024,13 +1058,15 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                     AND tc.table_schema = ccu.table_schema
                     AND tc.table_name = ccu.table_name
                     AND tc.constraint_catalog = ccu.constraint_catalog
-            WHERE tc.table_name = {self._prep_placeholder}
+            WHERE lower(tc.table_name) = lower({self._prep_placeholder})
+                AND lower(tc.table_catalog) = lower({catalog_placeholder})
+                AND lower(tc.table_schema) = lower({schema_placeholder})
                 AND tc.constraint_type = 'PRIMARY KEY'
-                AND tc.table_catalog = current_database()
-                AND tc.table_schema = {schema_placeholder};
             """)
 
         params = [table.full_name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
 
@@ -1081,6 +1117,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
 
         # The query template is much more complicated here, due to the different semantics of the constraint_column_usage
@@ -1095,11 +1132,11 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                     AND tc.table_schema = ccu.table_schema
                     AND tc.table_name = ccu.table_name
                     AND tc.constraint_catalog = ccu.constraint_catalog
-            WHERE tc.table_name = {self._prep_placeholder}
-                AND ccu.column_name = {self._prep_placeholder}
+            WHERE lower(tc.table_name) = lower({self._prep_placeholder})
+                AND lower(ccu.column_name) = lower({self._prep_placeholder})
+                AND lower(tc.table_catalog) = lower({catalog_placeholder})
+                AND lower(tc.table_schema) = lower({schema_placeholder})
                 AND tc.constraint_type = 'UNIQUE'
-                AND tc.table_catalog = current_database()
-                AND tc.table_schema = {schema_placeholder}
             UNION
             SELECT kcu.column_name
             FROM information_schema.table_constraints tc
@@ -1109,22 +1146,22 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                     AND tc.table_schema = kcu.table_schema
                     AND tc.table_name = kcu.table_name
                     AND tc.constraint_catalog = kcu.constraint_catalog
-            WHERE tc.table_name = {self._prep_placeholder}
-                AND kcu.column_name = {self._prep_placeholder}
+            WHERE lower(tc.table_name) = lower({self._prep_placeholder})
+                AND lower(kcu.column_name) = lower({self._prep_placeholder})
+                AND lower(tc.table_catalog) = lower({catalog_placeholder})
+                AND lower(tc.table_schema) = lower({schema_placeholder})
                 AND tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_catalog = current_database()
-                AND tc.table_schema = {schema_placeholder};
             """)
 
         # Due to the UNION query, we need to repeat the placeholders. While the implementation is definitely not elegant,
         # this solution is arguably better than relying on named parameters which might or might not be supported by the
         # target database.
         params = [table.full_name, column.name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
-        params.extend([table.full_name, column.name])
-        if table.schema:
-            params.append(table.schema)
+        params *= 2  # repeat the parameters for the second part of the query
 
         cur = self._db.cursor()
         cur.execute(query_template, params)
@@ -1161,6 +1198,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = f"""
             SELECT ccu.table_schema, ccu.table_name, ccu.column_name
@@ -1176,13 +1214,16 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                 ON tc.constraint_catalog = ccu.constraint_catalog
                     AND tc.constraint_schema = ccu.constraint_schema
                     AND tc.constraint_name = ccu.constraint_name
-            WHERE tc.table_catalog = current_database()
+            WHERE lower(tc.table_name) = lower({self._prep_placeholder})
+                AND lower(kcu.column_name) = lower({self._prep_placeholder})
+                AND lower(tc.table_catalog) = lower({catalog_placeholder})
+                AND lower(tc.table_schema) = lower({schema_placeholder})
                 AND tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_schema = {schema_placeholder}
-                AND tc.table_name = {self._prep_placeholder}
-                AND kcu.column_Name = {self._prep_placeholder};
             """
+
         params = [table.full_name, column.name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params = [table.schema] + params
 
@@ -1253,6 +1294,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
 
         # The query template is much more complicated here, due to the different semantics of the constraint_column_usage
@@ -1267,11 +1309,11 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                     AND tc.table_schema = ccu.table_schema
                     AND tc.table_name = ccu.table_name
                     AND tc.constraint_catalog = ccu.constraint_catalog
-            WHERE tc.table_name = {self._prep_placeholder}
-                AND ccu.column_name = {self._prep_placeholder}
+            WHERE lower(tc.table_name) = lower({self._prep_placeholder})
+                AND lower(ccu.column_name) = lower({self._prep_placeholder})
+                AND lower(tc.table_catalog) = lower({catalog_placeholder})
+                AND lower(tc.table_schema) = lower({schema_placeholder})
                 AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
-                AND tc.table_catalog = current_database()
-                AND tc.table_schema = {schema_placeholder}
             UNION
             SELECT tc.constraint_name
             FROM information_schema.table_constraints tc
@@ -1281,22 +1323,22 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
                     AND tc.table_schema = kcu.table_schema
                     AND tc.table_name = kcu.table_name
                     AND tc.constraint_catalog = kcu.constraint_catalog
-            WHERE tc.table_name = {self._prep_placeholder}
-                AND kcu.column_name = {self._prep_placeholder}
+            WHERE lower(tc.table_name) = lower({self._prep_placeholder})
+                AND lower(kcu.column_name) = lower({self._prep_placeholder})
+                AND lower(tc.table_catalog) = lower({catalog_placeholder})
+                AND lower(tc.table_schema) = lower({schema_placeholder})
                 AND tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_catalog = current_database()
-                AND tc.table_schema = {schema_placeholder};
             """)
 
         # Due to the UNION query, we need to repeat the placeholders. While the implementation is definitely not elegant,
         # this solution is arguably better than relying on named parameters which might or might not be supported by the
         # target database.
         params = [table.full_name, column.name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
-        params.extend([table.full_name, column.name])
-        if table.schema:
-            params.append(table.schema)
+        params *= 2  # repeat the parameters for the second part of the query
 
         cur = self._db.cursor()
         cur.execute(query_template, params)
@@ -1335,17 +1377,20 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT data_type
             FROM information_schema.columns
-            WHERE table_name = {self._prep_placeholder}
-                AND column_name = {self._prep_placeholder}
-                AND table_catalog = current_database()
-                AND table_schema = {schema_placeholder};
+            WHERE lower(table_name) = lower({self._prep_placeholder})
+                AND lower(column_name) = lower({self._prep_placeholder})
+                AND lower(table_catalog) = lower({catalog_placeholder})
+                AND lower(table_schema) = lower({schema_placeholder});
             """)
 
         params = [table.full_name, column.name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
 
@@ -1402,17 +1447,20 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         if (table := column.table) is None:
             raise UnboundColumnError(column)
 
+        catalog_placeholder = self._prep_placeholder if table.catalog else "current_database()"
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
         query_template = textwrap.dedent(f"""
             SELECT is_nullable
             FROM information_schema.columns
-            WHERE table_name = {self._prep_placeholder}
-                AND column_name = {self._prep_placeholder}
-                AND table_catalog = current_database()
-                AND table_schema = {schema_placeholder};
+            WHERE lower(table_name) = lower({self._prep_placeholder})
+                AND lower(column_name) = lower({self._prep_placeholder})
+                AND lower(table_catalog) = lower({catalog_placeholder})
+                AND lower(table_schema) = lower({schema_placeholder});
             """)
 
         params = [table.full_name, column.name]
+        if table.catalog:
+            params.append(table.catalog)
         if table.schema:
             params.append(table.schema)
 

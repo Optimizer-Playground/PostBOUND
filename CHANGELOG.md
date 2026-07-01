@@ -12,6 +12,19 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
+# Version 0.21.4
+
+## 🏥 Fixes
+
+- Fixed the database schema sometimes being case-sensitive. This caused weird interactions
+  with the pre-defined workloads, which are typically lower-case. The schema is
+  now always based on the lower-case representation of the table and column names,
+  oriented around the Postgres behavior.
+- Fixed the database schema not respecting the schema/catalog of a passed
+  table/column reference.
+
+---
+
 # Version 0.21.3
 
 ## 🐣 New features
