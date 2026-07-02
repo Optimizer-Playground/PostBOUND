@@ -1347,7 +1347,7 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
 
         return {row[0] for row in result_set}
 
-    def datatype(self, column: ColumnReference) -> str:
+    def datatype(self, column: ColumnReference, *, raw: bool = False) -> str:
         """Retrieves the (physical) data type of a column.
 
         The provided type can be a standardized SQL-type, but it can be a type specific to the concrete database
@@ -1357,11 +1357,14 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         ----------
         column : ColumnReference
             The colum to check
+        raw : bool, optional
+            If enabled, the type will be returned as-is. Otherwise, it will be lower-cased.
+            By default, lower-casing is enabled.
 
         Returns
         -------
         str
-            The datatype. Will never be empty.
+            The datatype. Will never be empty. The type will automatically be lower-cased unless `raw` is set.
 
         Raises
         ------
@@ -1399,7 +1402,8 @@ class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
         result_set = cur.fetchone()
         assert result_set
 
-        return result_set[0]
+        dtype: str = result_set[0]
+        return dtype if raw else dtype.lower()
 
     def is_string_column(self, column: ColumnReference) -> bool:
         """Checks, whether a specific column is of a string type."""

@@ -1432,7 +1432,7 @@ class PostgresSchemaInterface(DatabaseSchema):
 
         return {BoundColumnReference(row[1], TableReference(row[0])) for row in result_set}
 
-    def datatype(self, column: ColumnReference) -> str:
+    def datatype(self, column: ColumnReference, *, raw: bool = False) -> str:
         if not column.table:
             raise UnboundColumnError(column)
         if column.table.virtual:
@@ -1446,7 +1446,8 @@ class PostgresSchemaInterface(DatabaseSchema):
         result_set = self._db.cursor().fetchone()
         assert result_set
 
-        return result_set[0]
+        dtype: str = result_set[0]
+        return dtype if raw else dtype.lower()
 
     def is_nullable(self, column: ColumnReference) -> bool:
         if not column.table:
