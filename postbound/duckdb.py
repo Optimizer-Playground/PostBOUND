@@ -348,7 +348,7 @@ class DuckDBSchema(DatabaseSchema):
             SELECT referenced_table, referenced_column_names
             FROM duckdb_constraints
             WHERE lower(table_name) = lower(?)
-                AND lower(constraint_column_names) = lower(array_value(?))
+                AND apply(constraint_column_names, lambda c: lower(c)) = array_value(lower(?))
                 AND lower(database_name) = lower({catalog_placeholder})
                 AND lower(schema_name) = lower({schema_placeholder})
                 AND constraint_type = 'FOREIGN KEY';
