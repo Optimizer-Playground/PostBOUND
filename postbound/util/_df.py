@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -48,7 +49,7 @@ def read_df(path: Path | str, **kwargs) -> pd.DataFrame:
 
 
 def write_df(
-    df: pd.DataFrame,
+    df: pd.DataFrame | Sequence[dict] | dict,
     path: Path | str,
     *,
     index: bool = False,
@@ -71,14 +72,21 @@ def write_df(
     path = Path(path)
     if append and path.suffix != ".csv":
         raise ValueError("Appending is currently only supported for CSV files.")
-
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame(df)
+
+    modified = False
     for col in df.columns:
         if df[col].dtype != "object":
             continue
         if all(t is str for t in df[col].map(type)):
             continue
+
+        if not modified:
+            df = df.copy()
+            modified = True
         df[col] = df[col].map(to_json)
 
     match path.suffix.lower():

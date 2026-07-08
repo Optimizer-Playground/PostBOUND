@@ -18,6 +18,12 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 - Added an `infer_between_predicates()` transformation. It translates predicates
   such as _col >= 24 AND col <= 42_ into _col BETWEEN 24 AND 42_.
+- `write_df()` now accepts the input "dataframe" in additional formats, such SOA
+  and AOS.
+
+## 📰 Updates
+
+- `write_df` no longer modifies the source data frame to serialize complex values
 
 ## 🏥 Fixes
 
