@@ -132,9 +132,7 @@ class SchemaCache:
     def initialize_with(self, schema: Optional[DatabaseSchema]) -> None:
         """Sets the catalog if necessary"""
         if self._schema is not None and self._schema != schema:
-            warnings.warn(
-                "Parsing query for new schema. Dropping old schema cache."
-            )
+            warnings.warn("Parsing query for new schema. Dropping old schema cache.")
             self._schema = schema
             self._lookup_cache.clear()
         elif self._schema is not None:
@@ -142,9 +140,7 @@ class SchemaCache:
             return
         self._schema = schema
 
-    def lookup_column(
-        self, colname: str, candidate_tables: Iterable[TableReference]
-    ) -> Optional[TableReference]:
+    def lookup_column(self, colname: str, candidate_tables: Iterable[TableReference]) -> Optional[TableReference]:
         """Resolves the table that defines a specific column.
 
         If no catalog is available, this method will always return *None*.
@@ -179,9 +175,7 @@ class SchemaCache:
         cols, _ = self._inflate_cache(table)
         return cols
 
-    def _inflate_cache(
-        self, table: str | TableReference
-    ) -> tuple[list[str], set[str]]:
+    def _inflate_cache(self, table: str | TableReference) -> tuple[list[str], set[str]]:
         """Provides the columns that belong to a specific table, consulting the online catalog if necessary.
 
         This method assumes that there is indeed an online schema available. Calling this method without a schema will
@@ -237,9 +231,7 @@ class QueryNamespace:
     """
 
     @staticmethod
-    def empty(
-        schema: Optional[DatabaseSchema] = None, *, top_level: bool = False
-    ) -> QueryNamespace:
+    def empty(schema: Optional[DatabaseSchema] = None, *, top_level: bool = False) -> QueryNamespace:
         QueryNamespace._schema_cache.initialize_with(schema)
         return QueryNamespace(top_level=top_level)
 
@@ -306,9 +298,7 @@ class QueryNamespace:
         self._column_cache: dict[str, TableReference] = {}
         """A cache to resolve common columns in the current context more quickly."""
 
-    def determine_output_shape(
-        self, select_clause: Optional[Select | Iterable[ColumnReference | str]]
-    ) -> None:
+    def determine_output_shape(self, select_clause: Optional[Select | Iterable[ColumnReference | str]]) -> None:
         """Determines the columns that form the result relation of this namespace.
 
         The result is only stored internally to allow parent namespaces to resolve column references correctly.
@@ -323,17 +313,11 @@ class QueryNamespace:
             self._output_shape = list(self._setop_children[0]._output_shape)
             return
 
-        assert select_clause is not None, (
-            "SELECT clause expected for non-setop query"
-        )
+        assert select_clause is not None, "SELECT clause expected for non-setop query"
         for projection in select_clause:
             if isinstance(projection, (str, ColumnReference)):
                 # this is for temporary tables (CTEs or VALUES) that define their schema
-                colname = (
-                    projection.name
-                    if isinstance(projection, ColumnReference)
-                    else projection
-                )
+                colname = projection.name if isinstance(projection, ColumnReference) else projection
                 self._output_shape.append(colname)
                 self._produced_columns.add(colname)
                 continue
@@ -353,22 +337,16 @@ class QueryNamespace:
                     ctx = {from_table} if from_table else self._current_ctx
                     for table in ctx:
                         if not table.virtual:
-                            self._output_shape.extend(
-                                self._schema_cache.columns_of(table)
-                            )
+                            self._output_shape.extend(self._schema_cache.columns_of(table))
                             continue
 
                         if table.alias:
                             defining_nsp = self._lookup_namespace(table.alias)
                         if not defining_nsp and table.full_name:
                             # if we try to look up an aliased CTE, we need to use the full name instead
-                            defining_nsp = self._lookup_namespace(
-                                table.full_name
-                            )
+                            defining_nsp = self._lookup_namespace(table.full_name)
                         if not defining_nsp:
-                            raise ParserError(
-                                f"No namespace found for table '{table}'"
-                            )
+                            raise ParserError(f"No namespace found for table '{table}'")
                         self._output_shape.extend(defining_nsp._output_shape)
 
                 case _ if self._top_level:
@@ -421,11 +399,7 @@ class QueryNamespace:
         matching_table: Optional[TableReference] = None
         for table in self._current_ctx:
             # later tables overwrite unqualified columns of earlier tables
-            physical_table = (
-                self._schema_cache.lookup_column(key, [table])
-                if not table.virtual
-                else None
-            )
+            physical_table = self._schema_cache.lookup_column(key, [table]) if not table.virtual else None
             if physical_table:
                 matching_table = table
                 break
@@ -524,9 +498,7 @@ class QueryNamespace:
         if subquery_nsp:
             return subquery_nsp
 
-        return (
-            self._parent._lookup_namespace(table_key) if self._parent else None
-        )
+        return self._parent._lookup_namespace(table_key) if self._parent else None
 
     def _invalidate_column_cache(self) -> None:
         """Clears all currently cached columns in case there is fear of a change in the column bindings."""
@@ -561,9 +533,7 @@ def _pglast_is_actual_colref(pglast_data: dict) -> bool:
     return not would_be_col.endswith("*")
 
 
-def _pglast_create_bound_colref(
-    tab: str, col: str, *, namespace: QueryNamespace
-) -> ColumnReference:
+def _pglast_create_bound_colref(tab: str, col: str, *, namespace: QueryNamespace) -> ColumnReference:
     """Creates a new reference to a column with known binding info.
 
     Parameters
@@ -587,9 +557,7 @@ def _pglast_create_bound_colref(
     return parsed_column
 
 
-def _pglast_parse_colref(
-    pglast_data: dict, *, namespace: QueryNamespace
-) -> ColumnReference:
+def _pglast_parse_colref(pglast_data: dict, *, namespace: QueryNamespace) -> ColumnReference:
     """Handler method to parse column references in the query.
 
     The column will be bound to its table if possible. This binding process uses the following rules:
@@ -614,15 +582,11 @@ def _pglast_parse_colref(
     """
     fields: list[dict] = pglast_data["fields"]
     if len(fields) > 2:
-        raise ParserError(
-            "Unknown column reference format: " + str(pglast_data)
-        )
+        raise ParserError("Unknown column reference format: " + str(pglast_data))
 
     if len(fields) == 2:
         tab, col = fields
-        return _pglast_create_bound_colref(
-            tab["String"]["sval"], col["String"]["sval"], namespace=namespace
-        )
+        return _pglast_create_bound_colref(tab["String"]["sval"], col["String"]["sval"], namespace=namespace)
 
     # at this point, we must have a single column parameter. It could be unbounded, or - if quoted - bounded
     col: str = fields[0]["String"]["sval"]
@@ -630,9 +594,7 @@ def _pglast_parse_colref(
     return ColumnReference(col, owning_table)
 
 
-def _pglast_parse_star(
-    pglast_data: dict, *, namespace: QueryNamespace
-) -> StarExpression:
+def _pglast_parse_star(pglast_data: dict, *, namespace: QueryNamespace) -> StarExpression:
     """Handler method to parse star expressions that are potentially bounded to a specific table, e.g. *R.\\**.
 
     Parameters
@@ -677,11 +639,7 @@ def _pglast_parse_const(pglast_data: dict) -> StaticValueExpression:
         case "isnull":
             return StaticValueExpression.null()
         case "ival":
-            val = (
-                pglast_data["ival"]["ival"]
-                if "ival" in pglast_data["ival"]
-                else 0
-            )
+            val = pglast_data["ival"]["ival"] if "ival" in pglast_data["ival"] else 0
             return StaticValueExpression(val)
         case "fval":
             val = pglast_data["fval"]["fval"]
@@ -782,9 +740,7 @@ def _pglast_parse_type(pglast_data: dict) -> str:
     return _PglastTypeMap.get(raw_type, raw_type)
 
 
-def _pglast_parse_case(
-    pglast_data: dict, *, namespace: QueryNamespace, query_txt: str
-) -> CaseExpression:
+def _pglast_parse_case(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> CaseExpression:
     """Handler method to parse *CASE* expressions in a query.
 
     Parameters
@@ -804,36 +760,24 @@ def _pglast_parse_case(
     """
     cases: list[tuple[AbstractPredicate, SqlExpression]] = []
     for arg in pglast_data["args"]:
-        current_case = _pglast_parse_predicate(
-            arg["CaseWhen"]["expr"], namespace=namespace, query_txt=query_txt
-        )
-        current_result = _pglast_parse_expression(
-            arg["CaseWhen"]["result"], namespace=namespace, query_txt=query_txt
-        )
+        current_case = _pglast_parse_predicate(arg["CaseWhen"]["expr"], namespace=namespace, query_txt=query_txt)
+        current_result = _pglast_parse_expression(arg["CaseWhen"]["result"], namespace=namespace, query_txt=query_txt)
         cases.append((current_case, current_result))
 
     if "arg" in pglast_data:
-        simple_expr = _pglast_parse_expression(
-            pglast_data["arg"], namespace=namespace, query_txt=query_txt
-        )
+        simple_expr = _pglast_parse_expression(pglast_data["arg"], namespace=namespace, query_txt=query_txt)
     else:
         simple_expr = None
 
     if "defresult" in pglast_data:
-        default_result = _pglast_parse_expression(
-            pglast_data["defresult"], namespace=namespace, query_txt=query_txt
-        )
+        default_result = _pglast_parse_expression(pglast_data["defresult"], namespace=namespace, query_txt=query_txt)
     else:
         default_result = None
 
-    return CaseExpression(
-        cases, simple_expr=simple_expr, else_expr=default_result
-    )
+    return CaseExpression(cases, simple_expr=simple_expr, else_expr=default_result)
 
 
-def _pglast_parse_expression(
-    pglast_data: dict, *, namespace: QueryNamespace, query_txt: str
-) -> SqlExpression:
+def _pglast_parse_expression(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> SqlExpression:
     """Handler method to parse arbitrary expressions in the query.
 
     For some more complex expressions, this method will delegate to tailored parsing methods.
@@ -863,17 +807,11 @@ def _pglast_parse_expression(
 
     match expression_key:
         case "ColumnRef" if _pglast_is_actual_colref(pglast_data["ColumnRef"]):
-            column = _pglast_parse_colref(
-                pglast_data["ColumnRef"], namespace=namespace
-            )
+            column = _pglast_parse_colref(pglast_data["ColumnRef"], namespace=namespace)
             return ColumnExpression(column)
 
-        case "ColumnRef" if not _pglast_is_actual_colref(
-            pglast_data["ColumnRef"]
-        ):
-            return _pglast_parse_star(
-                pglast_data["ColumnRef"], namespace=namespace
-            )
+        case "ColumnRef" if not _pglast_is_actual_colref(pglast_data["ColumnRef"]):
+            return _pglast_parse_star(pglast_data["ColumnRef"], namespace=namespace)
 
         case "A_Const":
             return _pglast_parse_const(pglast_data["A_Const"])
@@ -881,18 +819,14 @@ def _pglast_parse_expression(
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_OP":
             expression = pglast_data["A_Expr"]
             operation = _pglast_parse_operator(expression["name"])
-            right = _pglast_parse_expression(
-                expression["rexpr"], namespace=namespace, query_txt=query_txt
-            )
+            right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
 
             if "lexpr" not in expression and operation in MathOperator:
                 return MathExpression(operation, right)
             elif "lexpr" not in expression:
                 raise ParserError("Unknown operator format: " + str(expression))
 
-            left = _pglast_parse_expression(
-                expression["lexpr"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
 
             if operation in LogicalOperator:
                 return BinaryPredicate(operation, left, right)
@@ -905,63 +839,36 @@ def _pglast_parse_expression(
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_LIKE":
             expression = pglast_data["A_Expr"]
             operator = (
-                LogicalOperator.Like
-                if expression["name"][0]["String"]["sval"] == "~~"
-                else LogicalOperator.NotLike
+                LogicalOperator.Like if expression["name"][0]["String"]["sval"] == "~~" else LogicalOperator.NotLike
             )
-            left = _pglast_parse_expression(
-                expression["lexpr"], namespace=namespace, query_txt=query_txt
-            )
-            right = _pglast_parse_expression(
-                expression["rexpr"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
+            right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
             return BinaryPredicate(operator, left, right)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_ILIKE":
             expression = pglast_data["A_Expr"]
             operator = (
-                LogicalOperator.ILike
-                if expression["name"][0]["String"]["sval"] == "~~*"
-                else LogicalOperator.NotILike
+                LogicalOperator.ILike if expression["name"][0]["String"]["sval"] == "~~*" else LogicalOperator.NotILike
             )
-            left = _pglast_parse_expression(
-                expression["lexpr"], namespace=namespace, query_txt=query_txt
-            )
-            right = _pglast_parse_expression(
-                expression["rexpr"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
+            right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
             return BinaryPredicate(operator, left, right)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_BETWEEN":
             expression = pglast_data["A_Expr"]
-            left = _pglast_parse_expression(
-                expression["lexpr"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
             raw_interval = expression["rexpr"]["List"]["items"]
             if len(raw_interval) != 2:
-                raise ParserError(
-                    "Invalid BETWEEN interval: " + str(raw_interval)
-                )
-            lower = _pglast_parse_expression(
-                raw_interval[0], namespace=namespace, query_txt=query_txt
-            )
-            upper = _pglast_parse_expression(
-                raw_interval[1], namespace=namespace, query_txt=query_txt
-            )
+                raise ParserError("Invalid BETWEEN interval: " + str(raw_interval))
+            lower = _pglast_parse_expression(raw_interval[0], namespace=namespace, query_txt=query_txt)
+            upper = _pglast_parse_expression(raw_interval[1], namespace=namespace, query_txt=query_txt)
             return BetweenPredicate(left, (lower, upper))
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_IN":
             expression = pglast_data["A_Expr"]
-            left = _pglast_parse_expression(
-                expression["lexpr"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
             raw_values = expression["rexpr"]["List"]["items"]
-            values = [
-                _pglast_parse_expression(
-                    value, namespace=namespace, query_txt=query_txt
-                )
-                for value in raw_values
-            ]
+            values = [_pglast_parse_expression(value, namespace=namespace, query_txt=query_txt) for value in raw_values]
             predicate = InPredicate(left, values)
             operator = expression["name"][0]["String"]["sval"]
             if operator == "=":
@@ -977,12 +884,8 @@ def _pglast_parse_expression(
         ]:
             expression = pglast_data["A_Expr"]
             operator = _PglastOperatorMap[expression["kind"]]
-            left = _pglast_parse_expression(
-                expression["lexpr"], namespace=namespace, query_txt=query_txt
-            )
-            right = _pglast_parse_expression(
-                expression["rexpr"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
+            right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
             return BinaryPredicate(operator, left, right)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] in [
@@ -991,12 +894,8 @@ def _pglast_parse_expression(
         ]:
             expression = pglast_data["A_Expr"]
             operation = _pglast_parse_operator(expression["name"])
-            left = _pglast_parse_expression(
-                expression["lexpr"], namespace=namespace, query_txt=query_txt
-            )
-            right = _pglast_parse_expression(
-                expression["rexpr"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
+            right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
 
             match expression["kind"]:
                 case "AEXPR_OP_ALL":
@@ -1004,9 +903,7 @@ def _pglast_parse_expression(
                 case "AEXPR_OP_ANY":
                     quantifier = QuantifierOperator.Any
                 case _:
-                    raise ParserError(
-                        "Unknown quantifier operator: " + str(expression)
-                    )
+                    raise ParserError("Unknown quantifier operator: " + str(expression))
 
             return BinaryPredicate(
                 operation,
@@ -1018,38 +915,21 @@ def _pglast_parse_expression(
             expression = pglast_data["BoolExpr"]
             operator = _PglastOperatorMap[expression["boolop"]]
             children = [
-                _pglast_parse_predicate(
-                    child, namespace=namespace, query_txt=query_txt
-                )
-                for child in expression["args"]
+                _pglast_parse_predicate(child, namespace=namespace, query_txt=query_txt) for child in expression["args"]
             ]
             if not isinstance(operator, CompoundOperator):
-                raise ParserError(
-                    f"Unexpected non-compound in query '{query_txt}'"
-                )
+                raise ParserError(f"Unexpected non-compound in query '{query_txt}'")
             return CompoundPredicate(operator, children)
 
         case "NullTest":
             expression = pglast_data["NullTest"]
-            testexpr = _pglast_parse_expression(
-                expression["arg"], namespace=namespace, query_txt=query_txt
-            )
-            operation = (
-                LogicalOperator.Is
-                if expression["nulltesttype"] == "IS_NULL"
-                else LogicalOperator.IsNot
-            )
-            return BinaryPredicate(
-                operation, testexpr, StaticValueExpression.null()
-            )
+            testexpr = _pglast_parse_expression(expression["arg"], namespace=namespace, query_txt=query_txt)
+            operation = LogicalOperator.Is if expression["nulltesttype"] == "IS_NULL" else LogicalOperator.IsNot
+            return BinaryPredicate(operation, testexpr, StaticValueExpression.null())
 
-        case "FuncCall" if (
-            "over" not in pglast_data["FuncCall"]
-        ):  # normal functions, aggregates and UDFs
+        case "FuncCall" if "over" not in pglast_data["FuncCall"]:  # normal functions, aggregates and UDFs
             expression: dict = pglast_data["FuncCall"]
-            funcname: str = ".".join(
-                elem["String"]["sval"] for elem in expression["funcname"]
-            )
+            funcname: str = ".".join(elem["String"]["sval"] for elem in expression["funcname"])
             funcname = funcname.removeprefix("pg_catalog.")
 
             distinct = expression.get("agg_distinct", False)
@@ -1071,9 +951,7 @@ def _pglast_parse_expression(
                 )
 
             args = [
-                _pglast_parse_expression(
-                    arg, namespace=namespace, query_txt=query_txt
-                )
+                _pglast_parse_expression(arg, namespace=namespace, query_txt=query_txt)
                 for arg in expression.get("args", [])
             ]
 
@@ -1108,18 +986,12 @@ def _pglast_parse_expression(
                         filter_where=filter_expr,
                     )
 
-        case "FuncCall" if (
-            "over" in pglast_data["FuncCall"]
-        ):  # window functions
+        case "FuncCall" if "over" in pglast_data["FuncCall"]:  # window functions
             expression: dict = pglast_data["FuncCall"]
-            funcname = ".".join(
-                elem["String"]["sval"] for elem in expression["funcname"]
-            )
+            funcname = ".".join(elem["String"]["sval"] for elem in expression["funcname"])
 
             args = [
-                _pglast_parse_expression(
-                    arg, namespace=namespace, query_txt=query_txt
-                )
+                _pglast_parse_expression(arg, namespace=namespace, query_txt=query_txt)
                 for arg in expression.get("args", [])
             ]
             fn = FunctionExpression(funcname, args)
@@ -1128,9 +1000,7 @@ def _pglast_parse_expression(
 
             if "partitionClause" in window_spec:
                 partition = [
-                    _pglast_parse_expression(
-                        partition, namespace=namespace, query_txt=query_txt
-                    )
+                    _pglast_parse_expression(partition, namespace=namespace, query_txt=query_txt)
                     for partition in window_spec["partitionClause"]
                 ]
             else:
@@ -1164,23 +1034,16 @@ def _pglast_parse_expression(
         case "CoalesceExpr":
             expression = pglast_data["CoalesceExpr"]
             args = [
-                _pglast_parse_expression(
-                    arg, namespace=namespace, query_txt=query_txt
-                )
-                for arg in expression["args"]
+                _pglast_parse_expression(arg, namespace=namespace, query_txt=query_txt) for arg in expression["args"]
             ]
             return FunctionExpression("coalesce", args)
 
         case "TypeCast":
             expression: dict = pglast_data["TypeCast"]
-            casted_expression = _pglast_parse_expression(
-                expression["arg"], namespace=namespace, query_txt=query_txt
-            )
+            casted_expression = _pglast_parse_expression(expression["arg"], namespace=namespace, query_txt=query_txt)
             target_type = _pglast_parse_type(expression["typeName"])
             type_params = [
-                _pglast_parse_expression(
-                    param, namespace=namespace, query_txt=query_txt
-                )
+                _pglast_parse_expression(param, namespace=namespace, query_txt=query_txt)
                 for param in expression["typeName"].get("typmods", [])
             ]
             array_type = "arrayBounds" in expression["typeName"]
@@ -1213,9 +1076,7 @@ def _pglast_parse_expression(
             elif sublink_type == "EXPR_SUBLINK":
                 return SubqueryExpression(subquery)
 
-            testexpr = _pglast_parse_expression(
-                expression["testexpr"], namespace=namespace, query_txt=query_txt
-            )
+            testexpr = _pglast_parse_expression(expression["testexpr"], namespace=namespace, query_txt=query_txt)
 
             if sublink_type == "ANY_SUBLINK" and "operName" not in expression:
                 return InPredicate.subquery(testexpr, subquery)
@@ -1229,15 +1090,11 @@ def _pglast_parse_expression(
                 subquery_expression = QuantifierExpression.all(subquery)
                 return BinaryPredicate(operator, testexpr, subquery_expression)
             else:
-                raise NotImplementedError(
-                    "Subquery handling is not yet implemented"
-                )
+                raise NotImplementedError("Subquery handling is not yet implemented")
 
         case "A_Indirection":
             expression: dict = pglast_data["A_Indirection"]
-            array_expression = _pglast_parse_expression(
-                expression["arg"], namespace=namespace, query_txt=query_txt
-            )
+            array_expression = _pglast_parse_expression(expression["arg"], namespace=namespace, query_txt=query_txt)
 
             for index_expression in expression["indirection"]:
                 index_expression: dict = index_expression["A_Indices"]
@@ -1261,9 +1118,7 @@ def _pglast_parse_expression(
                         if "uidx" in index_expression
                         else None
                     )
-                    array_expression = ArrayAccessExpression(
-                        array_expression, lower_idx=lower, upper_idx=upper
-                    )
+                    array_expression = ArrayAccessExpression(array_expression, lower_idx=lower, upper_idx=upper)
                     continue
 
                 point_index = _pglast_parse_expression(
@@ -1271,18 +1126,14 @@ def _pglast_parse_expression(
                     namespace=namespace,
                     query_txt=query_txt,
                 )
-                array_expression = ArrayAccessExpression(
-                    array_expression, idx=point_index
-                )
+                array_expression = ArrayAccessExpression(array_expression, idx=point_index)
 
             return array_expression
 
         case "A_ArrayExpr":
             expression: dict = pglast_data["A_ArrayExpr"]
             elems = [
-                _pglast_parse_expression(
-                    elem, namespace=namespace, query_txt=query_txt
-                )
+                _pglast_parse_expression(elem, namespace=namespace, query_txt=query_txt)
                 for elem in expression.get("elements", [])
             ]
             return ArrayExpression(elems)
@@ -1314,12 +1165,7 @@ def _pglast_parse_values_cte(
     values: ValuesList = []
     for row in pglast_data["ctequery"]["SelectStmt"]["valuesLists"]:
         raw_items = row["List"]["items"]
-        parsed_items = [
-            _pglast_parse_expression(
-                item, namespace=namespace, query_txt=query_txt
-            )
-            for item in raw_items
-        ]
+        parsed_items = [_pglast_parse_expression(item, namespace=namespace, query_txt=query_txt) for item in raw_items]
         values.append(tuple(parsed_items))
 
     colnames: list[str] = []
@@ -1332,9 +1178,7 @@ def _pglast_parse_values_cte(
     return values, colnames
 
 
-def _pglast_parse_ctes(
-    json_data: dict, *, parent_namespace: QueryNamespace, query_txt: str
-) -> CommonTableExpression:
+def _pglast_parse_ctes(json_data: dict, *, parent_namespace: QueryNamespace, query_txt: str) -> CommonTableExpression:
     """Handler method to parse the *WITH* clause of a query.
 
     Parameters
@@ -1367,14 +1211,10 @@ def _pglast_parse_ctes(
                 force_materialization = False
 
         query_data = current_cte["ctequery"]["SelectStmt"]
-        child_nsp = parent_namespace.open_nested(
-            alias=target_name, source="cte"
-        )
+        child_nsp = parent_namespace.open_nested(alias=target_name, source="cte")
         if "targetList" not in query_data and query_data["op"] == "SETOP_NONE":
             # CTE is a VALUES query
-            values, columns = _pglast_parse_values_cte(
-                current_cte, namespace=child_nsp, query_txt=query_txt
-            )
+            values, columns = _pglast_parse_values_cte(current_cte, namespace=child_nsp, query_txt=query_txt)
             parsed_cte = ValuesWithQuery(
                 values,
                 target_name=target_table.identifier(),
@@ -1387,9 +1227,7 @@ def _pglast_parse_ctes(
                 namespace=child_nsp,
                 query_txt=query_txt,
             )
-            parsed_cte = WithQuery(
-                cte_query, target_table, materialized=force_materialization
-            )
+            parsed_cte = WithQuery(cte_query, target_table, materialized=force_materialization)
 
         parsed_ctes.append(parsed_cte)
 
@@ -1397,9 +1235,7 @@ def _pglast_parse_ctes(
     return CommonTableExpression(parsed_ctes, recursive=recursive)
 
 
-def _pglast_try_select_star(
-    target: dict, *, distinct: list[SqlExpression] | bool
-) -> Optional[Select]:
+def _pglast_try_select_star(target: dict, *, distinct: list[SqlExpression] | bool) -> Optional[Select]:
     """Attempts to generate a *SELECT(\\*)* representation for a *SELECT* clause.
 
     If the query is not actually a *SELECT(\\*)* query, this method will return *None*.
@@ -1426,9 +1262,7 @@ def _pglast_try_select_star(
     return Select.star(distinct=distinct) if "A_Star" in colref else None
 
 
-def _pglast_parse_select(
-    pglast_data: dict, *, namespace: QueryNamespace, query_txt: str
-) -> Select:
+def _pglast_parse_select(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> Select:
     """Handler method to parse the *SELECT* clause of a query.
 
     This is the only parsing handler that will always be called when parsing a query, since all queries must at least have a
@@ -1454,23 +1288,16 @@ def _pglast_parse_select(
     pglast_distinct = pglast_data.get("distinctClause", None)
     if pglast_distinct is None:
         distinct = False  # value not present --> no DISTINCT
-    elif pglast_distinct == [
-        {}
-    ]:  # that is pglasts encoding of a plain DISTINCT
+    elif pglast_distinct == [{}]:  # that is pglasts encoding of a plain DISTINCT
         distinct = True
     elif isinstance(pglast_distinct, list):
         distinct = [
-            _pglast_parse_expression(
-                expr, namespace=namespace, query_txt=query_txt
-            )
-            for expr in pglast_distinct
+            _pglast_parse_expression(expr, namespace=namespace, query_txt=query_txt) for expr in pglast_distinct
         ]
     else:
         raise ParserError(f"Unknown DISTINCT format: {pglast_distinct}")
 
-    targetlist: list[dict] = pglast_data[
-        "targetList"
-    ]  # targetlist must always be present, so no need for .get()
+    targetlist: list[dict] = pglast_data["targetList"]  # targetlist must always be present, so no need for .get()
 
     # first, try for SELECT * queries
     if len(targetlist) == 1:
@@ -1484,9 +1311,7 @@ def _pglast_parse_select(
 
     targets: list[BaseProjection] = []
     for target in targetlist:
-        expression = _pglast_parse_expression(
-            target["ResTarget"]["val"], namespace=namespace, query_txt=query_txt
-        )
+        expression = _pglast_parse_expression(target["ResTarget"]["val"], namespace=namespace, query_txt=query_txt)
         alias = target["ResTarget"].get("name", "")
         projection = BaseProjection(expression, alias)
         targets.append(projection)
@@ -1533,9 +1358,7 @@ def _pglast_is_values_list(pglast_data: dict) -> bool:
     return "valuesLists" in query
 
 
-def _pglast_parse_from_entry(
-    pglast_data: dict, *, namespace: QueryNamespace, query_txt: str
-) -> TableSource:
+def _pglast_parse_from_entry(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> TableSource:
     """Handler method to parse individual entries in the *FROM* clause.
 
     Parameters
@@ -1592,33 +1415,19 @@ def _pglast_parse_from_entry(
                 case "JOIN_FULL":
                     join_type = JoinType.OuterJoin
                 case _:
-                    raise ParserError(
-                        "Unknown join type: " + join_expr["jointype"]
-                    )
+                    raise ParserError("Unknown join type: " + join_expr["jointype"])
 
-            left = _pglast_parse_from_entry(
-                join_expr["larg"], namespace=namespace, query_txt=query_txt
-            )
-            right = _pglast_parse_from_entry(
-                join_expr["rarg"], namespace=namespace, query_txt=query_txt
-            )
+            left = _pglast_parse_from_entry(join_expr["larg"], namespace=namespace, query_txt=query_txt)
+            right = _pglast_parse_from_entry(join_expr["rarg"], namespace=namespace, query_txt=query_txt)
             if join_type == JoinType.CrossJoin:
-                return JoinTableSource(
-                    left, right, join_type=JoinType.CrossJoin
-                )
+                return JoinTableSource(left, right, join_type=JoinType.CrossJoin)
 
-            join_condition = _pglast_parse_predicate(
-                join_expr["quals"], namespace=namespace, query_txt=query_txt
-            )
+            join_condition = _pglast_parse_predicate(join_expr["quals"], namespace=namespace, query_txt=query_txt)
 
             # we do not need to store new tables in available_tables here, since this is already handled by the recursion.
-            return JoinTableSource(
-                left, right, join_condition=join_condition, join_type=join_type
-            )
+            return JoinTableSource(left, right, join_condition=join_condition, join_type=join_type)
 
-        case "RangeSubselect" if _pglast_is_values_list(
-            pglast_data["RangeSubselect"]
-        ):
+        case "RangeSubselect" if _pglast_is_values_list(pglast_data["RangeSubselect"]):
             values_list = _pglast_parse_values(
                 pglast_data["RangeSubselect"],
                 parent_namespace=namespace,
@@ -1642,9 +1451,7 @@ def _pglast_parse_from_entry(
                 query_txt=query_txt,
             )
 
-            subquery_source = SubqueryTableSource(
-                subquery, target_name=alias, lateral=is_lateral
-            )
+            subquery_source = SubqueryTableSource(subquery, target_name=alias, lateral=is_lateral)
             return subquery_source
 
         case "RangeFunction":
@@ -1655,21 +1462,15 @@ def _pglast_parse_from_entry(
             else:
                 alias = ""
 
-            function_expr: dict = raw_function["functions"][0]["List"]["items"][
-                0
-            ]
-            parsed_function = _pglast_parse_expression(
-                function_expr, namespace=namespace, query_txt=query_txt
-            )
+            function_expr: dict = raw_function["functions"][0]["List"]["items"][0]
+            parsed_function = _pglast_parse_expression(function_expr, namespace=namespace, query_txt=query_txt)
             return FunctionTableSource(parsed_function, alias=alias)
 
         case _:
             raise ParserError("Unknow FROM clause entry: " + str(pglast_data))
 
 
-def _pglast_parse_values(
-    pglast_data: dict, *, parent_namespace: QueryNamespace, query_txt: str
-) -> ValuesTableSource:
+def _pglast_parse_values(pglast_data: dict, *, parent_namespace: QueryNamespace, query_txt: str) -> ValuesTableSource:
     """Handler method to parse explicit *VALUES* lists in the *FROM* clause.
 
     Parameters
@@ -1693,19 +1494,12 @@ def _pglast_parse_values(
     raw_alias: dict = pglast_data.get("alias", {})
     alias = raw_alias.get("aliasname", "")
     child_nsp = parent_namespace.open_nested(alias=alias, source="values")
-    raw_values: list[dict] = pglast_data["subquery"]["SelectStmt"][
-        "valuesLists"
-    ]
+    raw_values: list[dict] = pglast_data["subquery"]["SelectStmt"]["valuesLists"]
 
     values: ValuesList = []
     for row in raw_values:
         raw_items = row["List"]["items"]
-        parsed_items = [
-            _pglast_parse_expression(
-                item, namespace=child_nsp, query_txt=query_txt
-            )
-            for item in raw_items
-        ]
+        parsed_items = [_pglast_parse_expression(item, namespace=child_nsp, query_txt=query_txt) for item in raw_items]
         values.append(tuple(parsed_items))
 
     if not alias:
@@ -1722,9 +1516,7 @@ def _pglast_parse_values(
     return table_source
 
 
-def _pglast_parse_from(
-    from_clause: list[dict], *, namespace: QueryNamespace, query_txt: str
-) -> From:
+def _pglast_parse_from(from_clause: list[dict], *, namespace: QueryNamespace, query_txt: str) -> From:
     """Handler method to parse the *FROM* clause of a query.
 
     Parameters
@@ -1744,15 +1536,11 @@ def _pglast_parse_from(
     """
     contains_plain_table = False
     contains_join = False
-    contains_mixed = (
-        False  # plain tables and explicit JOINs, subqueries or VALUES
-    )
+    contains_mixed = False  # plain tables and explicit JOINs, subqueries or VALUES
 
     table_sources: list[TableSource] = []
     for entry in from_clause:
-        current_table_source = _pglast_parse_from_entry(
-            entry, namespace=namespace, query_txt=query_txt
-        )
+        current_table_source = _pglast_parse_from_entry(entry, namespace=namespace, query_txt=query_txt)
         table_sources.append(current_table_source)
 
         match current_table_source:
@@ -1771,9 +1559,7 @@ def _pglast_parse_from(
             case FunctionTableSource():
                 contains_mixed = True
             case _:
-                raise ParserError(
-                    f"Unknown table source type: {type(current_table_source).__name__}"
-                )
+                raise ParserError(f"Unknown table source type: {type(current_table_source).__name__}")
 
     if not contains_join and not contains_mixed:
         return ImplicitFromClause(table_sources)
@@ -1783,9 +1569,7 @@ def _pglast_parse_from(
     return From(table_sources)
 
 
-def _pglast_parse_predicate(
-    pglast_data: dict, *, namespace: QueryNamespace, query_txt: str
-) -> AbstractPredicate:
+def _pglast_parse_predicate(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> AbstractPredicate:
     """Handler method to parse arbitrary predicates in the *WHERE* or *HAVING* clause.
 
     Parameters
@@ -1804,19 +1588,11 @@ def _pglast_parse_predicate(
     AbstractPredicate
         The parsed predicate.
     """
-    predicate = _pglast_parse_expression(
-        pglast_data, namespace=namespace, query_txt=query_txt
-    )
-    return (
-        predicate
-        if isinstance(predicate, AbstractPredicate)
-        else UnaryPredicate(predicate)
-    )
+    predicate = _pglast_parse_expression(pglast_data, namespace=namespace, query_txt=query_txt)
+    return predicate if isinstance(predicate, AbstractPredicate) else UnaryPredicate(predicate)
 
 
-def _pglast_parse_where(
-    where_clause: dict, *, namespace: QueryNamespace, query_txt: str
-) -> Where:
+def _pglast_parse_where(where_clause: dict, *, namespace: QueryNamespace, query_txt: str) -> Where:
     """Handler method to parse the *WHERE* clause of a query.
 
     Parameters
@@ -1834,15 +1610,11 @@ def _pglast_parse_where(
     Where
         The parsed *WHERE* clause.
     """
-    predicate = _pglast_parse_predicate(
-        where_clause, namespace=namespace, query_txt=query_txt
-    )
+    predicate = _pglast_parse_predicate(where_clause, namespace=namespace, query_txt=query_txt)
     return Where(predicate)
 
 
-def _pglast_parse_groupby(
-    groupby_clause: list[dict], *, namespace: QueryNamespace, query_txt: str
-) -> GroupBy:
+def _pglast_parse_groupby(groupby_clause: list[dict], *, namespace: QueryNamespace, query_txt: str) -> GroupBy:
     """Handler method to parse the *GROUP BY* clause of a query.
 
     Parameters
@@ -1865,17 +1637,13 @@ def _pglast_parse_groupby(
     for item in groupby_clause:
         if "GroupingSet" in item:
             raise NotImplementedError("Grouping sets are not yet supported")
-        group_expression = _pglast_parse_expression(
-            item, namespace=namespace, query_txt=query_txt
-        )
+        group_expression = _pglast_parse_expression(item, namespace=namespace, query_txt=query_txt)
         groupings.append(group_expression)
 
     return GroupBy(groupings)
 
 
-def _pglast_parse_having(
-    having_clause: dict, *, namespace: QueryNamespace, query_txt: str
-) -> Having:
+def _pglast_parse_having(having_clause: dict, *, namespace: QueryNamespace, query_txt: str) -> Having:
     """Handler method to parse the *HAVING* clause of a query.
 
     Parameters
@@ -1893,15 +1661,11 @@ def _pglast_parse_having(
     Having
         The parsed *HAVING* clause.
     """
-    predicate = _pglast_parse_predicate(
-        having_clause, namespace=namespace, query_txt=query_txt
-    )
+    predicate = _pglast_parse_predicate(having_clause, namespace=namespace, query_txt=query_txt)
     return Having(predicate)
 
 
-def _pglast_parse_orderby(
-    order_clause: list[dict], *, namespace: QueryNamespace, query_txt: str
-) -> OrderBy:
+def _pglast_parse_orderby(order_clause: list[dict], *, namespace: QueryNamespace, query_txt: str) -> OrderBy:
     """Handler method to parse the *ORDER BY* clause of a query.
 
     Parameters
@@ -1923,9 +1687,7 @@ def _pglast_parse_orderby(
 
     for item in order_clause:
         expression = item["SortBy"]
-        sort_key = _pglast_parse_expression(
-            expression["node"], namespace=namespace, query_txt=query_txt
-        )
+        sort_key = _pglast_parse_expression(expression["node"], namespace=namespace, query_txt=query_txt)
 
         match expression["sortby_dir"]:
             case "SORTBY_ASC":
@@ -1935,9 +1697,7 @@ def _pglast_parse_orderby(
             case "SORTBY_DEFAULT":
                 sort_ascending = None
             case _:
-                raise ParserError(
-                    "Unknown sort direction: " + expression["sortby_dir"]
-                )
+                raise ParserError("Unknown sort direction: " + expression["sortby_dir"])
 
         match expression["sortby_nulls"]:
             case "SORTBY_NULLS_FIRST":
@@ -1947,21 +1707,15 @@ def _pglast_parse_orderby(
             case "SORTBY_NULLS_DEFAULT":
                 put_nulls_first = None
             case _:
-                raise ParserError(
-                    "Unknown nulls placement: " + expression["sortby_nulls"]
-                )
+                raise ParserError("Unknown nulls placement: " + expression["sortby_nulls"])
 
-        order_expression = OrderByExpression(
-            sort_key, ascending=sort_ascending, nulls_first=put_nulls_first
-        )
+        order_expression = OrderByExpression(sort_key, ascending=sort_ascending, nulls_first=put_nulls_first)
         orderings.append(order_expression)
 
     return OrderBy(orderings)
 
 
-def _pglast_parse_limit(
-    pglast_data: dict, *, namespace: QueryNamespace, query_txt: str
-) -> Optional[Limit]:
+def _pglast_parse_limit(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> Optional[Limit]:
     """Handler method to parse LIMIT and OFFSET clauses.
 
     This method assumes that the given query actually contains *LIMIT* or *OFFSET* clauses and will fail otherwise.
@@ -1999,9 +1753,7 @@ def _pglast_parse_limit(
         offset = None
 
     normalized_query = query_txt.lower()
-    contains_standard_limit = (
-        "limit" in normalized_query or "fetch first" in normalized_query
-    )
+    contains_standard_limit = "limit" in normalized_query or "fetch first" in normalized_query
     if raw_limit is not None and not contains_standard_limit:
         if "fetch next" in normalized_query:
             fetch_direction = "next"
@@ -2017,9 +1769,7 @@ def _pglast_parse_limit(
     return Limit(limit=nrows, offset=offset, fetch_direction=fetch_direction)
 
 
-def _pglast_parse_setop(
-    pglast_data: dict, *, parent_namespace: QueryNamespace, query_txt: str
-) -> SetQuery:
+def _pglast_parse_setop(pglast_data: dict, *, parent_namespace: QueryNamespace, query_txt: str) -> SetQuery:
     """Handler method to parse set operations.
 
     This method assumes that the given query is indeed a set operation and will fail otherwise.
@@ -2062,11 +1812,7 @@ def _pglast_parse_setop(
 
     match pglast_data["op"]:
         case "SETOP_UNION":
-            operator = (
-                SetOperator.UnionAll
-                if pglast_data.get("all", False)
-                else SetOperator.Union
-            )
+            operator = SetOperator.UnionAll if pglast_data.get("all", False) else SetOperator.Union
         case "SETOP_INTERSECT":
             operator = SetOperator.Intersect
         case "SETOP_EXCEPT":
@@ -2084,9 +1830,7 @@ def _pglast_parse_setop(
         order_clause = None
 
     if pglast_data["limitOption"] == "LIMIT_OPTION_COUNT":
-        limit_clause = _pglast_parse_limit(
-            pglast_data, namespace=parent_namespace, query_txt=query_txt
-        )
+        limit_clause = _pglast_parse_limit(pglast_data, namespace=parent_namespace, query_txt=query_txt)
     else:
         limit_clause = None
 
@@ -2138,9 +1882,7 @@ def _pglast_parse_explain(pglast_data: dict) -> tuple[Optional[Explain], dict]:
     return explain_clause, pglast_data["query"]
 
 
-def _pglast_parse_query(
-    stmt: dict, *, namespace: QueryNamespace, query_txt: str
-) -> SelectStatement:
+def _pglast_parse_query(stmt: dict, *, namespace: QueryNamespace, query_txt: str) -> SelectStatement:
     """Main entry point into the parsing logic.
 
     This function takes a single SQL SELECT query and provides the corresponding `SqlQuery` object.
@@ -2165,62 +1907,42 @@ def _pglast_parse_query(
         The parsed query
     """
     if stmt["op"] != "SETOP_NONE":
-        return _pglast_parse_setop(
-            stmt, parent_namespace=namespace, query_txt=query_txt
-        )
+        return _pglast_parse_setop(stmt, parent_namespace=namespace, query_txt=query_txt)
 
     clauses: list[BaseClause] = []
 
     if "withClause" in stmt:
-        with_clause = _pglast_parse_ctes(
-            stmt["withClause"], parent_namespace=namespace, query_txt=query_txt
-        )
+        with_clause = _pglast_parse_ctes(stmt["withClause"], parent_namespace=namespace, query_txt=query_txt)
         clauses.append(with_clause)
 
     if "fromClause" in stmt:
-        from_clause = _pglast_parse_from(
-            stmt["fromClause"], namespace=namespace, query_txt=query_txt
-        )
+        from_clause = _pglast_parse_from(stmt["fromClause"], namespace=namespace, query_txt=query_txt)
         clauses.append(from_clause)
 
     # Each query is guaranteed to have a SELECT clause, so we can just parse it straight away
-    select_clause = _pglast_parse_select(
-        stmt, namespace=namespace, query_txt=query_txt
-    )
+    select_clause = _pglast_parse_select(stmt, namespace=namespace, query_txt=query_txt)
     clauses.append(select_clause)
 
     if "whereClause" in stmt:
-        where_clause = _pglast_parse_where(
-            stmt["whereClause"], namespace=namespace, query_txt=query_txt
-        )
+        where_clause = _pglast_parse_where(stmt["whereClause"], namespace=namespace, query_txt=query_txt)
         clauses.append(where_clause)
 
     if "groupClause" in stmt:
-        group_clause = _pglast_parse_groupby(
-            stmt["groupClause"], namespace=namespace, query_txt=query_txt
-        )
+        group_clause = _pglast_parse_groupby(stmt["groupClause"], namespace=namespace, query_txt=query_txt)
         clauses.append(group_clause)
 
     if "havingClause" in stmt:
-        having_clause = _pglast_parse_having(
-            stmt["havingClause"], namespace=namespace, query_txt=query_txt
-        )
+        having_clause = _pglast_parse_having(stmt["havingClause"], namespace=namespace, query_txt=query_txt)
         clauses.append(having_clause)
 
     if "sortClause" in stmt:
-        order_clause = _pglast_parse_orderby(
-            stmt["sortClause"], namespace=namespace, query_txt=query_txt
-        )
+        order_clause = _pglast_parse_orderby(stmt["sortClause"], namespace=namespace, query_txt=query_txt)
         clauses.append(order_clause)
 
     if stmt["limitOption"] == "LIMIT_OPTION_COUNT":
-        limit_clause = _pglast_parse_limit(
-            stmt, namespace=namespace, query_txt=query_txt
-        )
+        limit_clause = _pglast_parse_limit(stmt, namespace=namespace, query_txt=query_txt)
         if limit_clause is None:
-            raise ParserError(
-                f"Malformed LIMIT/OFFSET clause for query {query_txt}"
-            )
+            raise ParserError(f"Malformed LIMIT/OFFSET clause for query {query_txt}")
         clauses.append(limit_clause)
 
     return build_query(clauses)
@@ -2419,6 +2141,11 @@ def parse_query(
     if not query:
         raise ParserError("Empty query")
 
+    # If the query was written by our jsonize encoder, it will contain extra quotes, remove them before parsing
+    # Clients with weird input formats will likely benefit form this as well and a plain string is not a valid
+    # SQL query anyway so might as well..
+    query = query.removeprefix('"').removesuffix('"')
+
     bind_columns = bind_columns or (bind_columns is None and auto_bind_columns)
     if db_schema is None and bind_columns:
         pool = DatabasePool.get_instance()
@@ -2450,9 +2177,7 @@ def parse_query(
 
     set_cmds, stmts = _pglast_parse_set_commands(stmts)
     if len(stmts) != 1:
-        raise ValueError(
-            "Parser can only support single-statement queries for now"
-        )
+        raise ValueError("Parser can only support single-statement queries for now")
     raw_query: dict = stmts[0]["stmt"]
 
     if "ExplainStmt" in raw_query:
@@ -2472,12 +2197,8 @@ def parse_query(
     if not accept_set_query and isinstance(query, SetQuery):
         raise ParserError("Input query is a set query")
 
-    hint = (
-        _parse_hint_block(query, set_cmds=set_cmds) if include_hints else None
-    )
-    parsed_query = _apply_extra_clauses(
-        parsed_query, hint=hint, explain_clause=explain_clause
-    )
+    hint = _parse_hint_block(query, set_cmds=set_cmds) if include_hints else None
+    parsed_query = _apply_extra_clauses(parsed_query, hint=hint, explain_clause=explain_clause)
 
     return parsed_query
 
@@ -2532,9 +2253,7 @@ def load_table_json(json_data):
     """
     if not json_data:
         return None
-    json_data = (
-        json_data if isinstance(json_data, dict) else json.loads(json_data)
-    )
+    json_data = json_data if isinstance(json_data, dict) else json.loads(json_data)
     return TableReference(
         json_data.get("full_name", ""),
         json_data.get("alias", ""),
@@ -2567,12 +2286,8 @@ def load_column_json(json_data):
     """
     if not json_data:
         return None
-    json_data = (
-        json_data if isinstance(json_data, dict) else json.loads(json_data)
-    )
-    return ColumnReference(
-        json_data.get("column"), load_table_json(json_data.get("table", None))
-    )
+    json_data = json_data if isinstance(json_data, dict) else json.loads(json_data)
+    return ColumnReference(json_data.get("column"), load_table_json(json_data.get("table", None)))
 
 
 @overload
@@ -2599,14 +2314,9 @@ def load_expression_json(json_data):
     """
     if not json_data:
         return None
-    json_data = (
-        json_data if isinstance(json_data, dict) else json.loads(json_data)
-    )
+    json_data = json_data if isinstance(json_data, dict) else json.loads(json_data)
 
-    tables = [
-        load_table_json(table_data)
-        for table_data in json_data.get("tables", [])
-    ]
+    tables = [load_table_json(table_data) for table_data in json_data.get("tables", [])]
     expression_str = json_data["expression"]
     if not tables:
         emulated_query = f"SELECT {expression_str}"
@@ -2642,29 +2352,34 @@ def load_predicate_json(json_data):
 
     Raises
     ------
-    KeyError
+    ParserError
         If the encoding does not specify the tables that are referenced in the predicate
-    KeyError
+    ParserError
         If the encoding does not contain the actual predicate
     """
     if not json_data:
         return None
-    json_data = (
-        json_data if isinstance(json_data, dict) else json.loads(json_data)
-    )
+    json_data = json_data if isinstance(json_data, dict) else json.loads(json_data)
 
-    tables = [
-        load_table_json(table_data)
-        for table_data in json_data.get("tables", [])
-    ]
+    tables = [load_table_json(table_data) for table_data in json_data.get("tables", [])]
     if not tables:
-        raise KeyError("Predicate needs at least one table!")
+        raise ParserError("Predicate needs at least one table!")
     from_clause_str = ", ".join(str(tab) for tab in tables)
     predicate_str = json_data["predicate"]
     emulated_query = f"SELECT * FROM {from_clause_str} WHERE {predicate_str}"
     parsed_query = parse_query(emulated_query)
     if not parsed_query.where_clause:
-        raise ParserError(
-            f"No predicate found. Inferred query was '{parsed_query}'."
-        )
+        raise ParserError(f"No predicate found. Inferred query was '{parsed_query}'.")
     return parsed_query.where_clause.predicate
+
+
+def load_operator_json(json_data: str) -> SqlOperator:
+    """Re-creates an SQL operator from its JSON encoding."""
+    json_data = json_data.removeprefix('"').removesuffix('"')
+    if json_data in MathOperator:
+        return MathOperator(json_data)
+    if json_data in LogicalOperator:
+        return LogicalOperator(json_data)
+    if json_data in CompoundOperator:
+        return CompoundOperator(json_data)
+    raise ParserError(f"No matching operator found for JSON data {json_data}")

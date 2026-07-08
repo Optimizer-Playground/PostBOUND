@@ -18,11 +18,15 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 - Added an `infer_between_predicates()` transformation. It translates predicates
   such as _col >= 24 AND col <= 42_ into _col BETWEEN 24 AND 42_.
-- `write_df()` now accepts the input "dataframe" in additional formats, such SOA
-  and AOS.
+- Added an `load_operator_json()` "parser" to turn JSONized operator representations
+  back into their PostBOUND equivalents
+- `write_df()` now accepts the input "dataframe" in additional formats, such as
+  struct-of-arrays and array-of-structs.
 
 ## 📰 Updates
 
+- `parse_query` now plays nice when faced with the output of a JSON-ize operation
+  over a query.
 - `write_df` no longer modifies the source data frame to serialize complex values
 
 ## 🏥 Fixes
