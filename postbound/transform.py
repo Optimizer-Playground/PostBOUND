@@ -702,6 +702,9 @@ class _BetweenPredCreator(PredicateVisitor[AbstractPredicate]):
                         blocked_greater.add(column)
                     greater_filters[column] = rhs
 
+                case _:
+                    rewritten_filters.append(child)
+
         blocked_columns = blocked_less | blocked_greater
         for candidate, less_val in less_filters.items():
             if candidate in blocked_columns or candidate not in greater_filters:
