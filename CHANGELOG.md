@@ -12,6 +12,54 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
+# Version 0.21.6
+
+## 🐣 New features
+
+- Connections to DuckDB can now be established in read-only mode.
+
+## 📰 Updates
+
+_None_
+
+## 🏥 Fixes
+
+- Fixed `transform.infer_between_predicates()` dropping unrelated predicates
+
+## ⚠️ Deprecations
+
+- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
+  favor of the more flexible _projection_ and _output_ parameters. However, we
+  currently have no plans to remove the old API.
+- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
+  will be moved to the separate optimizer repository for version 0.22.0.
+- `Workload.read()` is deprecated in favor of `read_workload()`. The old method
+  will be removed in version 0.22.0.
+  This change unifies the workload API and consistently uses `read_workload_XXX`
+  functions for input.
+- `CompoundPredicate` will no longer be used to represent NOT predicates from
+  version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
+- `MathExpression` will no longer accept sequences of expressions as the second
+  argument. To encode operations involving more than 2 operands, a hierarchy of
+  binary math expressions should be used instead.
+- Databases will no longer support the database cache out-of-the-box. Instead,
+  the cache will become a proper high-level component that can be used with any
+  database. This change is planned for version 0.22.0
+- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
+  This should prevent confusion regarding the precise timing of the callback execution,
+  especially since we have now also introduced a _pre_exec_callback_.
+
+## 🪲 Known bugs
+
+- The automatic optimization of the Postgres server configuration as part of the
+  Docker installation does not work on MacOS. Currently, this should be considered
+  as wontfix.
+- The SSB queries can currently not be loaded from the workloads module. The underlying
+  data server crashed and we are currently exploring alternative, more reliable
+  solutions.
+
+---
+
 # Version 0.21.5
 
 ## 🐣 New features

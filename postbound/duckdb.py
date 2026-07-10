@@ -60,13 +60,15 @@ class DuckDBInterface(Database):
         db: Path,
         *,
         system_name: str = "DuckDB",
+        read_only: bool = False,
         cache_enabled: bool = False,
     ) -> None:
         super().__init__(system_name=system_name, cache_enabled=cache_enabled)
 
         self._dbfile = db
 
-        self._cur = quacklab.connect(db)
+        self._cur = quacklab.connect(db, read_only=read_only)
+        self._read_only = read_only
         self._last_query_runtime = math.nan
 
         self._stats = DuckDBStatistics(self)
@@ -175,7 +177,7 @@ class DuckDBInterface(Database):
         self._cur.close()
 
     def reconnect(self) -> None:
-        self._cur = quacklab.connect(self._dbfile)
+        self._cur = quacklab.connect(self._dbfile, read_only=self._read_only)
 
     def reset_connection(self) -> None:
         try:
@@ -183,7 +185,7 @@ class DuckDBInterface(Database):
         except Exception:
             pass
 
-        self._cur = quacklab.connect(self._dbfile)
+        self._cur = quacklab.connect(self._dbfile, read_only=self._read_only)
 
     def describe(self) -> jsondict:
         base_info: dict[str, object] = {
@@ -900,6 +902,7 @@ def connect(
     db: str | Path,
     *,
     name: str = "duckdb",
+    read_only: bool = False,
     refresh: bool = False,
     private: bool = False,
 ) -> DuckDBInterface:
@@ -910,6 +913,8 @@ def connect(
     name : str, optional
         A name to identify the current connection if multiple connections to different DuckDB instances should be
         maintained. This is used to register the instance on the `DatabasePool`. Defaults to *duckdb*.
+    read_only : bool, optional
+        If true, the database will be opened in read-only mode. By default, the database is opened in read-write mode.
     refresh : bool, optional
         If true, a new connection to the database will always be established, even if a connection to the same database is
         already pooled. The registration key will be suffixed to prevent collisions. By default, the current connection is
@@ -922,7 +927,7 @@ def connect(
         return _reconnect(name, pool=db_pool)
 
     db = Path(db)
-    duckdb_instance = DuckDBInterface(db)
+    duckdb_instance = DuckDBInterface(db, read_only=read_only)
 
     if not private:
         db_pool.register_database(name, duckdb_instance)
