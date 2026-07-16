@@ -25,6 +25,8 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 ## 🏥 Fixes
 
 - Fixed `transform.infer_between_predicates()` dropping unrelated predicates
+- Fixed `transform.extract_subquery()` and `transform.extract_query_fragment()`
+  breaking for negated unary predicates.
 
 ## ⚠️ Deprecations
 

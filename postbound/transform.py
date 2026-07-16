@@ -266,15 +266,18 @@ def _get_predicate_fragment(
     if not isinstance(predicate, CompoundPredicate):
         return predicate if predicate.tables().issubset(referenced_tables) else None
 
-    compound_predicate: CompoundPredicate = predicate
-    child_fragments = [_get_predicate_fragment(child, referenced_tables) for child in compound_predicate.children]
+    if predicate.operation == CompoundOperator.Not:
+        assert isinstance(predicate.children, AbstractPredicate)
+        child_fragments = [_get_predicate_fragment(predicate.children, referenced_tables)]
+    else:
+        child_fragments = [_get_predicate_fragment(child, referenced_tables) for child in predicate.children]  # type: ignore
     child_fragments = [fragment for fragment in child_fragments if fragment]
     if not child_fragments:
         return None
-    elif len(child_fragments) == 1 and compound_predicate.operation != CompoundOperator.Not:
+    elif len(child_fragments) == 1 and predicate.operation != CompoundOperator.Not:
         return child_fragments[0]
     else:
-        return CompoundPredicate(compound_predicate.operation, child_fragments)
+        return CompoundPredicate(predicate.operation, child_fragments)
 
 
 @overload
