@@ -488,23 +488,27 @@ def _default_subquery_name(tables: Iterable[TableReference]) -> str:
     return "_".join(table.identifier() for table in tables)
 
 
-def expand_to_query(predicate: AbstractPredicate) -> ImplicitSqlQuery:
+def expand_to_query(
+    predicate: AbstractPredicate, *, projection: Literal["star", "count_star"] = "star"
+) -> ImplicitSqlQuery:
     """Provides a ``SELECT *`` query that computes the result set of a specific predicate.
 
     Parameters
     ----------
     predicate : AbstractPredicate
         The predicate to expand
+    projection : Literal["star", "count_star"], optional
+    The *SELECT* clause of the resulting query
 
     Returns
     -------
     ImplicitSqlQuery
         An SQL query of the form ``SELECT * FROM <predicate tables> WHERE <predicate>``.
     """
-    select_clause = Select.star()
+    select_clause = Select.star() if projection == "star" else Select.count_star()
     from_clause = ImplicitFromClause.create_for(predicate.tables())
     where_clause = Where(predicate)
-    return build_query([select_clause, from_clause, where_clause])
+    return ImplicitSqlQuery(select_clause=select_clause, from_clause=from_clause, where_clause=where_clause)
 
 
 def move_into_subquery(query: SqlQuery, tables: Iterable[TableReference], subquery_name: str = "") -> SqlQuery:

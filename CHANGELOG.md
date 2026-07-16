@@ -20,7 +20,7 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 📰 Updates
 
-_None_
+- `transform.expand_to_query()` now supports different output projections
 
 ## 🏥 Fixes
 
