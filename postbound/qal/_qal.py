@@ -75,9 +75,7 @@ class LogicalOperator(enum.Enum):
     Overlaps = "&&"
 
 
-UnarySqlOperators = frozenset(
-    {LogicalOperator.Exists, LogicalOperator.Is, LogicalOperator.IsNot}
-)
+UnarySqlOperators = frozenset({LogicalOperator.Exists, LogicalOperator.Is, LogicalOperator.IsNot})
 """The `LogicalSqlOperators` that can be used as unary operators."""
 
 
@@ -195,9 +193,7 @@ class SqlExpression(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         """Enables processing of the current expression by an expression visitor.
 
         Parameters
@@ -292,9 +288,7 @@ class StaticValueExpression(SqlExpression, Generic[T]):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return []
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_static_value_expr(self, *args, **kwargs)
 
     __hash__ = SqlExpression.__hash__
@@ -357,9 +351,7 @@ class StarExpression(SqlExpression):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return []
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_star_expr(self, *args, **kwargs)
 
     __hash__ = SqlExpression.__hash__
@@ -478,14 +470,10 @@ class CastExpression(SqlExpression):
         return self._array_type
 
     def tables(self) -> set[TableReference]:
-        return self._casted_expression.tables() | util.set_union(
-            expr.tables() for expr in self._type_params
-        )
+        return self._casted_expression.tables() | util.set_union(expr.tables() for expr in self._type_params)
 
     def columns(self) -> set[ColumnReference]:
-        return self.casted_expression.columns() | util.set_union(
-            expr.columns() for expr in self.type_params
-        )
+        return self.casted_expression.columns() | util.set_union(expr.columns() for expr in self.type_params)
 
     def itercolumns(self) -> Iterable[ColumnReference]:
         casted_cols = list(self.casted_expression.itercolumns())
@@ -495,9 +483,7 @@ class CastExpression(SqlExpression):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return [self.casted_expression] + list(self.type_params)
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_cast_expr(self, *args, **kwargs)
 
     __hash__ = SqlExpression.__hash__
@@ -558,9 +544,7 @@ class MathExpression(SqlExpression):
     """
 
     @staticmethod
-    def create_binary(
-        lhs: Any, operator: MathOperator | str, rhs: Any
-    ) -> MathExpression:
+    def create_binary(lhs: Any, operator: MathOperator | str, rhs: Any) -> MathExpression:
         """Shortcut method to create a new math expression.
 
         Lhs and rhs are processed depending on their actual types:
@@ -610,8 +594,7 @@ class MathExpression(SqlExpression):
                     self._second_arg = tuple(self._second_arg)
             case _:
                 raise ValueError(
-                    "Second argument must be a single expression or a sequence of expressions, "
-                    f"not '{second_argument}'"
+                    f"Second argument must be a single expression or a sequence of expressions, not '{second_argument}'"
                 )
 
         if isinstance(self._second_arg, tuple) and len(self._second_arg) == 1:
@@ -689,9 +672,7 @@ class MathExpression(SqlExpression):
             case SqlExpression():
                 second_columns = list(self.second_arg.itercolumns())
             case Sequence():
-                second_columns = util.flatten(
-                    [sub_arg.itercolumns() for sub_arg in self.second_arg]
-                )
+                second_columns = util.flatten([sub_arg.itercolumns() for sub_arg in self.second_arg])
             case None:
                 second_columns = []
         return first_columns + second_columns
@@ -707,9 +688,7 @@ class MathExpression(SqlExpression):
                 pass
         return children
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_math_expr(self, *args, **kwargs)
 
     def _requires_brackets(self, child: SqlExpression) -> bool:
@@ -718,10 +697,7 @@ class MathExpression(SqlExpression):
             return False
         if child.operator == self.operator:
             return False
-        if (
-            self.operator == MathOperator.Concatenate
-            or child.operator == MathOperator.Concatenate
-        ):
+        if self.operator == MathOperator.Concatenate or child.operator == MathOperator.Concatenate:
             return True
 
         lazy_ops = {
@@ -755,18 +731,10 @@ class MathExpression(SqlExpression):
         if isinstance(self.second_arg, tuple):
             all_args = [self.first_arg] + list(self.second_arg)
             return operator_str.join(f"({arg})" for arg in all_args)
-        first_str = (
-            f"({self.first_arg})"
-            if self._requires_brackets(self.first_arg)
-            else str(self.first_arg)
-        )
+        first_str = f"({self.first_arg})" if self._requires_brackets(self.first_arg) else str(self.first_arg)
 
         assert isinstance(self.second_arg, SqlExpression)
-        second_str = (
-            f"({self.second_arg})"
-            if self._requires_brackets(self.second_arg)
-            else str(self.second_arg)
-        )
+        second_str = f"({self.second_arg})" if self._requires_brackets(self.second_arg) else str(self.second_arg)
         return f"{first_str} {operator_str} {second_str}"
 
 
@@ -822,9 +790,7 @@ class ColumnExpression(SqlExpression):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return []
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_column_expr(self)
 
     __hash__ = SqlExpression.__hash__
@@ -892,9 +858,7 @@ class FunctionExpression(SqlExpression):
 
     @staticmethod
     def create_count(
-        column: ColumnReference
-        | SqlExpression
-        | Iterable[SqlExpression] = StarExpression(),
+        column: ColumnReference | SqlExpression | Iterable[SqlExpression] = StarExpression(),
         *,
         distinct: bool = False,
     ) -> FunctionExpression:
@@ -965,18 +929,12 @@ class FunctionExpression(SqlExpression):
         if not function:
             raise ValueError("Function is required")
         if function.upper() not in AggregateFunctions and (distinct or filter_where):
-            raise ValueError(
-                "DISTINCT keyword or FILTER expressions are only valid for aggregate functions"
-            )
+            raise ValueError("DISTINCT keyword or FILTER expressions are only valid for aggregate functions")
 
         self._function = function.upper()
-        self._arguments: tuple[SqlExpression, ...] = (
-            () if arguments is None else tuple(arguments)
-        )
+        self._arguments: tuple[SqlExpression, ...] = () if arguments is None else tuple(arguments)
         self._kw_args: Mapping[str, SqlExpression] = (
-            {}
-            if keyword_args is None
-            else {k.upper(): v for k, v in keyword_args.items()}
+            {} if keyword_args is None else {k.upper(): v for k, v in keyword_args.items()}
         )
         self._distinct = distinct
         self._filter_expr = filter_where
@@ -1082,17 +1040,13 @@ class FunctionExpression(SqlExpression):
 
     def tables(self) -> set[TableReference]:
         args_tables = util.set_union(arg.tables() for arg in self.arguments)
-        kwargs_tables = util.set_union(
-            arg.tables() for arg in self.keyword_args.values()
-        )
+        kwargs_tables = util.set_union(arg.tables() for arg in self.keyword_args.values())
         filter_tables = self._filter_expr.tables() if self._filter_expr else set()
         return args_tables | kwargs_tables | filter_tables
 
     def columns(self) -> set[ColumnReference]:
         all_columns = util.set_union(arg.columns() for arg in self.arguments)
-        all_columns |= util.set_union(
-            arg.columns() for arg in self.keyword_args.values()
-        )
+        all_columns |= util.set_union(arg.columns() for arg in self.keyword_args.values())
         if self._filter_expr:
             all_columns |= self._filter_expr.columns()
         return all_columns
@@ -1110,9 +1064,7 @@ class FunctionExpression(SqlExpression):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return list(self.arguments) + list(self._kw_args.values())
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_function_expr(self, *args, **kwargs)
 
     __hash__ = SqlExpression.__hash__
@@ -1161,15 +1113,9 @@ class ArrayExpression(SqlExpression):
     """
 
     def __init__(self, elements: Sequence[SqlExpression]) -> None:
-        raw_elements = [
-            (idx, elem)
-            for idx, elem in enumerate(elements)
-            if not isinstance(elem, SqlExpression)
-        ]
+        raw_elements = [(idx, elem) for idx, elem in enumerate(elements) if not isinstance(elem, SqlExpression)]
         if raw_elements:
-            details = ", ".join(
-                f"{idx}: {type(elem)} ({elem})" for idx, elem in raw_elements
-            )
+            details = ", ".join(f"{idx}: {type(elem)} ({elem})" for idx, elem in raw_elements)
             raise TypeError(
                 "Cannot create ArrayExpression. ",
                 f"All elements must be SqlExpression instances, but found invalid elements at positions: {details}",
@@ -1199,9 +1145,7 @@ class ArrayExpression(SqlExpression):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return list(self._elements)
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_array_expr(self, *args, **kwargs)
 
     __hash__ = SqlExpression.__hash__
@@ -1258,14 +1202,9 @@ class ArrayAccessExpression(FunctionExpression):
         self._idx = idx
         self._lower_idx = lower_idx
         self._upper_idx = upper_idx
-        self._hash_val = hash(
-            (self._array, self._idx, self._lower_idx, self._upper_idx)
-        )
+        self._hash_val = hash((self._array, self._idx, self._lower_idx, self._upper_idx))
 
-        args = [
-            StaticValueExpression.null() if arg is None else arg
-            for arg in (array_expr, idx, lower_idx, upper_idx)
-        ]
+        args = [StaticValueExpression.null() if arg is None else arg for arg in (array_expr, idx, lower_idx, upper_idx)]
         super().__init__("ARRAY_GET", args)
 
     __slots__ = ("_array", "_idx", "_lower_idx", "_upper_idx", "_hash_val")
@@ -1331,9 +1270,7 @@ class ArrayAccessExpression(FunctionExpression):
             return None
         return self._lower_idx, self._upper_idx
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_array_access_expr(self, *args, **kwargs)
 
     def __eq__(self, other):
@@ -1409,9 +1346,7 @@ class SubqueryExpression(SqlExpression):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return []
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_subquery_expr(self, *args, **kwargs)
 
     __hash__ = SqlExpression.__hash__
@@ -1451,10 +1386,7 @@ class WindowExpression(SqlExpression):
         if isinstance(window_function, str):
             window_function = FunctionExpression(window_function)
         if isinstance(partitioning, Sequence):
-            partitioning = [
-                ColumnExpression(p) if isinstance(p, ColumnReference) else p
-                for p in partitioning
-            ]
+            partitioning = [ColumnExpression(p) if isinstance(p, ColumnReference) else p for p in partitioning]
 
         self._window_function = window_function
         self._partitioning = tuple(partitioning) if partitioning else tuple()
@@ -1538,13 +1470,9 @@ class WindowExpression(SqlExpression):
 
     def iterchildren(self) -> Iterable[SqlExpression]:
         function_children = self.window_function.iterchildren()
-        partitioning_children = util.flatten(
-            expr.iterchildren() for expr in self.partitioning
-        )
+        partitioning_children = util.flatten(expr.iterchildren() for expr in self.partitioning)
         ordering_children = self.ordering.iterexpressions() if self.ordering else []
-        filter_children = (
-            self.filter_condition.iterexpressions() if self.filter_condition else []
-        )
+        filter_children = self.filter_condition.iterexpressions() if self.filter_condition else []
         return util.flatten(
             [
                 function_children,
@@ -1554,9 +1482,7 @@ class WindowExpression(SqlExpression):
             ]
         )
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_window_expr(self)
 
     __hash__ = SqlExpression.__hash__
@@ -1571,15 +1497,11 @@ class WindowExpression(SqlExpression):
         )
 
     def __str__(self) -> str:
-        filter_str = (
-            f" FILTER (WHERE {self.filter_condition})" if self.filter_condition else ""
-        )
+        filter_str = f" FILTER (WHERE {self.filter_condition})" if self.filter_condition else ""
         function_str = f"{self.window_function}{filter_str} OVER"
         window_grouping: list[str] = []
         if self.partitioning:
-            partitioning_str = ", ".join(
-                str(partition) for partition in self.partitioning
-            )
+            partitioning_str = ", ".join(str(partition) for partition in self.partitioning)
             window_grouping.append(f"PARTITION BY {partitioning_str}")
         if self.ordering:
             window_grouping.append(str(self.ordering))
@@ -1676,23 +1598,12 @@ class CaseExpression(SqlExpression):
         return util.flatten(expr.itercolumns() for expr in self.iterchildren())
 
     def iterchildren(self) -> Iterable[SqlExpression]:
-        case_children = util.flatten(
-            list(pred.iterchildren()) + list(expr.iterchildren())
-            for pred, expr in self.cases
-        )
-        expression_children = (
-            list(self.simple_expression.iterchildren())
-            if self.simple_expression
-            else []
-        )
-        else_children = (
-            list(self.else_expression.iterchildren()) if self.else_expression else []
-        )
+        case_children = util.flatten(list(pred.iterchildren()) + list(expr.iterchildren()) for pred, expr in self.cases)
+        expression_children = list(self.simple_expression.iterchildren()) if self.simple_expression else []
+        else_children = list(self.else_expression.iterchildren()) if self.else_expression else []
         return case_children + expression_children + else_children
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_case_expr(self, *args, **kwargs)
 
     def _braketify(self, expression: SqlExpression) -> str:
@@ -1713,14 +1624,8 @@ class CaseExpression(SqlExpression):
 
     def __str__(self) -> str:
         expression = f"{self.simple_expression} " if self.simple_expression else ""
-        cases_str = " ".join(
-            f"WHEN {pred} THEN {self._braketify(expr)}" for pred, expr in self.cases
-        )
-        else_str = (
-            f" ELSE {self._braketify(self.else_expression)}"
-            if self.else_expression
-            else ""
-        )
+        cases_str = " ".join(f"WHEN {pred} THEN {self._braketify(expr)}" for pred, expr in self.cases)
+        else_str = f" ELSE {self._braketify(self.else_expression)}" if self.else_expression else ""
         return f"CASE {expression}{cases_str}{else_str} END"
 
 
@@ -1742,26 +1647,16 @@ class QuantifierExpression(SqlExpression):
     @staticmethod
     def any(expression: SqlExpression | SqlQuery) -> QuantifierExpression:
         """Create an ANY expression."""
-        expression = (
-            SubqueryExpression(expression)
-            if isinstance(expression, SqlQuery)
-            else expression
-        )
+        expression = SubqueryExpression(expression) if isinstance(expression, SqlQuery) else expression
         return QuantifierExpression(expression, quantifier=QuantifierOperator.Any)
 
     @staticmethod
     def all(expression: SqlExpression | SqlQuery) -> QuantifierExpression:
         """Create an ALL expression."""
-        expression = (
-            SubqueryExpression(expression)
-            if isinstance(expression, SqlQuery)
-            else expression
-        )
+        expression = SubqueryExpression(expression) if isinstance(expression, SqlQuery) else expression
         return QuantifierExpression(expression, quantifier=QuantifierOperator.All)
 
-    def __init__(
-        self, expression: SqlExpression, *, quantifier: QuantifierOperator
-    ) -> None:
+    def __init__(self, expression: SqlExpression, *, quantifier: QuantifierOperator) -> None:
         self._expression = expression
         self._quantifier = quantifier
 
@@ -1797,9 +1692,7 @@ class QuantifierExpression(SqlExpression):
     def iterchildren(self) -> Iterable[SqlExpression]:
         return [self._expression]
 
-    def accept_visitor(
-        self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_quantifier_expr(self, *args, **kwargs)
 
     __hash__ = SqlExpression.__hash__
@@ -1829,9 +1722,7 @@ class SqlExpressionVisitor(abc.ABC, Generic[VisitorResult]):
     """
 
     @abc.abstractmethod
-    def visit_static_value_expr(
-        self, expr: StaticValueExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_static_value_expr(self, expr: StaticValueExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -1843,21 +1734,15 @@ class SqlExpressionVisitor(abc.ABC, Generic[VisitorResult]):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_column_expr(
-        self, expr: ColumnExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_column_expr(self, expr: ColumnExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_function_expr(
-        self, expr: FunctionExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_function_expr(self, expr: FunctionExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_subquery_expr(
-        self, expr: SubqueryExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_subquery_expr(self, expr: SubqueryExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -1865,9 +1750,7 @@ class SqlExpressionVisitor(abc.ABC, Generic[VisitorResult]):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_window_expr(
-        self, expr: WindowExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_window_expr(self, expr: WindowExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -1875,29 +1758,21 @@ class SqlExpressionVisitor(abc.ABC, Generic[VisitorResult]):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_quantifier_expr(
-        self, expr: QuantifierExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_quantifier_expr(self, expr: QuantifierExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_predicate_expr(
-        self, expr: AbstractPredicate, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_predicate_expr(self, expr: AbstractPredicate, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
     def visit_array_expr(self, expr: ArrayExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
-    def visit_array_access_expr(
-        self, expr: ArrayAccessExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_array_access_expr(self, expr: ArrayAccessExpression, *args, **kwargs) -> VisitorResult:
         return self.visit_function_expr(expr, *args, **kwargs)
 
-    def visit_substring_expr(
-        self, expr: SubstringExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_substring_expr(self, expr: SubstringExpression, *args, **kwargs) -> VisitorResult:
         return self.visit_function_expr(expr, *args, **kwargs)
 
 
@@ -1924,64 +1799,40 @@ class ExpressionCollector(SqlExpressionVisitor[set[SqlExpression]]):
         self.matcher = matcher
         self.continue_after_match = continue_after_match
 
-    def visit_column_expr(
-        self, expr: ColumnExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_column_expr(self, expr: ColumnExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_cast_expr(
-        self, expr: CastExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_cast_expr(self, expr: CastExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_function_expr(
-        self, expr: FunctionExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_function_expr(self, expr: FunctionExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_math_expr(
-        self, expr: MathExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_math_expr(self, expr: MathExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_star_expr(
-        self, expr: StarExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_star_expr(self, expr: StarExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_static_value_expr(
-        self, expr: StaticValueExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_static_value_expr(self, expr: StaticValueExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_subquery_expr(
-        self, expr: SubqueryExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_subquery_expr(self, expr: SubqueryExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_window_expr(
-        self, expr: WindowExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_window_expr(self, expr: WindowExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_case_expr(
-        self, expr: CaseExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_case_expr(self, expr: CaseExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_quantifier_expr(
-        self, expr: QuantifierExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_quantifier_expr(self, expr: QuantifierExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_array_expr(
-        self, expr: ArrayExpression, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_array_expr(self, expr: ArrayExpression, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
-    def visit_predicate_expr(
-        self, expr: AbstractPredicate, *args, **kwargs
-    ) -> set[SqlExpression]:
+    def visit_predicate_expr(self, expr: AbstractPredicate, *args, **kwargs) -> set[SqlExpression]:
         return self._check_match(expr)
 
     def _check_match(self, expression: SqlExpression) -> set[SqlExpression]:
@@ -2000,9 +1851,7 @@ class ExpressionCollector(SqlExpressionVisitor[set[SqlExpression]]):
         own_match = {expression} if self.matcher(expression) else set()
         if own_match and not self.continue_after_match:
             return own_match
-        return own_match | util.set_union(
-            child.accept_visitor(self) for child in expression.iterchildren()
-        )
+        return own_match | util.set_union(child.accept_visitor(self) for child in expression.iterchildren())
 
 
 def as_expression(
@@ -2092,9 +1941,7 @@ def as_func_expr(func_name: str, *args, **kwargs) -> FunctionExpression:
     return FunctionExpression(func_name, positional_args, keyword_args=keyword_args)
 
 
-def as_math_expr(
-    lhs: object, operator: MathOperator | str, rhs: object
-) -> MathExpression:
+def as_math_expr(lhs: object, operator: MathOperator | str, rhs: object) -> MathExpression:
     """Utility to create a binary math expression.
 
     The left-hand side and right-hand side arguments are transformed using `as_expression`. The
@@ -2187,10 +2034,7 @@ def _collect_base_expressions(
         (ColumnExpression, StaticValueExpression, SubqueryExpression),
     ):
         return [expression]
-    return util.flatten(
-        _collect_base_expressions(child_expr)
-        for child_expr in expression.iterchildren()
-    )
+    return util.flatten(_collect_base_expressions(child_expr) for child_expr in expression.iterchildren())
 
 
 def _collect_subquery_expressions(
@@ -2211,9 +2055,7 @@ def _collect_subquery_expressions(
         All subqueries that are contained in some level in the expression
     """
     return [
-        child_expr
-        for child_expr in _collect_base_expressions(expression)
-        if isinstance(child_expr, SubqueryExpression)
+        child_expr for child_expr in _collect_base_expressions(expression) if isinstance(child_expr, SubqueryExpression)
     ]
 
 
@@ -2260,11 +2102,7 @@ def _collect_column_expression_tables(
     set[TableReference]
         All tables that are referenced in the columns of `ColumnExpression`s
     """
-    return {
-        column.table
-        for column in _collect_column_expression_columns(expression)
-        if column.table is not None
-    }
+    return {column.table for column in _collect_column_expression_columns(expression) if column.table is not None}
 
 
 def _generate_join_pairs(
@@ -2604,16 +2442,10 @@ class AbstractPredicate(SqlExpression, abc.ABC):
         set[TableReference]
             The tables that need to be provided by the query execution engine in order to run this predicate
         """
-        subqueries = util.flatten(
-            _collect_subquery_expressions(child_expr)
-            for child_expr in self.iterexpressions()
-        )
-        subquery_tables = util.set_union(
-            subquery.query.unbound_tables() for subquery in subqueries
-        )
+        subqueries = util.flatten(_collect_subquery_expressions(child_expr) for child_expr in self.iterexpressions())
+        subquery_tables = util.set_union(subquery.query.unbound_tables() for subquery in subqueries)
         column_tables = util.set_union(
-            _collect_column_expression_tables(child_expr)
-            for child_expr in self.iterexpressions()
+            _collect_column_expression_tables(child_expr) for child_expr in self.iterexpressions()
         )
         return column_tables | subquery_tables
 
@@ -2741,9 +2573,7 @@ class BinaryPredicate(BasePredicate):
     """
 
     @staticmethod
-    def equal(
-        first_argument: SqlExpression, second_argument: SqlExpression
-    ) -> BinaryPredicate:
+    def equal(first_argument: SqlExpression, second_argument: SqlExpression) -> BinaryPredicate:
         """Generates an equality predicate between two arguments."""
         return BinaryPredicate(LogicalOperator.Equal, first_argument, second_argument)
 
@@ -2799,19 +2629,13 @@ class BinaryPredicate(BasePredicate):
         if len(second_tables) > 1:
             return True
 
-        return (
-            bool(first_tables)
-            and bool(second_tables)
-            and len(first_tables ^ second_tables) > 0
-        )
+        return bool(first_tables) and bool(second_tables) and len(first_tables ^ second_tables) > 0
 
     def columns(self) -> set[ColumnReference]:
         return self.first_argument.columns() | self.second_argument.columns()
 
     def itercolumns(self) -> Iterable[ColumnReference]:
-        return list(self.first_argument.itercolumns()) + list(
-            self.second_argument.itercolumns()
-        )
+        return list(self.first_argument.itercolumns()) + list(self.second_argument.itercolumns())
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return [self.first_argument, self.second_argument]
@@ -2964,11 +2788,7 @@ class BetweenPredicate(BasePredicate):
         )
 
     def columns(self) -> set[ColumnReference]:
-        return (
-            self.column.columns()
-            | self.interval_start.columns()
-            | self.interval_end.columns()
-        )
+        return self.column.columns() | self.interval_start.columns() | self.interval_end.columns()
 
     def itercolumns(self) -> Iterable[ColumnReference]:
         return (
@@ -3004,11 +2824,7 @@ class BetweenPredicate(BasePredicate):
     __hash__ = AbstractPredicate.__hash__
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self.column == other.column
-            and self.interval == other.interval
-        )
+        return isinstance(other, type(self)) and self.column == other.column and self.interval == other.interval
 
     def __str__(self) -> str:
         interval_start, interval_end = self.interval
@@ -3049,9 +2865,7 @@ class InPredicate(BasePredicate):
     """
 
     @staticmethod
-    def subquery(
-        column: SqlExpression, subquery: SubqueryExpression | SqlQuery
-    ) -> InPredicate:
+    def subquery(column: SqlExpression, subquery: SubqueryExpression | SqlQuery) -> InPredicate:
         """Generates an *IN* predicate that is based on a subquery.
 
         Such a predicate is of the form ``R.a IN (SELECT S.b FROM S)``.
@@ -3068,11 +2882,7 @@ class InPredicate(BasePredicate):
         InPredicate
             The predicate
         """
-        subquery = (
-            subquery
-            if isinstance(subquery, SubqueryExpression)
-            else SubqueryExpression(subquery)
-        )
+        subquery = subquery if isinstance(subquery, SubqueryExpression) else SubqueryExpression(subquery)
         return InPredicate(column, (subquery,))
 
     def __init__(self, column: SqlExpression, values: Sequence[SqlExpression]) -> None:
@@ -3118,9 +2928,7 @@ class InPredicate(BasePredicate):
         bool
             Whether this predicate is based on a subquery
         """
-        return len(self._values) == 1 and isinstance(
-            self._values[0], SubqueryExpression
-        )
+        return len(self._values) == 1 and isinstance(self._values[0], SubqueryExpression)
 
     def is_join(self) -> bool:
         column_tables = _collect_column_expression_tables(self.column)
@@ -3139,9 +2947,7 @@ class InPredicate(BasePredicate):
         return all_columns
 
     def itercolumns(self) -> Iterable[ColumnReference]:
-        return list(self.column.itercolumns()) + util.flatten(
-            val.itercolumns() for val in self.values
-        )
+        return list(self.column.itercolumns()) + util.flatten(val.itercolumns() for val in self.values)
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return [self.column] + list(self.values)
@@ -3180,11 +2986,7 @@ class InPredicate(BasePredicate):
     __hash__ = AbstractPredicate.__hash__
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self.column == other.column
-            and set(self.values) == set(other.values)
-        )
+        return isinstance(other, type(self)) and self.column == other.column and set(self.values) == set(other.values)
 
     def __str__(self) -> str:
         vals = self._stringify_values()
@@ -3228,11 +3030,7 @@ class UnaryPredicate(BasePredicate):
         UnaryPredicate
             The *EXISTS* predicate
         """
-        subquery = (
-            subquery
-            if isinstance(subquery, SubqueryExpression)
-            else SubqueryExpression(subquery)
-        )
+        subquery = subquery if isinstance(subquery, SubqueryExpression) else SubqueryExpression(subquery)
         return UnaryPredicate(subquery, LogicalOperator.Exists)
 
     def __init__(self, column: SqlExpression, operation: Optional[SqlOperator] = None):
@@ -3296,11 +3094,7 @@ class UnaryPredicate(BasePredicate):
     __hash__ = AbstractPredicate.__hash__
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self.operation == other.operation
-            and self.column == other.column
-        )
+        return isinstance(other, type(self)) and self.operation == other.operation and self.column == other.column
 
     def __str__(self) -> str:
         if not self.operation:
@@ -3345,9 +3139,7 @@ class CompoundPredicate(AbstractPredicate):
     """
 
     @staticmethod
-    def create(
-        operation: CompoundOperator, parts: Sequence[AbstractPredicate]
-    ) -> AbstractPredicate:
+    def create(operation: CompoundOperator, parts: Sequence[AbstractPredicate]) -> AbstractPredicate:
         """Creates an arbitrary compound predicate for a number of child predicates.
 
         If just a single child predicate is provided, but the operation requires multiple children, that child is returned
@@ -3373,9 +3165,7 @@ class CompoundPredicate(AbstractPredicate):
             a conjunction or disjunction is requested, but no child predicates are supplied.
         """
         if operation == CompoundOperator.Not and len(parts) != 1:
-            raise ValueError(
-                f"Can only create negations for exactly one predicate but received: '{parts}'"
-            )
+            raise ValueError(f"Can only create negations for exactly one predicate but received: '{parts}'")
         elif operation != CompoundOperator.Not and not parts:
             raise ValueError("Conjunctions/disjunctions require at least one predicate")
 
@@ -3508,11 +3298,7 @@ class CompoundPredicate(AbstractPredicate):
             The sequence of child predicates for *AND* and *OR* predicates, or the negated predicate for *NOT*
             predicates.
         """
-        return (
-            self._children[0]
-            if self.operation == CompoundOperator.Not
-            else self._children
-        )
+        return self._children[0] if self.operation == CompoundOperator.Not else self._children
 
     def is_negation(self) -> bool:
         """Checks whether this is a NOT predicate."""
@@ -3572,18 +3358,16 @@ class CompoundPredicate(AbstractPredicate):
                 raise ValueError(f"Unknown operation: '{self.operation}'")
 
     def _stringify_not(self) -> str:
-        if not isinstance(self.children, InPredicate):
+        if isinstance(self.children, InPredicate):
+            return f"{self.children.column} NOT IN {self.children._stringify_values()}"
+        elif isinstance(self.children, BasePredicate):
             return f"NOT {self.children}"
-        return f"{self.children.column} NOT IN {self.children._stringify_values()}"
+        return f"NOT ({self.children})"
 
     __hash__ = AbstractPredicate.__hash__
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self.operation == other.operation
-            and self.children == other.children
-        )
+        return isinstance(other, type(self)) and self.operation == other.operation and self.children == other.children
 
     def __repr__(self) -> str:
         return super().__repr__()
@@ -3593,8 +3377,7 @@ class CompoundPredicate(AbstractPredicate):
             return self._stringify_not()
         elif self.operation == CompoundOperator.Or:
             components = " OR ".join(
-                f"({child})" if child.is_compound() else str(child)
-                for child in self.iterchildren()
+                f"({child})" if child.is_compound() else str(child) for child in self.iterchildren()
             )
             return f"({components})"
         elif self.operation == CompoundOperator.And:
@@ -3620,9 +3403,7 @@ class PredicateVisitor(abc.ABC, Generic[VisitorResult]):
     .. Visitor pattern: https://en.wikipedia.org/wiki/Visitor_pattern
     """
 
-    def visit_query_predicates(
-        self, query: SqlQuery | QueryPredicates, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_query_predicates(self, query: SqlQuery | QueryPredicates, *args, **kwargs) -> VisitorResult:
         if isinstance(query, SqlQuery):
             predicates = query.predicates()
         else:
@@ -3630,27 +3411,19 @@ class PredicateVisitor(abc.ABC, Generic[VisitorResult]):
         return predicates.root.accept_visitor(self, *args, **kwargs)
 
     @abc.abstractmethod
-    def visit_binary_predicate(
-        self, predicate: BinaryPredicate, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_between_predicate(
-        self, predicate: BetweenPredicate, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_between_predicate(self, predicate: BetweenPredicate, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_in_predicate(
-        self, predicate: InPredicate, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_in_predicate(self, predicate: InPredicate, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_unary_predicate(
-        self, predicate: UnaryPredicate, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -3712,14 +3485,10 @@ def as_predicate(
 
 
 @overload
-def as_predicate(
-    column: ColumnReference, operation: LogicalOperator | str, *arguments
-) -> BinaryPredicate: ...
+def as_predicate(column: ColumnReference, operation: LogicalOperator | str, *arguments) -> BinaryPredicate: ...
 
 
-def as_predicate(
-    column: ColumnReference, operation: LogicalOperator | str, *arguments
-) -> BasePredicate:
+def as_predicate(column: ColumnReference, operation: LogicalOperator | str, *arguments) -> BasePredicate:
     """Utility method to quickly construct instances of base predicates.
 
     The given arguments are transformed into appropriate expression objects as necessary.
@@ -3809,9 +3578,7 @@ def determine_join_equivalence_classes(
     join_predicates = {
         pred
         for pred in predicates
-        if isinstance(pred, BinaryPredicate)
-        and pred.is_join()
-        and pred.operation == LogicalOperator.Equal
+        if isinstance(pred, BinaryPredicate) and pred.is_join() and pred.operation == LogicalOperator.Equal
     }
 
     equivalence_graph = nx.Graph()
@@ -3857,9 +3624,7 @@ def generate_predicates_for_equivalence_classes(
     equivalence_predicates: set[BinaryPredicate] = set()
     for equivalence_class in equivalence_classes:
         for first_col, second_col in util.collections.pairs(equivalence_class):
-            equivalence_predicates.add(
-                as_predicate(first_col, LogicalOperator.Equal, second_col)
-            )
+            equivalence_predicates.add(as_predicate(first_col, LogicalOperator.Equal, second_col))
     return equivalence_predicates
 
 
@@ -3920,9 +3685,7 @@ def _attempt_filter_unwrap(
     match predicate:
         case BinaryPredicate(op, lhs, rhs):
             left, right = _unwrap_expression(lhs), _unwrap_expression(rhs)
-            left, right = (
-                (left, right) if isinstance(left, ColumnReference) else (right, left)
-            )
+            left, right = (left, right) if isinstance(left, ColumnReference) else (right, left)
             assert isinstance(left, ColumnReference)
             return left, op, right
 
@@ -4100,9 +3863,7 @@ class SimpleFilter(AbstractPredicate):
             individual predicates, they simply do not appear in the result. Therefore, this sequence
             may be empty if none of the predicates are valid  simplified views.
         """
-        views: list[SimpleFilter | None] = [
-            SimpleFilter.attempt_wrap(pred) for pred in predicates
-        ]
+        views: list[SimpleFilter | None] = [SimpleFilter.attempt_wrap(pred) for pred in predicates]
         return [v for v in views if v is not None]
 
     def __init__(
@@ -4373,9 +4134,7 @@ class SimpleJoin(AbstractPredicate):
             individual predicates, they simply do not appear in the result. Therefore, this sequence
             may be empty if none of the predicates are valid simplified views.
         """
-        views: list[SimpleJoin | None] = [
-            SimpleJoin.attempt_wrap(pred) for pred in predicates
-        ]
+        views: list[SimpleJoin | None] = [SimpleJoin.attempt_wrap(pred) for pred in predicates]
         return [v for v in views if v is not None]
 
     def __init__(
@@ -4441,9 +4200,7 @@ class SimpleJoin(AbstractPredicate):
         """
         ...
 
-    def partner_of(
-        self, other: TableReference | ColumnReference
-    ) -> Optional[TableReference | ColumnReference]:
+    def partner_of(self, other: TableReference | ColumnReference) -> Optional[TableReference | ColumnReference]:
         """Provides the join partner of the given column or table.
 
         If the column or table is not joined, *None* is returned.
@@ -4540,26 +4297,18 @@ def _collect_filter_predicates(
         return {predicate} if predicate.is_filter() else set()
     elif isinstance(predicate, CompoundPredicate):
         if predicate.operation == CompoundOperator.Or:
-            or_filter_children = [
-                child_pred
-                for child_pred in predicate.children
-                if child_pred.is_filter()
-            ]
+            or_filter_children = [child_pred for child_pred in predicate.children if child_pred.is_filter()]
             if len(or_filter_children) < 2:
                 return set(or_filter_children)
             or_filters = CompoundPredicate(CompoundOperator.Or, or_filter_children)
             return {or_filters}
         elif predicate.operation == CompoundOperator.Not:
-            not_filter_children = (
-                predicate.children if predicate.children.is_filter() else None
-            )
+            not_filter_children = predicate.children if predicate.children.is_filter() else None
             if not not_filter_children:
                 return set()
             return {predicate}
         elif predicate.operation == CompoundOperator.And:
-            return util.set_union(
-                [_collect_filter_predicates(child) for child in predicate.children]
-            )
+            return util.set_union([_collect_filter_predicates(child) for child in predicate.children])
         else:
             raise ValueError(f"Unknown operation: '{predicate.operation}'")
     else:
@@ -4606,24 +4355,18 @@ def _collect_join_predicates(
         return {predicate} if predicate.is_join() else set()
     elif isinstance(predicate, CompoundPredicate):
         if predicate.operation == CompoundOperator.Or:
-            or_join_children = [
-                child_pred for child_pred in predicate.children if child_pred.is_join()
-            ]
+            or_join_children = [child_pred for child_pred in predicate.children if child_pred.is_join()]
             if len(or_join_children) < 2:
                 return set(or_join_children)
             or_joins = CompoundPredicate(CompoundOperator.Or, or_join_children)
             return {or_joins}
         elif predicate.operation == CompoundOperator.Not:
-            not_join_children = (
-                predicate.children if predicate.children.is_join() else None
-            )
+            not_join_children = predicate.children if predicate.children.is_join() else None
             if not not_join_children:
                 return set()
             return {predicate}
         elif predicate.operation == CompoundOperator.And:
-            return util.set_union(
-                [_collect_join_predicates(child) for child in predicate.children]
-            )
+            return util.set_union([_collect_join_predicates(child) for child in predicate.children])
         else:
             raise ValueError(f"Unknown operation: '{predicate.operation}'")
     else:
@@ -4776,9 +4519,7 @@ class QueryPredicates:
 
             for join in self.joins():
                 for first_col, second_col in join.join_partners():
-                    join_graph.add_edge(
-                        first_col.table, second_col.table, predicate=join
-                    )
+                    join_graph.add_edge(first_col.table, second_col.table, predicate=join)
 
             return join_graph
 
@@ -4787,8 +4528,7 @@ class QueryPredicates:
             table2alias[tab.drop_alias()].add(tab)
 
         table2preds = {
-            tab: {alias: self.filters_for(alias) for alias in aliased}
-            for tab, aliased in table2alias.items()
+            tab: {alias: self.filters_for(alias) for alias in aliased} for tab, aliased in table2alias.items()
         }
         for table, preds in table2preds.items():
             join_graph.add_node(table, predicate=preds, aliases=table2alias[table])
@@ -4831,16 +4571,8 @@ class QueryPredicates:
         """
         if self.is_empty():
             return None
-        applicable_filters = [
-            filter_pred
-            for filter_pred in self.filters()
-            if filter_pred.contains_table(table)
-        ]
-        return (
-            CompoundPredicate.create_and(applicable_filters)
-            if applicable_filters
-            else None
-        )
+        applicable_filters = [filter_pred for filter_pred in self.filters() if filter_pred.contains_table(table)]
+        return CompoundPredicate.create_and(applicable_filters) if applicable_filters else None
 
     @functools.cache
     def joins_for(self, table: TableReference) -> Collection[AbstractPredicate]:
@@ -4869,13 +4601,9 @@ class QueryPredicates:
         applicable_joins: list[AbstractPredicate] = [
             join_pred for join_pred in self.joins() if join_pred.contains_table(table)
         ]
-        distinct_joins: dict[frozenset[TableReference], list[AbstractPredicate]] = (
-            collections.defaultdict(list)
-        )
+        distinct_joins: dict[frozenset[TableReference], list[AbstractPredicate]] = collections.defaultdict(list)
         for join_predicate in applicable_joins:
-            partners = {
-                column.table for column in join_predicate.join_partners_of(table)
-            }
+            partners = {column.table for column in join_predicate.join_partners_of(table)}
             distinct_joins[frozenset(partners)].append(join_predicate)
 
         aggregated_predicates = []
@@ -5029,9 +4757,7 @@ class QueryPredicates:
             return False
         return all(SimpleJoin.can_wrap(pred) for pred in self.joins())
 
-    def and_(
-        self, other_predicate: QueryPredicates | AbstractPredicate
-    ) -> QueryPredicates:
+    def and_(self, other_predicate: QueryPredicates | AbstractPredicate) -> QueryPredicates:
         """Combines the current predicates with additional predicates, creating a conjunction of the two predicates.
 
         The input predicates, as well as the current predicates object are not modified. All changes are applied to the
@@ -5048,22 +4774,12 @@ class QueryPredicates:
         QueryPredicates
             The merged predicates wrapper. Its root is roughly equivalent to ``self.root AND other_predicate.root``.
         """
-        if (
-            self.is_empty()
-            and isinstance(other_predicate, QueryPredicates)
-            and other_predicate.is_empty()
-        ):
+        if self.is_empty() and isinstance(other_predicate, QueryPredicates) and other_predicate.is_empty():
             return self
-        elif (
-            isinstance(other_predicate, QueryPredicates) and other_predicate.is_empty()
-        ):
+        elif isinstance(other_predicate, QueryPredicates) and other_predicate.is_empty():
             return self
 
-        other_predicate = (
-            other_predicate._root
-            if isinstance(other_predicate, QueryPredicates)
-            else other_predicate
-        )
+        other_predicate = other_predicate._root if isinstance(other_predicate, QueryPredicates) else other_predicate
         if self.is_empty():
             return QueryPredicates(other_predicate)
 
@@ -5088,9 +4804,7 @@ class QueryPredicates:
         join_graph.add_nodes_from(tables)
         for table in tables:
             for join in self.joins_for(table):
-                partner_tables = (
-                    set(col.table for col in join.join_partners_of(table)) & tables
-                )
+                partner_tables = set(col.table for col in join.join_partners_of(table)) & tables
                 join_graph.add_edges_from(itertools.product([table], partner_tables))
         return nx.is_connected(join_graph)
 
@@ -5125,9 +4839,7 @@ class QueryPredicates:
         for table in self._root.tables():
             join_partners = self.joins_for(table)
             for join_predicate in join_partners:
-                partner_tables = {
-                    partner.table for partner in join_predicate.join_partners_of(table)
-                }
+                partner_tables = {partner.table for partner in join_predicate.join_partners_of(table)}
                 map_key = frozenset(partner_tables | {table})
                 if map_key in predicate_map:
                     continue
@@ -5158,18 +4870,12 @@ class QueryPredicates:
             A conjunction of all the individual join predicates between the two sets of candidate tables. If there is no join
             predicate between any of the tables, *None* is returned.
         """
-        if isinstance(first_table, TableReference) and isinstance(
-            second_table, TableReference
-        ):
+        if isinstance(first_table, TableReference) and isinstance(second_table, TableReference):
             if first_table == second_table:
                 return None
             first_joins: Collection[AbstractPredicate] = self.joins_for(first_table)
-            matching_joins = {
-                join for join in first_joins if join.joins_table(second_table)
-            }
-            return (
-                CompoundPredicate.create_and(matching_joins) if matching_joins else None
-            )
+            matching_joins = {join for join in first_joins if join.joins_table(second_table)}
+            return CompoundPredicate.create_and(matching_joins) if matching_joins else None
 
         matching_joins = set()
         first_table, second_table = (
@@ -5214,9 +4920,7 @@ class QueryPredicates:
         if len(first_table) > 1:
             first_first_table, *remaining_first_tables = first_table
             for remaining_first_table in remaining_first_tables:
-                join_graph = nx.contracted_nodes(
-                    join_graph, first_first_table, remaining_first_table
-                )
+                join_graph = nx.contracted_nodes(join_graph, first_first_table, remaining_first_table)
             first_hook = first_first_table
         else:
             first_hook = util.simplify(first_table)
@@ -5224,9 +4928,7 @@ class QueryPredicates:
         if len(second_table) > 1:
             first_second_table, *remaining_second_tables = second_table
             for remaining_second_table in remaining_second_tables:
-                join_graph = nx.contracted_nodes(
-                    join_graph, first_second_table, remaining_second_table
-                )
+                join_graph = nx.contracted_nodes(join_graph, first_second_table, remaining_second_table)
             second_hook = first_second_table
         else:
             second_hook = util.simplify(second_table)
@@ -5321,9 +5023,7 @@ class BaseClause(abc.ABC):
         set[TableReference]
             All tables. This includes virtual tables if such tables are present in the clause
         """
-        return util.set_union(
-            expression.tables() for expression in self.iterexpressions()
-        )
+        return util.set_union(expression.tables() for expression in self.iterexpressions())
 
     @abc.abstractmethod
     def columns(self) -> set[ColumnReference]:
@@ -5366,9 +5066,7 @@ class BaseClause(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         """Enables processing of the current clause by a visitor.
 
         Parameters
@@ -5482,9 +5180,7 @@ class Hint(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return []
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_hint_clause(self, *args, **kwargs)
 
     __hash__ = BaseClause.__hash__
@@ -5614,9 +5310,7 @@ class Explain(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return []
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_explain_clause(self)
 
     __hash__ = BaseClause.__hash__
@@ -5679,9 +5373,7 @@ class WithQuery:
 
         self._query = query
         self._subquery_expression = SubqueryExpression(query)
-        self._target_name = (
-            target_name if isinstance(target_name, str) else target_name.identifier()
-        )
+        self._target_name = target_name if isinstance(target_name, str) else target_name.identifier()
         self._materialized = materialized
         self._hash_val = hash((query, target_name))
 
@@ -5787,11 +5479,7 @@ class WithQuery:
         return self._hash_val
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self._target_name == other._target_name
-            and self._query == other._query
-        )
+        return isinstance(other, type(self)) and self._target_name == other._target_name and self._query == other._query
 
     def __repr__(self) -> str:
         return str(self)
@@ -5837,9 +5525,7 @@ class ValuesWithQuery(WithQuery):
         if isinstance(target_name, TableReference):
             self._table = target_name
         else:
-            self._table = (
-                TableReference.create_virtual(target_name) if target_name else None
-            )
+            self._table = TableReference.create_virtual(target_name) if target_name else None
 
         parsed_columns: list[ColumnReference] = []
         for col in columns if columns else []:
@@ -5849,9 +5535,7 @@ class ValuesWithQuery(WithQuery):
             parsed_columns.append(ColumnReference(col, self._table))
         self._columns = tuple(parsed_columns)
 
-        table_source = ValuesTableSource(
-            values, alias=self._table, columns=self._columns
-        )
+        table_source = ValuesTableSource(values, alias=self._table, columns=self._columns)
         self._query = SqlQuery(
             select_clause=Select.star(),
             from_clause=From([table_source]),
@@ -5900,10 +5584,7 @@ class ValuesWithQuery(WithQuery):
         """
         if self._columns:
             return self._columns
-        return [
-            ColumnReference(f"column_{i + 1}", self.target_table)
-            for i in range(len(self._values[0]))
-        ]
+        return [ColumnReference(f"column_{i + 1}", self.target_table) for i in range(len(self._values[0]))]
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return util.flatten(row for row in self._values)
@@ -6032,18 +5713,12 @@ class CommonTableExpression(BaseClause):
         return util.set_union(with_query.columns() for with_query in self._with_queries)
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
-        return util.flatten(
-            with_query.iterexpressions() for with_query in self._with_queries
-        )
+        return util.flatten(with_query.iterexpressions() for with_query in self._with_queries)
 
     def itercolumns(self) -> Iterable[ColumnReference]:
-        return util.flatten(
-            with_query.itercolumns() for with_query in self._with_queries
-        )
+        return util.flatten(with_query.itercolumns() for with_query in self._with_queries)
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_cte_clause(self, *args, **kwargs)
 
     def __len__(self) -> int:
@@ -6130,25 +5805,19 @@ class BaseProjection:
         return BaseProjection(fn, target_name)
 
     @staticmethod
-    def create_min(
-        column: ColumnReference | SqlExpression, *, target_name: str = ""
-    ) -> BaseProjection:
+    def create_min(column: ColumnReference | SqlExpression, *, target_name: str = "") -> BaseProjection:
         """Shorthand to create a projection with a MIN() aggregation."""
         fn = FunctionExpression.create_min(column)
         return BaseProjection(fn, target_name)
 
     @staticmethod
-    def create_max(
-        column: ColumnReference | SqlExpression, *, target_name: str = ""
-    ) -> BaseProjection:
+    def create_max(column: ColumnReference | SqlExpression, *, target_name: str = "") -> BaseProjection:
         """Shorthand to create a projection with a MAX() aggregation."""
         fn = FunctionExpression.create_max(column)
         return BaseProjection(fn, target_name)
 
     @staticmethod
-    def create_sum(
-        column: ColumnReference | SqlExpression, *, target_name: str = ""
-    ) -> BaseProjection:
+    def create_sum(column: ColumnReference | SqlExpression, *, target_name: str = "") -> BaseProjection:
         """Shorthand to create a projection with a SUM() aggregation."""
         fn = FunctionExpression.create_sum(column)
         return BaseProjection(fn, target_name)
@@ -6186,9 +5855,7 @@ class BaseProjection:
         All parameters (except for the target name) are passed to the corresponding
         `FunctionExpression`, see its documentation for details.
         """
-        expr = FunctionExpression(
-            fn, args, keyword_args=kwargs, distinct=distinct, filter_where=filter_where
-        )
+        expr = FunctionExpression(fn, args, keyword_args=kwargs, distinct=distinct, filter_where=filter_where)
         return BaseProjection(expr, target_name)
 
     @staticmethod
@@ -6343,9 +6010,7 @@ class Select(BaseClause):
 
     @staticmethod
     def create_for(
-        columns: ColumnReference
-        | SqlExpression
-        | Iterable[ColumnReference | SqlExpression],
+        columns: ColumnReference | SqlExpression | Iterable[ColumnReference | SqlExpression],
         *,
         distinct: Iterable[SqlExpression] | bool = False,
     ) -> Select:
@@ -6369,9 +6034,7 @@ class Select(BaseClause):
         """
         columns = util.enlist(columns)
         target_columns = [
-            BaseProjection.column(column)
-            if isinstance(column, ColumnReference)
-            else BaseProjection(column)
+            BaseProjection.column(column) if isinstance(column, ColumnReference) else BaseProjection(column)
             for column in columns
         ]
         return Select(target_columns, distinct=distinct)
@@ -6391,31 +6054,23 @@ class Select(BaseClause):
         return Select(BaseProjection.create_count(column, target_name=target_name))
 
     @staticmethod
-    def create_min(
-        column: ColumnReference | SqlExpression, *, target_name: str = ""
-    ) -> Select:
+    def create_min(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Select:
         """Shorthand to create a SELECT clause with a single MIN() expression."""
         return Select(BaseProjection.create_min(column, target_name=target_name))
 
     @staticmethod
-    def create_max(
-        column: ColumnReference | SqlExpression, *, target_name: str = ""
-    ) -> Select:
+    def create_max(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Select:
         """Shorthand to create a SELECT clause with a single MAX() expression."""
         return Select(BaseProjection.create_max(column, target_name=target_name))
 
     @staticmethod
-    def create_sum(
-        column: ColumnReference | SqlExpression, *, target_name: str = ""
-    ) -> Select:
+    def create_sum(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Select:
         """Shorthand to create a SELECT clause with a single SUM() expression."""
         return Select(BaseProjection.create_sum(column, target_name=target_name))
 
     def __init__(
         self,
-        targets: BaseProjection
-        | SqlExpression
-        | Sequence[BaseProjection | SqlExpression],
+        targets: BaseProjection | SqlExpression | Sequence[BaseProjection | SqlExpression],
         *,
         distinct: Iterable[SqlExpression] | bool = False,
     ) -> None:
@@ -6428,10 +6083,7 @@ class Select(BaseClause):
             case SqlExpression():
                 self._targets = (BaseProjection(targets),)
             case Sequence():
-                self._targets = tuple(
-                    t if isinstance(t, BaseProjection) else BaseProjection(t)
-                    for t in targets
-                )
+                self._targets = tuple(t if isinstance(t, BaseProjection) else BaseProjection(t) for t in targets)
             case _:
                 raise ValueError(f"Unexpected targets value: {targets}")
 
@@ -6556,9 +6208,7 @@ class Select(BaseClause):
         """
         return {target.target_name for target in self.targets if target.target_name}
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_select_clause(self, *args, **kwargs)
 
     def __len__(self) -> int:
@@ -6580,11 +6230,7 @@ class Select(BaseClause):
     def __str__(self) -> str:
         if self.is_distinct():
             distinct_cols = ", ".join(str(col) for col in self.distinct_on)
-            select_str = (
-                f"SELECT DISTINCT ON ({distinct_cols})"
-                if distinct_cols
-                else "SELECT DISTINCT"
-            )
+            select_str = f"SELECT DISTINCT ON ({distinct_cols})" if distinct_cols else "SELECT DISTINCT"
         else:
             select_str = "SELECT"
         parts_str = ", ".join(str(target) for target in self.targets)
@@ -6770,18 +6416,10 @@ class SubqueryTableSource(TableSource):
         *,
         lateral: bool = False,
     ) -> None:
-        self._subquery_expression = (
-            query
-            if isinstance(query, SubqueryExpression)
-            else SubqueryExpression(query)
-        )
-        self._target_name = (
-            target_name if isinstance(target_name, str) else target_name.identifier()
-        )
+        self._subquery_expression = query if isinstance(query, SubqueryExpression) else SubqueryExpression(query)
+        self._target_name = target_name if isinstance(target_name, str) else target_name.identifier()
         self._lateral = lateral
-        self._hash_val = hash(
-            (self._subquery_expression, self._target_name, self._lateral)
-        )
+        self._hash_val = hash((self._subquery_expression, self._target_name, self._lateral))
 
     __slots__ = (
         "_subquery_expression",
@@ -6825,11 +6463,7 @@ class SubqueryTableSource(TableSource):
         Optional[TableReference]
             The table. This will always be a virtual table. Can be **None** for an anonymous subquery.
         """
-        return (
-            TableReference.create_virtual(self._target_name)
-            if self.target_name
-            else None
-        )
+        return TableReference.create_virtual(self._target_name) if self.target_name else None
 
     @property
     def expression(self) -> SubqueryExpression:
@@ -6869,10 +6503,7 @@ class SubqueryTableSource(TableSource):
         """
         if not self.target_name:
             return self._subquery_expression.query.output_columns()
-        return [
-            col.bind_to(self.target_table)
-            for col in self._subquery_expression.query.output_columns()
-        ]
+        return [col.bind_to(self.target_table) for col in self._subquery_expression.query.output_columns()]
 
     def tables(self) -> set[TableReference]:
         return self._subquery_expression.tables() | {self.target_table}
@@ -7017,10 +6648,7 @@ class ValuesTableSource(TableSource):
         """
         if self._columns:
             return self._columns
-        return [
-            ColumnReference(f"column_{i}", self._table)
-            for i in range(len(self._values[0]))
-        ]
+        return [ColumnReference(f"column_{i}", self._table) for i in range(len(self._values[0]))]
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return util.flatten(row for row in self._values)
@@ -7054,9 +6682,7 @@ class ValuesTableSource(TableSource):
         complete_vals_str = ", ".join(vals)
         cols = ", ".join(quote(col.name) for col in self._columns)
         cols_str = f" ({cols})" if cols else ""
-        tab_str = (
-            f" AS {quote(self._table.identifier())}{cols_str}" if self._table else ""
-        )
+        tab_str = f" AS {quote(self._table.identifier())}{cols_str}" if self._table else ""
 
         return f"(VALUES {complete_vals_str}){tab_str}"
 
@@ -7073,9 +6699,7 @@ class FunctionTableSource(TableSource):
         created.
     """
 
-    def __init__(
-        self, function: FunctionExpression, *, alias: str | TableReference = ""
-    ) -> None:
+    def __init__(self, function: FunctionExpression, *, alias: str | TableReference = "") -> None:
         self._function = function
 
         if isinstance(alias, TableReference):
@@ -7134,11 +6758,7 @@ class FunctionTableSource(TableSource):
         return self._hash_val
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self._function == other._function
-            and self._alias == other._alias
-        )
+        return isinstance(other, type(self)) and self._function == other._function and self._alias == other._alias
 
     def __repr__(self) -> str:
         return str(self)
@@ -7220,17 +6840,13 @@ class JoinTableSource(TableSource):
         join_type: JoinType = JoinType.InnerJoin,
     ) -> None:
         if join_condition is None and join_type not in AutoJoins:
-            raise ValueError(
-                "Join condition is required for this join type: " + str(join_type)
-            )
+            raise ValueError("Join condition is required for this join type: " + str(join_type))
 
         self._left = left
         self._right = right
         self._join_condition = join_condition
         self._join_type = join_type if join_condition else JoinType.CrossJoin
-        self._hash_val = hash(
-            (self._left, self._right, self._join_condition, self._join_type)
-        )
+        self._hash_val = hash((self._left, self._right, self._join_condition, self._join_type))
 
     __slots__ = (
         "_left",
@@ -7346,25 +6962,19 @@ class JoinTableSource(TableSource):
         return self._left.tables() | self._right.tables()
 
     def columns(self) -> set[ColumnReference]:
-        condition_columns = (
-            self._join_condition.columns() if self._join_condition else set()
-        )
+        condition_columns = self._join_condition.columns() if self._join_condition else set()
         return self._left.columns() | self._right.columns() | condition_columns
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
         left_expressions = list(self._left.iterexpressions())
         right_expressions = list(self._right.iterexpressions())
-        condition_expressions = (
-            list(self._join_condition.iterexpressions()) if self._join_condition else []
-        )
+        condition_expressions = list(self._join_condition.iterexpressions()) if self._join_condition else []
         return left_expressions + right_expressions + condition_expressions
 
     def itercolumns(self) -> Iterable[ColumnReference]:
         left_columns = list(self._left.itercolumns())
         right_columns = list(self._right.itercolumns())
-        condition_columns = (
-            list(self._join_condition.itercolumns()) if self._join_condition else []
-        )
+        condition_columns = list(self._join_condition.itercolumns()) if self._join_condition else []
         return left_columns + right_columns + condition_columns
 
     def predicates(self) -> Optional[QueryPredicates]:
@@ -7379,11 +6989,7 @@ class JoinTableSource(TableSource):
         if self._join_condition:
             all_predicates.append(self._join_condition)
 
-        return (
-            QueryPredicates(CompoundPredicate.create_and(all_predicates))
-            if all_predicates
-            else None
-        )
+        return QueryPredicates(CompoundPredicate.create_and(all_predicates)) if all_predicates else None
 
     def __hash__(self) -> int:
         return self._hash_val
@@ -7475,15 +7081,11 @@ class From(BaseClause, Generic[TableType]):
         source_predicates = [src.predicates() for src in self._items]
         if not any(source_predicates):
             return None
-        actual_predicates = [
-            src_pred.root for src_pred in source_predicates if src_pred
-        ]
+        actual_predicates = [src_pred.root for src_pred in source_predicates if src_pred]
         merged_predicate = CompoundPredicate.create_and(actual_predicates)
         return QueryPredicates(merged_predicate)
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_from_clause(self, *args, **kwargs)
 
     def __len__(self) -> int:
@@ -7652,9 +7254,7 @@ class Where(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return self.predicate.itercolumns()
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_where_clause(self, *args, **kwargs)
 
     __hash__ = BaseClause.__hash__
@@ -7686,18 +7286,14 @@ class GroupBy(BaseClause):
     """
 
     @staticmethod
-    def create_for(
-        column: ColumnReference | Iterable[ColumnReference], *more_cols
-    ) -> GroupBy:
+    def create_for(column: ColumnReference | Iterable[ColumnReference], *more_cols) -> GroupBy:
         """Shortcut method to create a *GROUP BY* clause from column references."""
         column = [column] if isinstance(column, ColumnReference) else list(column)
         column.extend(more_cols)
 
         return GroupBy([ColumnExpression(col) for col in column])
 
-    def __init__(
-        self, group_columns: Sequence[SqlExpression], distinct: bool = False
-    ) -> None:
+    def __init__(self, group_columns: Sequence[SqlExpression], distinct: bool = False) -> None:
         if not group_columns:
             raise ValueError("At least one group column must be specified")
         self._group_columns = tuple(group_columns)
@@ -7740,9 +7336,7 @@ class GroupBy(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return util.flatten(column.itercolumns() for column in self.group_columns)
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_groupby_clause(self, *args, **kwargs)
 
     def __len__(self) -> int:
@@ -7811,9 +7405,7 @@ class Having(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return self.condition.itercolumns()
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_having_clause(self, *args, **kwargs)
 
     __hash__ = BaseClause.__hash__
@@ -7926,14 +7518,8 @@ class OrderByExpression:
         return str(self)
 
     def __str__(self) -> str:
-        ascending_str = (
-            "" if self.ascending is None else (" ASC" if self.ascending else " DESC")
-        )
-        nulls_first = (
-            ""
-            if self.nulls_first is None
-            else (" NULLS FIRST " if self.nulls_first else " NULLS LAST")
-        )
+        ascending_str = "" if self.ascending is None else (" ASC" if self.ascending else " DESC")
+        nulls_first = "" if self.nulls_first is None else (" NULLS FIRST " if self.nulls_first else " NULLS LAST")
         return f"{self.column}{ascending_str}{nulls_first}"
 
 
@@ -7967,17 +7553,10 @@ class OrderBy(BaseClause):
         columns = util.enlist(columns)
         columns = util.flatten(columns)
         return OrderBy(
-            [
-                OrderByExpression.create_for(
-                    col, ascending=ascending, nulls_first=nulls_first
-                )
-                for col in columns
-            ]
+            [OrderByExpression.create_for(col, ascending=ascending, nulls_first=nulls_first) for col in columns]
         )
 
-    def __init__(
-        self, expressions: Iterable[OrderByExpression] | OrderByExpression
-    ) -> None:
+    def __init__(self, expressions: Iterable[OrderByExpression] | OrderByExpression) -> None:
         if not expressions:
             raise ValueError("At least one ORDER BY expression required")
         self._expressions = tuple(util.enlist(expressions))
@@ -7999,21 +7578,15 @@ class OrderBy(BaseClause):
         return self._expressions
 
     def columns(self) -> set[ColumnReference]:
-        return util.set_union(
-            expression.column.columns() for expression in self.expressions
-        )
+        return util.set_union(expression.column.columns() for expression in self.expressions)
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return [expression.column for expression in self.expressions]
 
     def itercolumns(self) -> Iterable[ColumnReference]:
-        return util.flatten(
-            expression.itercolumns() for expression in self.iterexpressions()
-        )
+        return util.flatten(expression.itercolumns() for expression in self.iterexpressions())
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_orderby_clause(self)
 
     def __len__(self) -> int:
@@ -8028,9 +7601,7 @@ class OrderBy(BaseClause):
         return isinstance(other, type(self)) and self.expressions == other.expressions
 
     def __str__(self) -> str:
-        return "ORDER BY " + ", ".join(
-            str(order_expr) for order_expr in self.expressions
-        )
+        return "ORDER BY " + ", ".join(str(order_expr) for order_expr in self.expressions)
 
 
 FetchDirection = Literal["first", "next", "prior", "last"]
@@ -8115,28 +7686,18 @@ class Limit(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return []
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_limit_clause(self, *args, **kwargs)
 
     __hash__ = BaseClause.__hash__
 
     def __eq__(self, other) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self.limit == other.limit
-            and self.offset == other.offset
-        )
+        return isinstance(other, type(self)) and self.limit == other.limit and self.offset == other.offset
 
     def __str__(self) -> str:
         offset_str = f"OFFSET {self.offset} ROWS" if self.offset is not None else ""
         fetch_direction = self.fetch_direction.upper()
-        limit_str = (
-            f"FETCH {fetch_direction} {self.limit} ROWS ONLY"
-            if self.limit is not None
-            else ""
-        )
+        limit_str = f"FETCH {fetch_direction} {self.limit} ROWS ONLY" if self.limit is not None else ""
         if offset_str and limit_str:
             return offset_str + " " + limit_str
         elif offset_str:
@@ -8252,9 +7813,7 @@ class UnionClause(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return list(self._lhs.itercolumns()) + list(self._rhs.itercolumns())
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_union_clause(self, *args, **kwargs)
 
     __hash__ = BaseClause.__hash__
@@ -8285,9 +7844,7 @@ class ExceptClause(BaseClause):
         The right query that is part of the *EXCEPT* operation. This is the result set of the tuples that should be removed.
     """
 
-    def __init__(
-        self, left_query: SelectStatement, right_query: SelectStatement
-    ) -> None:
+    def __init__(self, left_query: SelectStatement, right_query: SelectStatement) -> None:
         self._lhs = left_query
         self._rhs = right_query
         super().__init__(hash((self._lhs, self._rhs)))
@@ -8333,18 +7890,13 @@ class ExceptClause(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return list(self._lhs.itercolumns()) + list(self._rhs.itercolumns())
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_except_clause(self, *args, **kwargs)
 
     __hash__ = BaseClause.__hash__
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self._partner_query == other._partner_query
-        )
+        return isinstance(other, type(self)) and self._partner_query == other._partner_query
 
     def __str__(self) -> str:
         lhs_str = self._lhs.stringify(trailing_delimiter=False)
@@ -8365,9 +7917,7 @@ class IntersectClause(BaseClause):
         and right does not really matter.
     """
 
-    def __init__(
-        self, left_query: SelectStatement, right_query: SelectStatement
-    ) -> None:
+    def __init__(self, left_query: SelectStatement, right_query: SelectStatement) -> None:
         self._lhs = left_query
         self._rhs = right_query
         super().__init__(hash((self._lhs, self._rhs)))
@@ -8428,18 +7978,13 @@ class IntersectClause(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return list(self._lhs.itercolumns()) + list(self._rhs.itercolumns())
 
-    def accept_visitor(
-        self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs
-    ) -> VisitorResult:
+    def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_intersect_clause(self, *args, **kwargs)
 
     __hash__ = BaseClause.__hash__
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self._partner_query == other._partner_query
-        )
+        return isinstance(other, type(self)) and self._partner_query == other._partner_query
 
     def __str__(self) -> str:
         lhs_str = self._lhs.stringify(trailing_delimiter=False)
@@ -8473,9 +8018,7 @@ class ClauseVisitor(abc.ABC, Generic[VisitorResult]):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_cte_clause(
-        self, clause: CommonTableExpression, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_cte_clause(self, clause: CommonTableExpression, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -8511,15 +8054,11 @@ class ClauseVisitor(abc.ABC, Generic[VisitorResult]):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_except_clause(
-        self, clause: ExceptClause, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_except_clause(self, clause: ExceptClause, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def visit_intersect_clause(
-        self, clause: IntersectClause, *args, **kwargs
-    ) -> VisitorResult:
+    def visit_intersect_clause(self, clause: IntersectClause, *args, **kwargs) -> VisitorResult:
         raise NotImplementedError
 
 
@@ -8565,10 +8104,7 @@ def collect_subqueries_in_expression(
     """
     if isinstance(expression, SubqueryExpression):
         return {expression.query}
-    return util.set_union(
-        collect_subqueries_in_expression(child_expr)
-        for child_expr in expression.iterchildren()
-    )
+    return util.set_union(collect_subqueries_in_expression(child_expr) for child_expr in expression.iterchildren())
 
 
 def _collect_subqueries_in_table_source(
@@ -8598,8 +8134,7 @@ def _collect_subqueries_in_table_source(
     elif isinstance(table_source, JoinTableSource):
         source_subqueries = _collect_subqueries_in_table_source(table_source.source)
         nested_subqueries = util.set_union(
-            _collect_subqueries_in_table_source(nested_join)
-            for nested_join in table_source.joined_table
+            _collect_subqueries_in_table_source(nested_join) for nested_join in table_source.joined_table
         )
         condition_subqueries = (
             util.set_union(
@@ -8640,47 +8175,31 @@ def _collect_subqueries(clause: BaseClause) -> set[SqlQuery]:
     --------
     SqlQuery.subqueries
     """
-    if (
-        isinstance(clause, Hint)
-        or isinstance(clause, Limit)
-        or isinstance(clause, Explain)
-    ):
+    if isinstance(clause, Hint) or isinstance(clause, Limit) or isinstance(clause, Explain):
         return set()
 
     if isinstance(clause, CommonTableExpression):
         return set()
     elif isinstance(clause, Select):
-        return util.set_union(
-            collect_subqueries_in_expression(target.expression)
-            for target in clause.targets
-        )
+        return util.set_union(collect_subqueries_in_expression(target.expression) for target in clause.targets)
     elif isinstance(clause, ImplicitFromClause):
         return set()
     elif isinstance(clause, From):
-        return util.set_union(
-            _collect_subqueries_in_table_source(src) for src in clause.items
-        )
+        return util.set_union(_collect_subqueries_in_table_source(src) for src in clause.items)
     elif isinstance(clause, Where):
         where_predicate = clause.predicate
         return util.set_union(
-            collect_subqueries_in_expression(expression)
-            for expression in where_predicate.iterexpressions()
+            collect_subqueries_in_expression(expression) for expression in where_predicate.iterexpressions()
         )
     elif isinstance(clause, GroupBy):
-        return util.set_union(
-            collect_subqueries_in_expression(column) for column in clause.group_columns
-        )
+        return util.set_union(collect_subqueries_in_expression(column) for column in clause.group_columns)
     elif isinstance(clause, Having):
         having_predicate = clause.condition
         return util.set_union(
-            collect_subqueries_in_expression(expression)
-            for expression in having_predicate.iterexpressions()
+            collect_subqueries_in_expression(expression) for expression in having_predicate.iterexpressions()
         )
     elif isinstance(clause, OrderBy):
-        return util.set_union(
-            collect_subqueries_in_expression(expression.column)
-            for expression in clause.expressions
-        )
+        return util.set_union(collect_subqueries_in_expression(expression.column) for expression in clause.expressions)
     elif isinstance(clause, UnionClause):
         return clause.left_query.subqueries() | clause.right_query.subqueries()
     elif isinstance(clause, ExceptClause):
@@ -8721,8 +8240,7 @@ def _collect_bound_tables_from_source(
     elif isinstance(table_source, JoinTableSource):
         direct_tables = _collect_bound_tables_from_source(table_source.source)
         nested_tables = util.set_union(
-            _collect_bound_tables_from_source(nested_join)
-            for nested_join in table_source.joined_table
+            _collect_bound_tables_from_source(nested_join) for nested_join in table_source.joined_table
         )
         return direct_tables | nested_tables
 
@@ -8751,9 +8269,7 @@ def _collect_bound_tables(from_clause: From) -> set[TableReference]:
     if isinstance(from_clause, ImplicitFromClause):
         return from_clause.tables()
     else:
-        return util.set_union(
-            _collect_bound_tables_from_source(src) for src in from_clause.items
-        )
+        return util.set_union(_collect_bound_tables_from_source(src) for src in from_clause.items)
 
 
 FromClauseType = TypeVar("FromClauseType", bound=From)
@@ -8766,9 +8282,7 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
     match item:
         # Predicates
         case CompoundPredicate() if not item.is_negation():
-            children = [
-                _create_ast(c, indentation=indentation + 2) for c in item.children
-            ]
+            children = [_create_ast(c, indentation=indentation + 2) for c in item.children]
             child_str = "\n".join(children)
             item_str = f"{item_str} [{item.operation.value}]"
             return f"{prefix}+-{item_str}\n{child_str}"
@@ -8778,9 +8292,7 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
             return f"{prefix}+-{item_str}\n{child}"
         case UnaryPredicate():
             child = _create_ast(item.column, indentation=indentation + 2)
-            item_str = (
-                f"{item_str} [{item.operation.value}]" if item.operation else item_str
-            )
+            item_str = f"{item_str} [{item.operation.value}]" if item.operation else item_str
             return f"{prefix}+-{item_str}\n{child}"
         case BinaryPredicate():
             lhs = _create_ast(item.first_argument, indentation=indentation + 2)
@@ -8788,10 +8300,7 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
             item_str = f"{item_str} [{item.operation.value}]"
             return f"{prefix}+-{item_str}\n{lhs}\n{rhs}"
         case AbstractPredicate():
-            expressions = [
-                _create_ast(e, indentation=indentation + 2)
-                for e in item.iterexpressions()
-            ]
+            expressions = [_create_ast(e, indentation=indentation + 2) for e in item.iterexpressions()]
             expression_str = "\n".join(expressions)
             return f"{prefix}+-{item_str}\n{expression_str}"
 
@@ -8800,31 +8309,21 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
             return f"{prefix}+ {item_str} [{item.column}]"
         case CastExpression():
             child = _create_ast(item.casted_expression, indentation=indentation + 2)
-            target_type = (
-                f"{item.target_type}[]" if item.array_type else item.target_type
-            )
+            target_type = f"{item.target_type}[]" if item.array_type else item.target_type
             return f"{prefix}+-{item_str} [{target_type}]\n{child}"
         case QuantifierExpression():
             child = _create_ast(item.expression, indentation=indentation + 2)
             return f"{prefix}+-{item_str} [{item.quantifier.value}]\n{child}"
         case FunctionExpression():
-            arguments = [
-                _create_ast(arg, indentation=indentation + 2) for arg in item.arguments
-            ]
+            arguments = [_create_ast(arg, indentation=indentation + 2) for arg in item.arguments]
             argument_str = "\n".join(arguments)
             item_str = f"{item_str} [{item.function}]"
             return f"{prefix}+-{item_str}\n{argument_str}"
         case SqlExpression():
             # NB: This has to be the last expression/predicate handler since they all inherit from SqlExpression
-            expressions = [
-                _create_ast(e, indentation=indentation + 2) for e in item.iterchildren()
-            ]
+            expressions = [_create_ast(e, indentation=indentation + 2) for e in item.iterchildren()]
             expression_str = "\n".join(expressions)
-            return (
-                f"{prefix}+-{item_str}\n{expression_str}"
-                if expressions
-                else f"{prefix}+-{item_str} [{item}]"
-            )
+            return f"{prefix}+-{item_str}\n{expression_str}" if expressions else f"{prefix}+-{item_str} [{item}]"
 
         # Clauses
         case Where() | Having():
@@ -8852,10 +8351,7 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
             cte_str = "\n".join(ctes)
             return f"{prefix}+-{item_str}\n{cte_str}"
         case BaseClause():
-            expressions = [
-                _create_ast(e, indentation=indentation + 2)
-                for e in item.iterexpressions()
-            ]
+            expressions = [_create_ast(e, indentation=indentation + 2) for e in item.iterexpressions()]
             expression_str = "\n".join(expressions)
             return f"{prefix}+-{item_str}\n{expression_str}"
         case ValuesWithQuery():
@@ -8865,16 +8361,11 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
             item_str = f"{item_str} [{item.target_name}]"
             return f"{prefix}+-{item_str}\n{child_expression}"
         case SetQuery():
-            subqueries = [
-                _create_ast(q, indentation=indentation + 2)
-                for q in (item.left_query, item.right_query)
-            ]
+            subqueries = [_create_ast(q, indentation=indentation + 2) for q in (item.left_query, item.right_query)]
             subquery_str = "\n".join(subqueries)
             return f"{prefix}+-{item_str}\n{subquery_str}"
         case SqlQuery():
-            clauses = [
-                _create_ast(c, indentation=indentation + 2) for c in item.clauses()
-            ]
+            clauses = [_create_ast(c, indentation=indentation + 2) for c in item.clauses()]
             clause_str = "\n".join(clauses)
             return f"{prefix}+-{item_str}\n{clause_str}"
         case _:
@@ -9312,9 +8803,7 @@ class SqlQuery:
 
         if self.cte_clause:
             for with_query in self.cte_clause.queries:
-                current_predicate = current_predicate.and_(
-                    with_query.query.predicates()
-                )
+                current_predicate = current_predicate.and_(with_query.query.predicates())
 
         if self.where_clause:
             current_predicate = current_predicate.and_(self.where_clause.predicate)
@@ -9410,9 +8899,7 @@ class SqlQuery:
         # the implementation of subqueries() on SetQuery relies on this being a set, both methods should be changed together
         return util.set_union(_collect_subqueries(clause) for clause in self.clauses())
 
-    def clauses(
-        self, *, skip: Optional[Type | Iterable[Type]] = NoneType
-    ) -> Sequence[BaseClause]:
+    def clauses(self, *, skip: Optional[Type | Iterable[Type]] = NoneType) -> Sequence[BaseClause]:
         """Provides all the clauses that are defined (i.e. not *None*) in this query.
 
         Parameters
@@ -9439,11 +8926,7 @@ class SqlQuery:
             self.orderby_clause,
             self.limit_clause,
         ]
-        return [
-            clause
-            for clause in all_clauses
-            if clause is not None and not isinstance(clause, skip)
-        ]
+        return [clause for clause in all_clauses if clause is not None and not isinstance(clause, skip)]
 
     def bound_tables(self) -> set[TableReference]:
         """Provides all tables that can be assigned to a physical or virtual table reference in this query.
@@ -9460,9 +8943,7 @@ class SqlQuery:
         set[TableReference]
             All tables that are bound (i.e. listed in the *FROM* clause or a CTE) of the query.
         """
-        subquery_produced_tables = util.set_union(
-            subquery.bound_tables() for subquery in self.subqueries()
-        )
+        subquery_produced_tables = util.set_union(subquery.bound_tables() for subquery in self.subqueries())
         cte_produced_tables = self.cte_clause.tables() if self.cte_clause else set()
         own_produced_tables = _collect_bound_tables(self.from_clause)
         return own_produced_tables | subquery_produced_tables | cte_produced_tables
@@ -9489,18 +8970,11 @@ class SqlQuery:
             virtual_subquery_targets = set()
 
         if self.cte_clause:
-            virtual_cte_targets = {
-                with_query.target_table for with_query in self.cte_clause.queries
-            }
+            virtual_cte_targets = {with_query.target_table for with_query in self.cte_clause.queries}
         else:
             virtual_cte_targets = set()
 
-        return (
-            self.tables()
-            - self.bound_tables()
-            - virtual_subquery_targets
-            - virtual_cte_targets
-        )
+        return self.tables() - self.bound_tables() - virtual_subquery_targets - virtual_cte_targets
 
     def is_ordered(self) -> bool:
         """Checks, whether this query produces its result tuples in order.
@@ -9541,11 +9015,7 @@ class SqlQuery:
         if not len(self.select_clause.targets) == 1 or self.select_clause.is_distinct():
             return False
         target: SqlExpression = util.simplify(self.select_clause.targets).expression
-        return (
-            isinstance(target, FunctionExpression)
-            and target.is_aggregate()
-            and not self._groupby_clause
-        )
+        return isinstance(target, FunctionExpression) and target.is_aggregate() and not self._groupby_clause
 
     def is_set_query(self) -> bool:
         """Checks, whether this query is a set query.
@@ -9625,10 +9095,7 @@ class SqlQuery:
             A string representation of this query
         """
         delim = ";" if trailing_delimiter else ""
-        return (
-            "".join(_stringify_clause(clause) for clause in self.clauses()).rstrip()
-            + delim
-        )
+        return "".join(_stringify_clause(clause) for clause in self.clauses()).rstrip() + delim
 
     def ast(self) -> str:
         """Provides a human-readable representation of the abstract syntax tree for this query.
@@ -9654,10 +9121,7 @@ class SqlQuery:
         clause_visitor : ClauseVisitor
             The visitor algorithm to use.
         """
-        return {
-            clause: clause.accept_visitor(clause_visitor, *args, **kwargs)
-            for clause in self.clauses()
-        }
+        return {clause: clause.accept_visitor(clause_visitor, *args, **kwargs) for clause in self.clauses()}
 
     def __json__(self) -> str:
         return str(self)
@@ -9861,12 +9325,8 @@ class MixedSqlQuery(SqlQuery):
         explain_clause: Optional[Explain] = None,
         hints: Optional[Hint] = None,
     ) -> None:
-        if isinstance(from_clause, ExplicitFromClause) or isinstance(
-            from_clause, ImplicitFromClause
-        ):
-            raise ValueError(
-                "MixedSqlQuery cannot be combined with explicit/implicit FROM clause"
-            )
+        if isinstance(from_clause, ExplicitFromClause) or isinstance(from_clause, ImplicitFromClause):
+            raise ValueError("MixedSqlQuery cannot be combined with explicit/implicit FROM clause")
         super().__init__(
             select_clause=select_clause,
             from_clause=from_clause,
@@ -10229,9 +9689,7 @@ class SetQuery:
             self._rhs.output_columns(),
         )
         if len(lhs_cols) != len(rhs_cols):
-            raise ValueError(
-                "The left and right queries of a set operation must have the same number of columns"
-            )
+            raise ValueError("The left and right queries of a set operation must have the same number of columns")
 
         for i in range(len(lhs_cols)):
             lhs_col = lhs_cols[i]
@@ -10270,9 +9728,7 @@ class SetQuery:
         # as an implementation detail we know for a fact that SqlQuery always returns a set
         return self._lhs.subqueries() | self._rhs.subqueries()
 
-    def clauses(
-        self, *, skip: Optional[Type | Iterable[Type]] = NoneType
-    ) -> Sequence[BaseClause]:
+    def clauses(self, *, skip: Optional[Type | Iterable[Type]] = NoneType) -> Sequence[BaseClause]:
         """Provides all the clauses that are defined (i.e. not *None*) in this query.
 
         Parameters
@@ -10459,12 +9915,7 @@ class SetQuery:
             A string representation of this query
         """
         delim = ";" if trailing_delimiter else ""
-        return (
-            "".join(
-                _stringify_clause(clause).rstrip("; ") for clause in self.clauses()
-            ).rstrip()
-            + delim
-        )
+        return "".join(_stringify_clause(clause).rstrip("; ") for clause in self.clauses()).rstrip() + delim
 
     def ast(self) -> str:
         """Provides a human-readable representation of the abstract syntax tree for this query.
@@ -10478,9 +9929,7 @@ class SetQuery:
         """
         return _create_ast(self)
 
-    def accept_visitor(
-        self, clause_visitor: ClauseVisitor, *args, **kwargs
-    ) -> dict[BaseClause, VisitorResult]:
+    def accept_visitor(self, clause_visitor: ClauseVisitor, *args, **kwargs) -> dict[BaseClause, VisitorResult]:
         """Applies a visitor over all clauses in the current query.
 
         Notice that since the visitor is applied to all clauses, it returns the results for each of them.
@@ -10490,10 +9939,7 @@ class SetQuery:
         clause_visitor : ClauseVisitor
             The visitor algorithm to use.
         """
-        return {
-            clause: clause.accept_visitor(clause_visitor, *args, **kwargs)
-            for clause in self.clauses()
-        }
+        return {clause: clause.accept_visitor(clause_visitor, *args, **kwargs) for clause in self.clauses()}
 
     def __json__(self) -> str:
         return str(self)
@@ -10636,9 +10082,7 @@ def build_query(query_clauses: Iterable[BaseClause]) -> SqlQuery:
 
     if build_set_query:
         if union_clause is not None:
-            setop = (
-                SetOperator.UnionAll if union_clause.union_all else SetOperator.Union
-            )
+            setop = SetOperator.UnionAll if union_clause.union_all else SetOperator.Union
             lhs, rhs = union_clause.left_query, union_clause.right_query
         elif except_clause is not None:
             setop = SetOperator.Except

@@ -24,6 +24,9 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 🏥 Fixes
 
+- Fixed string representation of _NOT_ predicates omitting brackets for complex
+  negated predicates. For example, _NOT (a = 42 AND b = 24)_ was wrongly turned
+  into _NOT a = 42 AND b = 24_.
 - Fixed `transform.infer_between_predicates()` dropping unrelated predicates
 - Fixed `transform.extract_subquery()` and `transform.extract_query_fragment()`
   breaking for negated unary predicates.
