@@ -30,6 +30,8 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 - Fixed `transform.infer_between_predicates()` dropping unrelated predicates
 - Fixed `transform.extract_subquery()` and `transform.extract_query_fragment()`
   breaking for negated unary predicates.
+- Fixed `DatabaseStatistics.most_common_values()` breaking if NULL is one of
+  the MCVs.
 
 ## ⚠️ Deprecations
 

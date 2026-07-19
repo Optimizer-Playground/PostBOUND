@@ -1654,7 +1654,7 @@ class MostCommonValues[T]:
 
     def __init__(self, mcvs: Iterable[tuple[T, int]]) -> None:
         self.mcvs: Sequence[tuple[T, int]] = list(mcvs)
-        self.mcvs.sort(key=lambda pair: (pair[1], pair[0]), reverse=True)
+        self.mcvs.sort(key=lambda pair: (-pair[1], (pair[0] is not None), pair[0]))
         self._mcv_map = dict(self.mcvs)
         if self.mcvs:
             self._min_freq = self.mcvs[-1][1]
