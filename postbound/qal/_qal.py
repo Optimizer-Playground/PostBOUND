@@ -1772,9 +1772,6 @@ class SqlExpressionVisitor(abc.ABC, Generic[VisitorResult]):
     def visit_array_access_expr(self, expr: ArrayAccessExpression, *args, **kwargs) -> VisitorResult:
         return self.visit_function_expr(expr, *args, **kwargs)
 
-    def visit_substring_expr(self, expr: SubstringExpression, *args, **kwargs) -> VisitorResult:
-        return self.visit_function_expr(expr, *args, **kwargs)
-
 
 class ExpressionCollector(SqlExpressionVisitor[set[SqlExpression]]):
     """Utility to traverse an arbitrarily deep expression hierarchy in order to collect specific expressions.
@@ -2656,9 +2653,9 @@ class BinaryPredicate(BasePredicate):
         *args,
         **kwargs,
     ) -> VisitorResult:
-        if _safe_recurse_expression_visitor(visitor):
-            return visitor.visit_predicate_expr(self, *args, **kwargs)
-        return visitor.visit_binary_predicate(self, *args, **kwargs)
+        if isinstance(visitor, PredicateVisitor):
+            return visitor.visit_binary_predicate(self, *args, **kwargs)
+        return visitor.visit_predicate_expr(self, *args, **kwargs)
 
     __hash__ = AbstractPredicate.__hash__
 
@@ -2817,9 +2814,9 @@ class BetweenPredicate(BasePredicate):
         *args,
         **kwargs,
     ) -> VisitorResult:
-        if _safe_recurse_expression_visitor(visitor):
-            return visitor.visit_predicate_expr(self, *args, **kwargs)
-        return visitor.visit_between_predicate(self, *args, **kwargs)
+        if isinstance(visitor, PredicateVisitor):
+            return visitor.visit_between_predicate(self, *args, **kwargs)
+        return visitor.visit_predicate_expr(self, *args, **kwargs)
 
     __hash__ = AbstractPredicate.__hash__
 
@@ -2968,9 +2965,9 @@ class InPredicate(BasePredicate):
         *args,
         **kwargs,
     ) -> VisitorResult:
-        if _safe_recurse_expression_visitor(visitor):
-            return visitor.visit_predicate_expr(self, *args, **kwargs)
-        return visitor.visit_in_predicate(self, *args, **kwargs)
+        if isinstance(visitor, PredicateVisitor):
+            return visitor.visit_in_predicate(self, *args, **kwargs)
+        return visitor.visit_predicate_expr(self, *args, **kwargs)
 
     def _stringify_values(self) -> str:
         """Converts the allowed values into a valid string representation."""
@@ -3087,9 +3084,9 @@ class UnaryPredicate(BasePredicate):
         *args,
         **kwargs,
     ) -> VisitorResult:
-        if _safe_recurse_expression_visitor(visitor):
-            return visitor.visit_predicate_expr(self, *args, **kwargs)
-        return visitor.visit_unary_predicate(self, *args, **kwargs)
+        if isinstance(visitor, PredicateVisitor):
+            return visitor.visit_unary_predicate(self, *args, **kwargs)
+        return visitor.visit_predicate_expr(self, *args, **kwargs)
 
     __hash__ = AbstractPredicate.__hash__
 
@@ -3344,9 +3341,10 @@ class CompoundPredicate(AbstractPredicate):
         *args,
         **kwargs,
     ) -> VisitorResult:
-        if _safe_recurse_expression_visitor(visitor):
+        if isinstance(visitor, SqlExpressionVisitor) and not isinstance(visitor, PredicateVisitor):
             return visitor.visit_predicate_expr(self, *args, **kwargs)
 
+        assert isinstance(visitor, PredicateVisitor)
         match self.operation:
             case CompoundOperator.Not:
                 return visitor.visit_not_predicate(self, self.children, *args, **kwargs)
@@ -3389,9 +3387,14 @@ class CompoundPredicate(AbstractPredicate):
 class PredicateVisitor(abc.ABC, Generic[VisitorResult]):
     """Basic visitor to operator on arbitrary predicate trees.
 
-    As a modification to a strict vanilla interpretation of the design pattern, we provide dedicated matching methods for the
-    different composite operators (i.e. for *AND*, *OR* and *NOT* predicates), rather than just matching on
+    As a modification to a strict vanilla interpretation of the design pattern, we provide dedicated matching methods
+    for the different composite operators (i.e. for *AND*, *OR* and *NOT* predicates), rather than just matching on
     `CompoundPredicate`.
+
+    If the visitor is also an `SqlExpressionVisitor`, the `visit_predicate_expr` method will be *not* called on any
+    predicate. Instead, the appropriate visit method depending on the predicate type (e.g., `visit_binary_predicate`)
+    will be called. You can still implement `visit_predicate_expr` to keep linters, etc. quiet, but it will not do
+    anything.
 
     See Also
     --------
@@ -3455,13 +3458,6 @@ class PredicateVisitor(abc.ABC, Generic[VisitorResult]):
         **kwargs,
     ) -> VisitorResult:
         raise NotImplementedError
-
-
-def _safe_recurse_expression_visitor(visitor) -> bool:
-    return (  #
-        isinstance(visitor, SqlExpressionVisitor)  #
-        and not isinstance(visitor, PredicateVisitor)  #
-    )
 
 
 @overload
