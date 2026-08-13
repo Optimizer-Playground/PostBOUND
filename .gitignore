@@ -166,6 +166,7 @@ dt-venv/
 postbound-venv/
 pb-venv/
 .psycopg_connection*
+*.duckdb
 .pg-connect*.toml
 .mysql_connection.config
 
