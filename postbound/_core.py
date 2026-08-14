@@ -22,6 +22,10 @@ VisitorResult = TypeVar("VisitorResult")
 """Result of visitor invocations."""
 
 TimeMs = float
+"""Type alias for a time measurement in milliseconds."""
+
+TimeS = float
+"""Type alias for a time measurement in seconds."""
 
 Cost = float
 """Type alias for a cost estimate."""
@@ -37,22 +41,22 @@ class Cardinality(Number):
     - A prohibitively large cardinality is represented by inf.
 
     Basically, cardinality instances are just wrappers around their integer value that also catch the two special cases.
-    Use cardinalities as you would use normal numbers. Notice that cardinalities are immutable, so all mathematical operators
-    return a new cardinality instance.
+    Use cardinalities as you would use normal numbers. Notice that cardinalities are immutable, so all mathematical
+    operators return a new cardinality instance.
 
-    To check for the state of a cardinality, you can either use `is_valid()` or the more specific `isnan()` and `isinf()`.
-    Furthermore, a more expressive alias for `isnan()` exists in the form of `is_unknown()`.
+    To check for the state of a cardinality, you can either use `is_valid()` or the more specific `isnan()` and
+    `isinf()`. Furthermore, a more expressive alias for `isnan()` exists in the form of `is_unknown()`.
 
-    You can access the raw cardinality value vie the `value` property. However, this property requires that the cardinality is
-    indeed in a valid state. If you want to handle invalid cardinalities yourself, `get()` returns a general float value (that
-    can also be *NaN* or *inf*).
+    You can access the raw cardinality value vie the `value` property. However, this property requires that the
+    cardinality is indeed in a valid state. If you want to handle invalid cardinalities yourself, `get()` returns a
+    general float value (that can also be *NaN* or *inf*).
 
-    To construct valid cardinalities, it is probably easiest to just create a new instance and passing the desired value.
-    The `of()` factory method can be used for better readability. Additionally, the `unknown()` and `infinite()` factory
-    methods can be used to create cardinalities in the special states.
+    To construct valid cardinalities, it is probably easiest to just create a new instance and passing the desired
+    value. The `of()` factory method can be used for better readability. Additionally, the `unknown()` and `infinite()`
+    factory methods can be used to create cardinalities in the special states.
 
-    Lastly, cardinalities can be used in *match* statements. They match the following pattern: *(is_valid, value)*. If the
-    cardinality is invalid, the value is set to -1.
+    Lastly, cardinalities can be used in *match* statements. They match the following pattern: *(is_valid, value)*. If
+    the cardinality is invalid, the value is set to -1.
     """
 
     @staticmethod
@@ -117,8 +121,9 @@ class Cardinality(Number):
     def get(self) -> float:
         """Provides the value of this cardinality.
 
-        In contrast to accessing the `value` property, this method always returns a float and does not raise an error for
-        invalid cardinalities. Instead, it returns *NaN* for unknown cardinalities and *inf* for infinite cardinalities.
+        In contrast to accessing the `value` property, this method always returns a float and does not raise an error
+        for invalid cardinalities. Instead, it returns *NaN* for unknown cardinalities and *inf* for infinite
+        cardinalities.
         """
         return float(self)
 
@@ -229,9 +234,7 @@ class Cardinality(Number):
             return divmod(self.value, other)
         return NotImplemented
 
-    def __rdivmod__(
-        self, other: SupportsFloat | SupportsIndex
-    ) -> tuple[Number, Number]:
+    def __rdivmod__(self, other: SupportsFloat | SupportsIndex) -> tuple[float, float]:
         if self._nan:
             own_value = math.nan
         elif self._inf:
@@ -241,10 +244,10 @@ class Cardinality(Number):
         return divmod(float(other), own_value)
 
     def __floordiv__(self, other: object) -> int:
-        return math.floor(self / other)
+        return math.floor(float(self / other))
 
     def __rfloordiv__(self, other: SupportsFloat | SupportsIndex) -> int:
-        return math.floor(other / self)
+        return math.floor(float(other / self))
 
     def __mod__(self, other: object) -> Cardinality:
         if not self._valid:
@@ -408,9 +411,9 @@ class Cardinality(Number):
 class ScanOperator(Enum):
     """The scan operators supported by PostBOUND.
 
-    These can differ from the scan operators that are actually available in the selected target database system. The individual
-    operators are chosen because they are supported by a wide variety of database systems and they are sufficiently different
-    from each other.
+    These can differ from the scan operators that are actually available in the selected target database system. The
+    individual operators are chosen because they are supported by a wide variety of database systems and they are
+    sufficiently different from each other.
     """
 
     SequentialScan = "Seq. Scan"
@@ -430,9 +433,9 @@ class ScanOperator(Enum):
 class JoinOperator(Enum):
     """The join operators supported by PostBOUND.
 
-    These can differ from the join operators that are actually available in the selected target database system. The individual
-    operators are chosen because they are supported by a wide variety of database systems and they are sufficiently different
-    from each other.
+    These can differ from the join operators that are actually available in the selected target database system. The
+    individual operators are chosen because they are supported by a wide variety of database systems and they are
+    sufficiently different from each other.
     """
 
     NestedLoopJoin = "NLJ"
@@ -452,8 +455,8 @@ class JoinOperator(Enum):
 class IntermediateOperator(Enum):
     """The intermediate operators supported by PostBOUND.
 
-    Intermediate operators are those that do not change the contents of their input relation, but only the way in which it is
-    available. For example, a sort operator changes the order of the tuples.
+    Intermediate operators are those that do not change the contents of their input relation, but only the way in which
+    it is available. For example, a sort operator changes the order of the tuples.
     """
 
     Sort = "Sort"
@@ -483,7 +486,8 @@ identifiers which contain at least one upper case character to be quoted.
 
 References
 ----------
-- Postgres documentation on identifiers: https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
+- Postgres documentation on identifiers:
+    https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
 - Regex tester: https://regex101.com/r/TtrNQg/1
 """
 
@@ -589,8 +593,8 @@ SqlKeywords = frozenset(
 def quote(identifier: str) -> str:
     """Quotes an identifier if necessary.
 
-    Valid identifiers can be used as-is, e.g. *title* or *movie_id*. Invalid identifiers will be wrapped in quotes, such as
-    *"movie title"* or *"movie-id"*.
+    Valid identifiers can be used as-is, e.g. *title* or *movie_id*. Invalid identifiers will be wrapped in quotes,
+    such as *"movie title"* or *"movie-id"*.
 
     Parameters
     ----------
@@ -604,10 +608,7 @@ def quote(identifier: str) -> str:
     """
     if not identifier:
         return ""
-    valid_identifier = (
-        _IdentifierPattern.fullmatch(identifier)
-        and identifier.upper() not in SqlKeywords
-    )
+    valid_identifier = _IdentifierPattern.fullmatch(identifier) and identifier.upper() not in SqlKeywords
     return identifier if valid_identifier else f'"{identifier}"'
 
 
@@ -635,9 +636,9 @@ class TableReference:
     It can either be a physical table, a CTE, or an entirely virtual query created via subqueries. Note that a table
     reference is indeed just a reference and not a 1:1 "representation" since each table can be sourced multiple times
     in a query. Therefore, in addition to the table name, each instance can optionally also contain an alias to
-    distinguish between different references to the same table. In case of virtual tables, the full name will usually be empty
-    and only the alias set. An exception are table references that refer to CTEs: their full name is set to the CTE name, the
-    alias to the alias from the FROM clause (if present) and the table is still treated as virtual.
+    distinguish between different references to the same table. In case of virtual tables, the full name will usually be
+    empty and only the alias set. An exception are table references that refer to CTEs: their full name is set to the
+    CTE name, the alias to the alias from the FROM clause (if present) and the table is still treated as virtual.
 
     Table references can be sorted lexicographically. All instances should be treated as immutable objects.
 
@@ -654,11 +655,11 @@ class TableReference:
         virtual table in PostBOUND. One cannot directly reference that alias in a *FROM* clause, without also
         specifying the subquery. Defaults to *False* since most tables will have direct physical counterparts.
     schema : str, optional
-        The schema in which the table is located. Defaults to an empty string if the table is in the default schema or the
-        schema is unknown.
+        The schema in which the table is located. Defaults to an empty string if the table is in the default schema or
+        the schema is unknown.
     catalog : str, optional
-        The catalog in which the table is located. Defaults to an empty string if the table is in the default catalog or the
-        catalog is unknown.
+        The catalog in which the table is located. Defaults to an empty string if the table is in the default catalog or
+        the catalog is unknown.
 
     Raises
     ------
@@ -683,20 +684,18 @@ class TableReference:
         full_name : str, optional
             An optional full name for the entire table. This is mostly used to create references to CTE tables.
         schema : str, optional
-            The schema in which the table is located. Defaults to an empty string if the table is in the default schema or the
-            schema is unknown.
+            The schema in which the table is located. Defaults to an empty string if the table is in the default schema
+            or the schema is unknown.
         catalog : str, optional
-            The catalog in which the table is located. Defaults to an empty string if the table is in the default catalog or the
-            catalog is unknown.
+            The catalog in which the table is located. Defaults to an empty string if the table is in the default
+            catalog or the catalog is unknown.
 
         Returns
         -------
         TableReference
             The virtual table reference
         """
-        return TableReference(
-            full_name, alias, virtual=True, schema=schema, catalog=catalog
-        )
+        return TableReference(full_name, alias, virtual=True, schema=schema, catalog=catalog)
 
     def __init__(
         self,
@@ -828,7 +827,8 @@ class TableReference:
         Returns
         -------
         str
-            The catalog or an empty string if the catalog is either unknown or the table is located in the default catalog.
+            The catalog or an empty string if the catalog is either unknown or the table is located in the
+            default catalog.
         """
         return self._catalog
 
@@ -887,9 +887,7 @@ class TableReference:
         """
         if self.virtual:
             raise StateError("An alias cannot be dropped from a virtual table!")
-        return TableReference(
-            self.full_name, schema=self._schema, catalog=self._catalog
-        )
+        return TableReference(self.full_name, schema=self._schema, catalog=self._catalog)
 
     def with_alias(self, alias: str) -> TableReference:
         """Creates a new table reference for the same table but with a different alias.
@@ -992,9 +990,7 @@ class TableReference:
         virtual = self._virtual if virtual is None else virtual
         schema = self._schema if schema is None else schema
         catalog = self._catalog if catalog is None else catalog
-        return TableReference(
-            full_name, alias, virtual=virtual, schema=schema, catalog=catalog
-        )
+        return TableReference(full_name, alias, virtual=virtual, schema=schema, catalog=catalog)
 
     def __json__(self) -> object:
         return {
@@ -1107,8 +1103,8 @@ class ColumnReference:
 
         Notes
         -----
-        Sadly, the current spec of the TypeGuard explicitly excludes self from the type check. Therefore, we cannot simply
-        modify `is_bound` to return a TypeGuard and have to use an additional method. Ugh.
+        Sadly, the current spec of the TypeGuard explicitly excludes self from the type check. Therefore, we cannot
+        imply modify `is_bound` to return a TypeGuard and have to use an additional method. Ugh.
         """
         return col.is_bound()
 
@@ -1134,9 +1130,7 @@ class ColumnReference:
     @overload
     def __new__(cls, name: str, table: Literal[None]) -> ColumnReference: ...
 
-    def __new__(
-        cls, name: str, table: Optional[TableReference] = None
-    ) -> ColumnReference:
+    def __new__(cls, name: str, table: Optional[TableReference] = None) -> ColumnReference:
         if cls is not ColumnReference or table is None:
             return super().__new__(cls)
         return BoundColumnReference(name, table)
