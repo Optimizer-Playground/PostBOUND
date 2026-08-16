@@ -919,7 +919,7 @@ def _pglast_parse_expression(pglast_data: dict, *, namespace: QueryNamespace, qu
             ]
             if not isinstance(operator, CompoundOperator):
                 raise ParserError(f"Unexpected non-compound in query '{query_txt}'")
-            return CompoundPredicate(operator, children)
+            return CompoundPredicate.create(operator, children)
 
         case "NullTest":
             expression = pglast_data["NullTest"]

@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import typing
 import warnings
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from typing import Literal, Optional, overload
+
+from postbound.qal._qal import AndPredicate, NotPredicate, OrPredicate
 
 from . import util
 from ._core import ColumnReference, TableReference
@@ -277,7 +279,7 @@ def _get_predicate_fragment(
     elif len(child_fragments) == 1 and predicate.operation != CompoundOperator.Not:
         return child_fragments[0]
     else:
-        return CompoundPredicate(predicate.operation, child_fragments)
+        return CompoundPredicate.create(predicate.operation, child_fragments)
 
 
 @overload
@@ -659,15 +661,11 @@ class _BetweenPredCreator(PredicateVisitor[AbstractPredicate]):
     def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> UnaryPredicate:
         return predicate
 
-    def visit_not_predicate(
-        self, predicate: CompoundPredicate, child: AbstractPredicate, *args, **kwargs
-    ) -> CompoundPredicate:
-        rewritten_child = child.accept_visitor(self)
+    def visit_not_predicate(self, predicate: NotPredicate, *args, **kwargs) -> NotPredicate:
+        rewritten_child = predicate.child.accept_visitor(self)
         return CompoundPredicate.create_not(rewritten_child)
 
-    def visit_and_predicate(
-        self, predicate: CompoundPredicate, components: Sequence[AbstractPredicate], *args, **kwargs
-    ) -> CompoundPredicate:
+    def visit_and_predicate(self, predicate: AndPredicate, *args, **kwargs) -> AndPredicate:
         rewritten_filters: list[AbstractPredicate] = []
 
         less_filters: dict[ColumnReference, SqlExpression] = {}
@@ -675,7 +673,7 @@ class _BetweenPredCreator(PredicateVisitor[AbstractPredicate]):
         blocked_less: set[ColumnReference] = set()
         blocked_greater: set[ColumnReference] = set()
 
-        for child in components:
+        for child in predicate.children:
             if len(child.columns()) != 1:
                 rewritten_filters.append(child)
                 continue
@@ -728,10 +726,8 @@ class _BetweenPredCreator(PredicateVisitor[AbstractPredicate]):
 
         return CompoundPredicate.create_and(rewritten_filters)  # type: ignore
 
-    def visit_or_predicate(
-        self, predicate: CompoundPredicate, components: Sequence[AbstractPredicate], *args, **kwargs
-    ) -> CompoundPredicate:
-        rewritten_children = [child.accept_visitor(self) for child in components]
+    def visit_or_predicate(self, predicate: OrPredicate, *args, **kwargs) -> CompoundPredicate:
+        rewritten_children = [child.accept_visitor(self) for child in predicate.children]
         return CompoundPredicate.create_or(rewritten_children)  # type: ignore
 
 
@@ -889,7 +885,7 @@ def remove_predicate(
     elif len(updated_children) == 1:
         return updated_children[0]
     else:
-        return CompoundPredicate(predicate.operation, updated_children)
+        return CompoundPredicate.create(predicate.operation, updated_children)
 
 
 def add_clause(query: SelectQueryType, clauses_to_add: BaseClause | Iterable[BaseClause]) -> SelectQueryType:
@@ -1056,7 +1052,7 @@ def _replace_expression_in_predicate(
             renamed_children = [_replace_expression_in_predicate(predicate.children, replacement)]
         else:
             renamed_children = [_replace_expression_in_predicate(child, replacement) for child in predicate.children]
-        return CompoundPredicate(predicate.operation, renamed_children)
+        return CompoundPredicate.create(predicate.operation, renamed_children)
     else:
         raise ValueError("Unknown predicate type: " + str(predicate))
 
@@ -1284,7 +1280,7 @@ def _perform_predicate_replacement(
                 _perform_predicate_replacement(child_pred, target_predicate, new_predicate)
                 for child_pred in current_predicate.children
             ]
-        return CompoundPredicate(current_predicate.operation, replaced_children)
+        return CompoundPredicate.create(current_predicate.operation, replaced_children)
     else:
         return current_predicate
 
@@ -1643,7 +1639,7 @@ def rename_columns_in_predicate(
             if predicate.operation == CompoundOperator.Not
             else [rename_columns_in_predicate(child, available_renamings) for child in predicate.children]
         )
-        return CompoundPredicate(predicate.operation, renamed_children)
+        return CompoundPredicate.create(predicate.operation, renamed_children)
     else:
         raise ValueError("Unknown predicate type: " + str(predicate))
 
@@ -1966,7 +1962,7 @@ class _TableReferenceRenamer(
             renamed_expression = ordering.column.accept_visitor(self)
             renamed_orderings.append(OrderByExpression(renamed_expression, ordering.ascending, ordering.nulls_first))
 
-        return renamed_orderings
+        return OrderBy(renamed_orderings)
 
     def visit_limit_clause(self, clause: Limit, *args, **kwargs) -> Limit:
         return clause
@@ -1974,17 +1970,19 @@ class _TableReferenceRenamer(
     def visit_union_clause(self, clause: UnionClause, *args, **kwargs) -> UnionClause:
         renamed_lhs = clause.left_query.accept_visitor(self)
         renamed_rhs = clause.right_query.accept_visitor(self)
-        return UnionClause(renamed_lhs, renamed_rhs, union_all=clause.union_all)
+        return UnionClause(
+            build_query(renamed_lhs.values()), build_query(renamed_rhs.values()), union_all=clause.union_all
+        )
 
     def visit_except_clause(self, clause: ExceptClause, *args, **kwargs) -> ExceptClause:
         renamed_lhs = clause.left_query.accept_visitor(self)
         renamed_rhs = clause.right_query.accept_visitor(self)
-        return ExceptClause(renamed_lhs, renamed_rhs)
+        return ExceptClause(build_query(renamed_lhs.values()), build_query(renamed_rhs.values()))
 
     def visit_intersect_clause(self, clause: IntersectClause, *args, **kwargs) -> IntersectClause:
         renamed_lhs = clause.left_query.accept_visitor(self)
         renamed_rhs = clause.right_query.accept_visitor(self)
-        return IntersectClause(renamed_lhs, renamed_rhs)
+        return IntersectClause(build_query(renamed_lhs.values()), build_query(renamed_rhs.values()))
 
     def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> BinaryPredicate:
         renamed_lhs = predicate.first_argument.accept_visitor(self)
@@ -2008,33 +2006,30 @@ class _TableReferenceRenamer(
 
     def visit_not_predicate(
         self,
-        predicate: CompoundPredicate,
-        child_predicate: AbstractPredicate,
+        predicate: NotPredicate,
         *args,
         **kwargs,
     ) -> CompoundPredicate:
-        renamed_child = child_predicate.accept_visitor(self)
-        return CompoundPredicate(CompoundOperator.Not, [renamed_child])
+        renamed_child = predicate.child.accept_visitor(self)
+        return NotPredicate(renamed_child)
 
     def visit_or_predicate(
         self,
-        predicate: CompoundPredicate,
-        components: Sequence[AbstractPredicate],
+        predicate: OrPredicate,
         *args,
         **kwargs,
     ) -> CompoundPredicate:
-        renamed_children = [child.accept_visitor(self) for child in components]
-        return CompoundPredicate(CompoundOperator.Or, renamed_children)
+        renamed_children = [child.accept_visitor(self) for child in predicate.children]
+        return OrPredicate(renamed_children)
 
     def visit_and_predicate(
         self,
-        predicate: CompoundPredicate,
-        components: Sequence[AbstractPredicate],
+        predicate: AndPredicate,
         *args,
         **kwargs,
     ) -> CompoundPredicate:
-        renamed_children = [child.accept_visitor(self) for child in components]
-        return CompoundPredicate(CompoundOperator.And, renamed_children)
+        renamed_children = [child.accept_visitor(self) for child in predicate.children]
+        return AndPredicate(renamed_children)
 
     def visit_static_value_expr(self, expr: StaticValueExpression, *args, **kwargs) -> StaticValueExpression:
         return expr
@@ -2113,7 +2108,7 @@ class _TableReferenceRenamer(
 
     def visit_quantifier_expr(self, expr: QuantifierExpression, *args, **kwargs) -> QuantifierExpression:
         renamed_child = expr.expression.accept_visitor(self)
-        return QuantifierExpression(expr.quantifier, quantifier=renamed_child)
+        return QuantifierExpression(renamed_child, quantifier=expr.quantifier)
 
     def visit_array_expr(self, expr: ArrayExpression, *args, **kwargs) -> ArrayExpression:
         renamed_elems = [elem.accept_visitor(self) for elem in expr.elements]
@@ -2121,14 +2116,14 @@ class _TableReferenceRenamer(
 
     def visit_array_access_expr(self, expr: ArrayAccessExpression, *args, **kwargs) -> ArrayAccessExpression:
         renamed_array = expr.array.accept_visitor(self)
-        renamed_idx = expr.lower_index.accept_visitor(self) if expr.index else None
+        renamed_idx = expr.index.accept_visitor(self) if expr.index else None
         renamed_lower = expr.lower_index.accept_visitor(self) if expr.lower_index else None
         renamed_upper = expr.upper_index.accept_visitor(self) if expr.upper_index else None
         return ArrayAccessExpression(
             renamed_array,
             idx=renamed_idx,
-            lower_index=renamed_lower,
-            upper_index=renamed_upper,
+            lower_idx=renamed_lower,
+            upper_idx=renamed_upper,
         )
 
     def visit_predicate_expr(self, expr: AbstractPredicate, *args, **kwargs) -> AbstractPredicate:
@@ -2139,13 +2134,13 @@ class _TableReferenceRenamer(
         match source:
             case DirectTableSource(tab):
                 renamed_table = self._rename_table(tab)
-                return DirectTableSource(renamed_table)
+                return DirectTableSource(renamed_table)  # type: ignore - Ruff seemingly can't figure out the binding
 
             case SubqueryTableSource(subquery, target_name, lateral):
                 nested_renamings = subquery.accept_visitor(self)
                 nested_query = build_query(nested_renamings.values())
                 target_table = self._rename_table(target_name)
-                return SubqueryTableSource(nested_query, target_table, lateral=lateral)
+                return SubqueryTableSource(nested_query, target_table, lateral=lateral)  # type: ignore - Ruff seemingly can't figure out the binding
 
             case JoinTableSource(lhs, rhs, join_condition, join_type):
                 renamed_lhs = self._rename_table_source(lhs)
@@ -2156,16 +2151,16 @@ class _TableReferenceRenamer(
                     renamed_rhs,
                     join_condition=renamed_condition,
                     join_type=join_type,
-                )
+                )  # type: ignore - Ruff seemingly can't figure out the binding
 
             case ValuesTableSource(rows, alias, columns):
                 renamed_alias = self._rename_table(alias)
-                return ValuesTableSource(rows, alias=renamed_alias, columns=columns)
+                return ValuesTableSource(rows, alias=renamed_alias, columns=columns)  # type: ignore - Ruff seemingly can't figure out the binding
 
             case FunctionTableSource(function, alias):
                 renamed_function = function.accept_visitor(self)
                 renamed_alias = self._rename_table(alias) if alias else ""
-                return FunctionTableSource(renamed_function, alias=renamed_alias)
+                return FunctionTableSource(renamed_function, alias=renamed_alias)  # type: ignore - Ruff seemingly can't figure out the binding
 
             case _:
                 raise ValueError("Unknown table source type: " + str(source))
@@ -2176,7 +2171,7 @@ class _TableReferenceRenamer(
     @overload
     def _rename_table(self, table: str) -> str: ...
 
-    def _rename_table(self, table: str | TableReference) -> str | TableReference:
+    def _rename_table(self, table):
         """Helper method to rename a specific table reference independent of its specific representation."""
         if isinstance(table, TableReference):
             return self._renamings.get(table, table)
@@ -2249,6 +2244,7 @@ def rename_table[T: SelectStatement](
     if isinstance(from_table, TableReference) and target_table is None:
         raise ValueError("Renamings must be specified as a dict, or both from_table and target_table must be set!")
     elif isinstance(from_table, TableReference):
+        assert target_table is not None
         renamings = {from_table: target_table}
     else:
         renamings = from_table

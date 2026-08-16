@@ -1773,7 +1773,7 @@ wheels = [
 
 [[package]]
 name = "postbound"
-version = "0.21.6.dev3"
+version = "0.22.0.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "lazy-loader" },
