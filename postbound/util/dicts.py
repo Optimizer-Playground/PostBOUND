@@ -4,17 +4,56 @@ from __future__ import annotations
 
 import collections
 import itertools
-import numbers
 import typing
 import warnings
-from collections.abc import Callable, Iterable, Sequence
-from typing import Optional
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Optional, Protocol
 
 import numpy as np
 
 T = typing.TypeVar("T")
 K = typing.TypeVar("K")
 V = typing.TypeVar("V")
+
+
+class SupportsLE(Protocol):
+    def __le__(self, other) -> bool: ...
+
+
+class SupportsLT(Protocol):
+    def __lt__(self, other) -> bool: ...
+
+
+class SupportsGE(Protocol):
+    def __ge__(self, other) -> bool: ...
+
+
+class SupportsGT(Protocol):
+    def __gt__(self, other) -> bool: ...
+
+
+# the Python standard library often implements the comparison functions using the `*args, **kwargs` signature instead
+# of the more specific `other` argument. We replicate these protocols here to allow standard Python types to be passed
+# to our functions as well.
+
+
+class PyStdLE(Protocol):
+    def __le__(self, *args, **kwargs) -> bool: ...
+
+
+class PyStdLT(Protocol):
+    def __lt__(self, *args, **kwargs) -> bool: ...
+
+
+class PyStdGE(Protocol):
+    def __ge__(self, *args, **kwargs) -> bool: ...
+
+
+class PyStdGT(Protocol):
+    def __gt__(self, *args, **kwargs) -> bool: ...
+
+
+type SupportsRichCmp = SupportsLT | SupportsLE | SupportsGE | SupportsGT | PyStdLE | PyStdGT | PyStdGE
 
 
 def stringify(d: dict[K, V]) -> str:
@@ -44,9 +83,7 @@ def key(dictionary: dict[K, V]) -> K:
     """
     if not len(dictionary) == 1:
         nvals = len(dictionary)
-        raise ValueError(
-            f"Dictionary must contain exactly 1 entry, not {nvals}: {dictionary}"
-        )
+        raise ValueError(f"Dictionary must contain exactly 1 entry, not {nvals}: {dictionary}")
     return next(iter(dictionary.keys()))
 
 
@@ -56,9 +93,7 @@ def value(dictionary: dict[K, V]) -> V:
     `value({'a': 1}) = 1`
     """
     if not len(dictionary) == 1:
-        raise ValueError(
-            "Dictionary must contain exactly 1 entry, not " + str(len(dictionary))
-        )
+        raise ValueError("Dictionary must contain exactly 1 entry, not " + str(len(dictionary)))
     return next(iter(dictionary.values()))
 
 
@@ -98,9 +133,7 @@ def intersection(a: dict[K, V], b: dict[K, V]) -> dict[K, V]:
     return {k: v for k, v in a.items() if k in b}
 
 
-def merge(
-    a: dict[K, V], b: dict[K, V], *, updater: Optional[Callable[[K, V, V], V]] = None
-) -> dict[K, V]:
+def merge(a: dict[K, V], b: dict[K, V], *, updater: Optional[Callable[[K, V, V], V]] = None) -> dict[K, V]:
     """Creates a new dict containing all key/values pairs from both argument dictionaries.
 
     If keys overlap, entries from dictionary `b` will take priority, unless an `update` method is given.
@@ -165,9 +198,7 @@ def generate_multi(entries: Iterable[tuple[K, V]]) -> dict[K, list[V]]:
     return dict(collector)
 
 
-def reduce_multi(
-    multi_dict: dict[K, list[V]], reduction: Callable[[K, list[V]], V]
-) -> dict[K, V]:
+def reduce_multi(multi_dict: dict[K, list[V]], reduction: Callable[[K, list[V]], V]) -> dict[K, V]:
     """Ungroups a multi-dict by aggregating the values based on key and values."""
     return {k: reduction(k, vs) for k, vs in multi_dict.items()}
 
@@ -208,20 +239,24 @@ def invert(mapping: dict[K, V]) -> dict[V, K]:
     return {v: k for k, v in mapping.items()}
 
 
-def argmin(mapping: dict[K, numbers.Number]) -> K:
+def argmin[K, V: SupportsRichCmp](mapping: Mapping[K, V]) -> K:
     """
     For a dict mapping keys to numeric types, returns the key `k` with minimum value `v`, s.t. for all keys `k'` with
     values `v'` it holds that `v <= v'`.
     """
-    return min(mapping, key=mapping.get)
+    # ty complains here because get() might return None. But we know for a fact that this cannot be the case since
+    # get() will only be called for the existing keys. So this is safe to ignore.
+    return min(mapping, key=mapping.get)  # type: ignore
 
 
-def argmax(mapping: dict[K, numbers.Number]) -> K:
+def argmax[K, V: SupportsRichCmp](mapping: dict[K, V]) -> K:
     """
     For a dict mapping keys to numeric types, returns the key `k` with maximum value `v`, s.t. for all keys `k'` with
     values `v'` it holds that `v >= v'`.
     """
-    return max(mapping, key=mapping.get)
+    # ty complains here because get() might return None. But we know for a fact that this cannot be the case since
+    # get() will only be called for the existing keys. So this is safe to ignore.
+    return max(mapping, key=mapping.get)  # type: ignore
 
 
 def dict_to_numpy(data: dict[K, V]) -> np.array[V]:
@@ -241,7 +276,7 @@ class HashableDict(collections.UserDict[K, V]):
         return hash_dict(self.data)
 
 
-class CustomHashDict(collections.UserDict[K, V]):
+class CustomHashDict[K, V](Mapping[K, V]):
     """Wrapper of a normal Python dictionary that uses a custom hash function instead of the default hash() method.
 
     All non-hashing related behavior is directly inherited from the default Python dictionary. Only the item access is changed
@@ -260,24 +295,35 @@ class CustomHashDict(collections.UserDict[K, V]):
     """
 
     def __init__(self, hash_func: Callable[[K], int], **kwargs) -> None:
-        super().__init__()
         self.hash_function = hash_func
         self._hash_args = kwargs
 
-    def _apply_hash(self, key: K) -> int:
-        return self.hash_function(key, **self._hash_args)
+        self._map: dict[int, V] = {}
+        self._keys: set[K] = set()
 
-    def __getitem__(self, k: K) -> V:
-        return super().__getitem__(self._apply_hash(k))
+    def __getitem__(self, key: K) -> V:
+        idx = self.hash_function(key, **self._hash_args)
+        return self._map[idx]
 
-    def __setitem__(self, k: K, item: V) -> None:
-        super().__setitem__(self._apply_hash(k), item)
+    def __setitem__(self, key: K, item: V) -> None:
+        idx = self.hash_function(key, **self._hash_args)
+        self._keys.add(key)
+        self._map[idx] = item
 
     def __delitem__(self, key: K) -> None:
-        return super().__delitem__(self._apply_hash(key))
+        idx = self.hash_function(key, **self._hash_args)
+        del self._map[idx]
+        self._keys.remove(key)
 
-    def __contains__(self, key: K) -> bool:
-        return super().__contains__(self._apply_hash(key))
+    def __contains__(self, key: object) -> bool:
+        idx = self.hash_function(key, **self._hash_args)  # type: ignore
+        return idx in self._map
+
+    def __len__(self) -> int:
+        return len(self._map)
+
+    def __iter__(self) -> Iterator[K]:
+        return iter(self._keys)
 
 
 class DynamicDefaultDict(collections.UserDict[K, V]):
@@ -296,10 +342,10 @@ class DynamicDefaultDict(collections.UserDict[K, V]):
         super().__init__()
         self.factory = factory
 
-    def __getitem__(self, k: K) -> V:
-        if k not in self.data:
-            self.data[k] = self.factory(k)
-        return self.data[k]
+    def __getitem__(self, key: K) -> V:
+        if key not in self.data:
+            self.data[key] = self.factory(key)
+        return self.data[key]
 
 
 class frozendict(collections.UserDict[K, V]):
