@@ -24,14 +24,13 @@ from __future__ import annotations
 
 import random
 import shutil
-import typing
 import urllib.request
 import warnings
 import zipfile
 from collections import UserDict
-from collections.abc import Callable, Hashable, Iterable, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, cast, overload
 
 import natsort
 import pandas as pd
@@ -40,7 +39,7 @@ import tqdm
 from . import parser, util
 from ._base import pbdir
 from .db import DatabasePool
-from .qal import SelectStatement
+from .qal import SelectStatement, SqlQuery
 
 _WorkloadSources = {
     "job": "https://zenodo.org/records/19205561/files/job.zip?download=1",
@@ -82,14 +81,7 @@ def _fetch_workload(name: str) -> Path:
     return workload_dir
 
 
-LabelType = typing.TypeVar("LabelType", bound=Hashable)
-"""The labels that are used to identify individual queries in a workload."""
-
-NewLabelType = typing.TypeVar("NewLabelType", bound=Hashable)
-"""In case of mutations of the workload labels, this denotes the new type of the labels after the mutation."""
-
-
-class Workload(UserDict[LabelType, SelectStatement]):
+class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
     """A workload collects a number of queries (read: benchmark) and provides utilities to operate on them conveniently.
 
     In addition to the actual queries, each query is annotated by a label that can be used to retrieve the query more
@@ -136,7 +128,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         include_hints: bool = True,
         on_error: Literal["raise", "warn", "ignore"] = "raise",
         verbose: bool = False,
-    ) -> Workload[str]:
+    ) -> Workload[str, SqlQuery]:
         """Reads all SQL queries from a specific directory into a workload object.
 
         .. deprecated:: 0.20.2
@@ -183,7 +175,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         Path.glob
         parser.parse_query
         """
-        queries: dict[str, SelectStatement] = {}
+        queries: dict[str, SqlQuery] = {}
         root = Path(root_dir)
 
         if verbose:
@@ -219,7 +211,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
 
     def __init__(
         self,
-        queries: dict[LabelType, SelectStatement],
+        queries: Mapping[L, Q],
         name: str = "",
         root: Optional[Path] = None,
     ) -> None:
@@ -228,7 +220,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         self._root = root
 
         self._sorted_labels = natsort.natsorted(list(self.keys()))
-        self._sorted_queries: list[SelectStatement] = []
+        self._sorted_queries: list[Q] = []
         self._update_query_order()
 
         self._label_mapping = util.dicts.invert(self.data)
@@ -244,7 +236,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         """
         return self._name
 
-    def queries(self) -> Sequence[SelectStatement]:
+    def queries(self) -> Sequence[Q]:
         """Provides all queries in the workload in natural order (according to their labels).
 
         If the natural order was manually destroyed, e.g. by shuffling, the shuffled order is used.
@@ -256,7 +248,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         """
         return list(self._sorted_queries)
 
-    def labels(self) -> Sequence[LabelType]:
+    def labels(self) -> Sequence[L]:
         """Provides all query labels of the workload in natural order.
 
         If the natural order was manually destroyed, e.g. by shuffling, the shuffled order is used.
@@ -268,7 +260,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         """
         return list(self._sorted_labels)
 
-    def entries(self) -> Sequence[tuple[LabelType, SelectStatement]]:
+    def entries(self) -> Sequence[tuple[L, Q]]:
         """Provides all (label, query) pairs in the workload, in natural order of the query labels.
 
         If the natural order was manually destroyed, e.g. by shuffling, the shuffled order is used.
@@ -280,7 +272,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         """
         return list(zip(self._sorted_labels, self._sorted_queries))
 
-    def head(self) -> Optional[tuple[LabelType, SelectStatement]]:
+    def head(self) -> Optional[tuple[L, Q]]:
         """Provides the first query in the workload.
 
         The first query is determined according to the natural order of the query labels by default. If that order was manually
@@ -297,7 +289,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
             return None
         return self._sorted_labels[0], self._sorted_queries[0]
 
-    def label_of(self, query: SelectStatement) -> LabelType:
+    def label_of(self, query: Q) -> L:
         """Provides the label of the given query.
 
         Parameters
@@ -317,7 +309,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         """
         return self._label_mapping[query]
 
-    def with_labels(self, labels: Iterable[LabelType]) -> Workload[LabelType]:
+    def with_labels(self, labels: Iterable[L]) -> Workload[L, Q]:
         """Provides a new workload that contains only the queries with the specified labels.
 
         Parameters
@@ -334,7 +326,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         selected_queries = {label: query for label, query in self.data.items() if label in labels}
         return Workload(selected_queries, name=self._name, root=self._root)
 
-    def first(self, n: int) -> Workload[LabelType]:
+    def first(self, n: int) -> Workload[L, Q]:
         """Provides the first `n` queries of the workload, according to the natural order of the query labels.
 
         If there are less than `n` queries in the workload, all queries will be returned. Similar to other methods that rely
@@ -355,7 +347,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         sub_workload = {label: self.data[label] for label in first_n_labels}
         return Workload(sub_workload, self._name, self._root)
 
-    def last(self, n: int) -> Workload[LabelType]:
+    def last(self, n: int) -> Workload[L, Q]:
         """Provides the last `n` queries of the workload, according to the natural order of the query labels.
 
         If there are less than `n` queries in the workload, all queries will be returned. Similar to other methods that rely
@@ -376,7 +368,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         sub_workload = {label: self.data[label] for label in last_n_labels}
         return Workload(sub_workload, self._name, self._root)
 
-    def pick_random(self, n: int) -> Workload[LabelType]:
+    def pick_random(self, n: int) -> Workload[L, Q]:
         """Constructs a new workload, consisting of randomly selected queries from this workload.
 
         The new workload will once again be ordered according to the natural ordering of the labels.
@@ -396,7 +388,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         sub_workload = {label: self.data[label] for label in selected_labels}
         return Workload(sub_workload, self._name, self._root)
 
-    def with_prefix(self, label_prefix: LabelType) -> Workload[LabelType]:
+    def with_prefix(self, label_prefix: L) -> Workload[L, Q]:
         """Filters the workload for all queries that have a lablel starting with a specific prefix.
 
         This method requires that all label instances provide a `startswith` method (as is the case for simple string
@@ -433,7 +425,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         }
         return Workload(prefix_queries, name=self._name, root=self._root)
 
-    def filter_by(self, predicate: Callable[[LabelType, SelectStatement], bool]) -> Workload[LabelType]:
+    def filter_by(self, predicate: Callable[[L, Q], bool]) -> Workload[L, Q]:
         """Provides all queries from the workload that match a specific predicate.
 
         Parameters
@@ -451,7 +443,9 @@ class Workload(UserDict[LabelType, SelectStatement]):
         matching_queries = {label: query for label, query in self.data.items() if predicate(label, query)}
         return Workload(matching_queries, name=self._name, root=self._root)
 
-    def relabel(self, label_provider: Callable[[LabelType, SelectStatement], NewLabelType]) -> Workload[NewLabelType]:
+    def relabel[NewLabelType: Hashable](
+        self, label_provider: Callable[[L, Q], NewLabelType]
+    ) -> Workload[NewLabelType, Q]:
         """Constructs a new workload, leaving the queries intact but replacing the labels.
 
         The new workload will ordered according to the natural order of the new labels.
@@ -471,20 +465,20 @@ class Workload(UserDict[LabelType, SelectStatement]):
         relabeled_queries = {label_provider(current_label, query): query for current_label, query in self.data.items()}
         return Workload(relabeled_queries, self._name, self._root)
 
-    def map(self, transformation: Callable, *args, **kwargs) -> Workload[LabelType]:
+    def map[NQ: SqlQuery](self, transformation: Callable[[Q], NQ] | Callable, *args, **kwargs) -> Workload[L, NQ]:
         """Constructs a new workload, leaving the labels intact but replacing the queries.
 
         The new workload will ordered according to the natural order of the labels.
 
         Parameters
         ----------
-        transformation : Callable[[SqlQuery, ...], SqlQuery]
-            Replacement method that maps all old queries to new query values. The replacement receives the old query as input
-            and produces the new query value. Additional arguments can be passed to the transformation and will be
+        transformation : Callable[[LabelSqlQuery, ...], SqlQuery]
+            Replacement method that maps all old queries to new query values. The replacement receives the old query as
+            input and produces the new query value. Additional arguments can be passed to the transformation and will be
             forwarded.
         *args
-            Additional positional arguments that should be forwarded to the transformation method. These are passed after the
-            query argument.
+            Additional positional arguments that should be forwarded to the transformation method. These are passed
+            after the query argument.
         **kwargs
             Additional keyword arguments that should be forwarded to the transformation method.
 
@@ -500,12 +494,12 @@ class Workload(UserDict[LabelType, SelectStatement]):
         transformed_queries = {label: transformation(query, *args, **kwargs) for label, query in self.data.items()}
         return Workload(transformed_queries, self._name, self._root)
 
-    def transform(
+    def transform[NL: Hashable, NQ: SqlQuery](
         self,
-        transformation: Callable,
+        transformation: Callable[[L, Q], tuple[NL, NQ]] | Callable,
         *args,
         **kwargs,
-    ) -> Workload[LabelType]:
+    ) -> Workload[NL, NQ]:
         """Constructs a new workload, replacing both the labels and the queries.
 
         The new workload will ordered according to the natural order of the new labels.
@@ -534,7 +528,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         transformed_queries = [transformation(label, query, *args, **kwargs) for label, query in self.data.items()]
         return Workload(dict(transformed_queries), self._name, self._root)
 
-    def shuffle(self) -> Workload[LabelType]:
+    def shuffle(self) -> Workload[L, Q]:
         """Randomly changes the order of the queries in the workload.
 
         Returns
@@ -547,7 +541,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
         shuffled_workload._update_query_order()
         return shuffled_workload
 
-    def ordered(self) -> Workload[LabelType]:
+    def ordered(self) -> Workload[L, Q]:
         """Enforces the natural ordering of the queries according to their labels.
 
         Returns
@@ -561,14 +555,14 @@ class Workload(UserDict[LabelType, SelectStatement]):
         """Enforces that the order of the queries matches the order of the labels."""
         self._sorted_queries = [self.data[label] for label in self._sorted_labels]
 
-    def __add__(self, other: Workload[LabelType]) -> Workload[LabelType]:
+    def __add__(self, other: Workload[L, Q]) -> Workload[L, Q]:
         if not isinstance(other, Workload):
             raise TypeError("Can only add workloads together")
         return Workload(
             other.data | self.data, name=self._name, root=self._root
         )  # retain own labels in case of conflict
 
-    def __sub__(self, other: Workload[LabelType]) -> Workload[LabelType]:
+    def __sub__(self, other: Workload[L, Q]) -> Workload[L, Q]:
         if not isinstance(other, Workload) and isinstance(other, Iterable):
             labels_to_remove = set(other)
             reduced_workload = {label: query for label, query in self.data.items() if label not in labels_to_remove}
@@ -581,7 +575,7 @@ class Workload(UserDict[LabelType, SelectStatement]):
             root=self._root,
         )
 
-    def __and__(self, other: Workload[LabelType]) -> Workload[LabelType]:
+    def __and__(self, other: Workload[L, Q]) -> Workload[L, Q]:
         if not isinstance(other, Workload) and isinstance(other, Iterable):
             labels_to_include = set(other)
             reduced_workload = {label: query for label, query in self.data.items() if label in labels_to_include}
@@ -594,11 +588,10 @@ class Workload(UserDict[LabelType, SelectStatement]):
             root=self._root,
         )
 
-    def __or__(self, other: dict[LabelType, SelectStatement] | UserDict[LabelType, SelectStatement]) -> Workload[LabelType]:
-        other_data = other.data if isinstance(other, UserDict) else other
-        return Workload(
-            other_data | self.data, name=self._name, root=self._root
-        )  # retain own labels in case of conflict
+    def __or__(self, other: Mapping[L, Q]) -> Workload[L, Q]:
+        merged = dict(self.data)
+        merged.update(other)
+        return Workload(merged, name=self._name, root=self._root)  # retain own labels in case of conflict
 
     def __repr__(self) -> str:
         return str(self)
@@ -612,7 +605,9 @@ class Workload(UserDict[LabelType, SelectStatement]):
             return f"Workload: {len(self)} queries"
 
 
-def wrap_workload(queries: Iterable[SelectStatement], name: str = "", root: Path | str | None = None) -> Workload[int]:
+def wrap_workload[T: SqlQuery](
+    queries: Iterable[T], name: str = "", root: Path | str | None = None
+) -> Workload[int, T]:
     """Wraps a number of queries in a workload with numerical labels."""
     return generate_workload(queries, name=name, workload_root=root)
 
@@ -629,7 +624,7 @@ def read_workload(
     include_hints: bool = True,
     on_error: Literal["raise", "warn", "ignore"] = "raise",
     verbose: bool = False,
-) -> Workload[str]:
+) -> Workload[str, SqlQuery]:
     """Loads a workload consisting of multiple different files, potentially scattered in multiple directories
 
     The main advantage of this method over using `Workload.read` directly is the support for recursive directory layouts: it
@@ -663,11 +658,11 @@ def read_workload(
 
     Returns
     -------
-    Workload[str]
+    Workload[str, SqlQuery]
         The workload
     """
     root = Path(path)
-    queries: dict[str, SelectStatement] = {}
+    queries: dict[str, SqlQuery] = {}
 
     if verbose:
         matching_files = list(root.glob(query_file_pattern))
@@ -725,7 +720,7 @@ def read_workload(
     return Workload(queries, name, root)
 
 
-def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "utf-8") -> Workload[int]:
+def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "utf-8") -> Workload[int, SqlQuery]:
     """Loads a workload consisting of multiple queries from a single file.
 
     The input file has to contain one valid SQL query per line. While empty lines are skipped, any non-SQL line will
@@ -746,7 +741,7 @@ def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "
 
     Returns
     -------
-    Workload[int]
+    Workload[int, SqlQuery]
         The workload
     """
     filepath = Path(filename)
@@ -757,6 +752,30 @@ def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "
         return generate_workload(parsed_queries, name=name, workload_root=filepath)
 
 
+@overload
+def read_csv_workload(
+    filename: str | Path,
+    name: str = "",
+    *,
+    query_column: str = "query",
+    label_column: str,
+    file_encoding: str = "utf-8",
+    pd_args: Optional[dict] = None,
+) -> Workload[str, SqlQuery]: ...
+
+
+@overload
+def read_csv_workload(
+    filename: str | Path,
+    name: str = "",
+    *,
+    query_column: str = "query",
+    label_column: Literal[None],
+    file_encoding: str = "utf-8",
+    pd_args: Optional[dict] = None,
+) -> Workload[int, SqlQuery]: ...
+
+
 def read_csv_workload(
     filename: str | Path,
     name: str = "",
@@ -765,7 +784,7 @@ def read_csv_workload(
     label_column: Optional[str] = None,
     file_encoding: str = "utf-8",
     pd_args: Optional[dict] = None,
-) -> Workload[str] | Workload[int]:
+) -> Workload[str, SqlQuery] | Workload[int, SqlQuery]:
     """Loads a workload consisting of queries from a CSV column.
 
     All queries are expected to be contained in the same column and each query is expected to be put onto its own row.
@@ -794,7 +813,7 @@ def read_csv_workload(
 
     Returns
     -------
-    Workload[str] | Workload[int]
+    Workload[str, SqlQuery] | Workload[int, SqlQuery]
         The workload. It has string labels if `label_column` was provided, or numerical labels otherwise.
 
     See Also
@@ -832,13 +851,13 @@ def read_csv_workload(
     return generate_workload(queries, name=name, labels=label_provider, workload_root=filepath)
 
 
-def generate_workload(
-    queries: Iterable[SelectStatement],
+def generate_workload[L: Hashable, Q: SqlQuery](
+    queries: Iterable[Q],
     *,
     name: str = "",
-    labels: Optional[dict[SelectStatement, LabelType]] = None,
+    labels: Optional[Mapping[Q, L]] = None,
     workload_root: Optional[Path | str] = None,
-) -> Workload[LabelType]:
+) -> Workload[L, Q]:
     """Wraps a number of queries in a workload object.
 
     The queries can receive optional labels, and will receive numerical labels according to their position in the `queries`
@@ -868,13 +887,16 @@ def generate_workload(
     """
     workload_root = Path(workload_root) if isinstance(workload_root, str) else workload_root
     name = name if name else (workload_root.stem if workload_root else "")
-    if not labels:
-        labels: dict[SelectStatement, int] = {query: idx + 1 for idx, query in enumerate(queries)}
-    workload_contents = util.dicts.invert(labels)
-    return Workload(workload_contents, name, workload_root)
+
+    if labels is not None:
+        workload_contents = {labels[q]: q for q in queries}
+    else:
+        workload_contents = {i + 1: query for i, query in enumerate(queries)}
+
+    return Workload(workload_contents, name, workload_root)  # type: ignore
 
 
-def _assert_workload_loaded(workload: Workload[LabelType], expected_dir: Path) -> None:
+def _assert_workload_loaded(workload: Workload, expected_dir: Path) -> None:
     """Ensures that workload queries have been read successfully. The expected directory is used for error messages."""
     if not workload:
         raise ValueError(
@@ -890,7 +912,7 @@ def job(
     *,
     flavor: Literal["default", "light", "complex"] = "default",
     file_encoding: str = "utf-8",
-) -> Workload[str]:
+) -> Workload[str, SelectStatement]:
     """Reads the Join Order Benchmark, with labels according to the original paper (e.g. *1a*, *21c*, etc.).
 
 
@@ -926,10 +948,10 @@ def job(
     # JOB only uses aliases column references, so no need for explicit binding
     job_workload = Workload.read(workload_dir, name="JOB", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(job_workload, workload_dir)
-    return job_workload
+    return cast(Workload[str, SelectStatement], job)
 
 
-def job_light(*, file_encoding: str = "utf-8") -> Workload[str]:
+def job_light(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:
     """Reads the JOB-light benchmark, with numeric query labels (q-1, q-2, q-3, ...).
 
     Parameters
@@ -951,10 +973,10 @@ def job_light(*, file_encoding: str = "utf-8") -> Workload[str]:
     # JOB-light only uses aliases column references, so no need for explicit binding
     job_light_workload = Workload.read(workload_dir, name="JOB-light", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(job_light_workload, workload_dir)
-    return job_light_workload
+    return cast(Workload[str, SelectStatement], job_light_workload)
 
 
-def job_complex(*, file_encoding: str = "utf-8") -> Workload[str]:
+def job_complex(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:
     """Reads the JOB-complex benchmark, with numeric query labels (q-1, q-2, q-3, ...).
 
     Parameters
@@ -982,10 +1004,10 @@ def job_complex(*, file_encoding: str = "utf-8") -> Workload[str]:
         bind_columns=False,
     )
     _assert_workload_loaded(job_complex_workload, workload_dir)
-    return job_complex_workload
+    return cast(Workload[str, SelectStatement], job_complex_workload)
 
 
-def ssb(*, file_encoding: str = "utf-8", bind_columns: Optional[bool] = None) -> Workload[str]:
+def ssb(*, file_encoding: str = "utf-8", bind_columns: Optional[bool] = None) -> Workload[str, SelectStatement]:
     """Reads the Star Schema Benchmark, with labels according to the original data (e.g. *q1-1*, *q3-2*, etc.).
 
     Parameters
@@ -1011,14 +1033,14 @@ def ssb(*, file_encoding: str = "utf-8", bind_columns: Optional[bool] = None) ->
     workload_dir = _fetch_workload("ssb")
     ssb_workload = Workload.read(workload_dir, name="SSB", file_encoding=file_encoding, bind_columns=bind_columns)
     _assert_workload_loaded(ssb_workload, workload_dir)
-    return ssb_workload
+    return cast(Workload[str, SelectStatement], ssb_workload)
 
 
 def stack(
     *,
     file_encoding: str = "utf-8",
     bind_columns: Optional[bool] = None,
-) -> Workload[str]:
+) -> Workload[str, SelectStatement]:
     """Reads the Stack Benchmark, as shipped with the PostBOUND repository.
 
     Most queries use semi-numeric labels consisting of the context and the query number, e.g., *q1/q1-001*. However, some
@@ -1055,10 +1077,10 @@ def stack(
         bind_columns=bind_columns,
     )
     _assert_workload_loaded(stack_workload, workload_dir)
-    return stack_workload
+    return cast(Workload[str, SelectStatement], stack_workload)
 
 
-def stats(*, file_encoding: str = "utf-8") -> Workload[str]:
+def stats(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:
     """Reads the Stats Benchmark, with semi-numeric query labels (e.g. *q-1*, *q-2*, etc.).
 
     Parameters
@@ -1079,10 +1101,10 @@ def stats(*, file_encoding: str = "utf-8") -> Workload[str]:
     workload_dir = _fetch_workload("stats")
     stats_workload = Workload.read(workload_dir, name="Stats", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(stats_workload, workload_dir)
-    return stats_workload
+    return cast(Workload[str, SelectStatement], stats_workload)
 
 
-def fetch_workload(name: str, *, file_encoding: str = "utf-8") -> Workload[str]:
+def fetch_workload(name: str, *, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:
     """Utility method to fetch a pre-defined workload by name."""
     match name:
         case "job" | "imdb":
