@@ -44,9 +44,9 @@ from .qal import (
     AbstractPredicate,
     ArrayAccessExpression,
     ArrayExpression,
-    BaseClause,
     BaseProjection,
     BetweenPredicate,
+    BinaryOperator,
     BinaryPredicate,
     CaseExpression,
     CastExpression,
@@ -56,19 +56,16 @@ from .qal import (
     CompoundPredicate,
     DirectTableSource,
     Explain,
-    ExplicitFromClause,
     From,
     FunctionExpression,
     FunctionTableSource,
     GroupBy,
     Having,
     Hint,
-    ImplicitFromClause,
     InPredicate,
     JoinTableSource,
     JoinType,
     Limit,
-    LogicalOperator,
     MathExpression,
     MathOperator,
     OrderBy,
@@ -76,17 +73,19 @@ from .qal import (
     QuantifierExpression,
     QuantifierOperator,
     Select,
-    SelectStatement,
+    SqlQuery,
     SetOperator,
     SetQuery,
+    SqlClause,
     SqlExpression,
     SqlOperator,
-    SqlQuery,
+    SelectStatement,
     StarExpression,
     StaticValueExpression,
     SubqueryExpression,
     SubqueryTableSource,
     TableSource,
+    UnaryOperator,
     UnaryPredicate,
     ValuesList,
     ValuesTableSource,
@@ -508,9 +507,9 @@ class QueryNamespace:
 def _pglast_is_actual_colref(pglast_data: dict) -> bool:
     """Checks, whether a apparent column reference is actually a column reference and not a star expression in disguise.
 
-    pglast represents both column references such as *R.a* or *a* as well as star expressions like *R.\\** as ``ColumnRef``
-    dictionaries, hence we need to make sure we are actually parsing the right thing. This method takes care of distinguishing
-    the two cases.
+    pglast represents both column references such as *R.a* or *a* as well as star expressions like *R.\\** as
+    ``ColumnRef`` dictionaries, hence we need to make sure we are actually parsing the right thing. This method takes
+    care of distinguishing the two cases.
 
     Parameters
     ----------
@@ -523,14 +522,8 @@ def _pglast_is_actual_colref(pglast_data: dict) -> bool:
         *True* if this is an actual column reference, *False* if this is a star expression.
     """
     fields: list[dict] = pglast_data["fields"]
-    if len(fields) == 1:
-        return "A_Star" not in fields[0]
-    if len(fields) == 2:
-        would_be_col: str = fields[1]
-        return "A_Star" not in would_be_col
-
-    would_be_col: str = fields[0]["String"]["sval"]
-    return not would_be_col.endswith("*")
+    final_field = fields[-1]
+    return "A_Star" not in final_field
 
 
 def _pglast_create_bound_colref(tab: str, col: str, *, namespace: QueryNamespace) -> ColumnReference:
@@ -654,13 +647,13 @@ def _pglast_parse_const(pglast_data: dict) -> StaticValueExpression:
 
 
 _PglastOperatorMap: dict[str, SqlOperator] = {
-    "=": LogicalOperator.Equal,
-    "<": LogicalOperator.Less,
-    "<=": LogicalOperator.LessEqual,
-    ">": LogicalOperator.Greater,
-    ">=": LogicalOperator.GreaterEqual,
-    "<>": LogicalOperator.NotEqual,
-    "!=": LogicalOperator.NotEqual,
+    "=": BinaryOperator.Equal,
+    "<": BinaryOperator.Less,
+    "<=": BinaryOperator.LessEqual,
+    ">": BinaryOperator.Greater,
+    ">=": BinaryOperator.GreaterEqual,
+    "<>": BinaryOperator.NotEqual,
+    "!=": BinaryOperator.NotEqual,
     "AND_EXPR": CompoundOperator.And,
     "OR_EXPR": CompoundOperator.Or,
     "NOT_EXPR": CompoundOperator.Not,
@@ -670,11 +663,11 @@ _PglastOperatorMap: dict[str, SqlOperator] = {
     "/": MathOperator.Divide,
     "%": MathOperator.Modulo,
     "||": MathOperator.Concatenate,
-    "@>": LogicalOperator.Contains,
-    "<@": LogicalOperator.ContainedBy,
-    "&&": LogicalOperator.Overlaps,
-    "AEXPR_DISTINCT": LogicalOperator.DistinctFrom,
-    "AEXPR_NOT_DISTINCT": LogicalOperator.NotDistinctFrom,
+    "@>": BinaryOperator.Contains,
+    "<@": BinaryOperator.ContainedBy,
+    "&&": BinaryOperator.Overlaps,
+    "AEXPR_DISTINCT": BinaryOperator.DistinctFrom,
+    "AEXPR_NOT_DISTINCT": BinaryOperator.NotDistinctFrom,
 }
 """Map from the internal representation of Postgres operators to our standardized QAL operators."""
 
@@ -818,41 +811,41 @@ def _pglast_parse_expression(pglast_data: dict, *, namespace: QueryNamespace, qu
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_OP":
             expression = pglast_data["A_Expr"]
-            operation = _pglast_parse_operator(expression["name"])
+            pglast_op = _pglast_parse_operator(expression["name"])
             right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
 
-            if "lexpr" not in expression and operation in MathOperator:
-                return MathExpression(operation, right)
+            if "lexpr" not in expression and isinstance(pglast_op, MathOperator):
+                return MathExpression(pglast_op, right)
             elif "lexpr" not in expression:
                 raise ParserError("Unknown operator format: " + str(expression))
 
             left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
 
-            if operation in LogicalOperator:
-                return BinaryPredicate(operation, left, right)
+            if isinstance(pglast_op, BinaryOperator):
+                return BinaryPredicate(pglast_op, left, right)
 
-            if isinstance(operation, CompoundOperator):
-                raise ParserError(f"Unexpected compound in query '{query_txt}'")
+            if not isinstance(pglast_op, MathOperator):
+                raise ParserError(f"Unexpected operator in query '{query_txt}'")
 
-            return MathExpression(operation, left, right)
+            return MathExpression(pglast_op, left, right)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_LIKE":
             expression = pglast_data["A_Expr"]
-            operator = (
-                LogicalOperator.Like if expression["name"][0]["String"]["sval"] == "~~" else LogicalOperator.NotLike
+            pglast_op = (
+                BinaryOperator.Like if expression["name"][0]["String"]["sval"] == "~~" else BinaryOperator.NotLike
             )
             left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
             right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
-            return BinaryPredicate(operator, left, right)
+            return BinaryPredicate(pglast_op, left, right)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_ILIKE":
             expression = pglast_data["A_Expr"]
-            operator = (
-                LogicalOperator.ILike if expression["name"][0]["String"]["sval"] == "~~*" else LogicalOperator.NotILike
+            pglast_op = (
+                BinaryOperator.ILike if expression["name"][0]["String"]["sval"] == "~~*" else BinaryOperator.NotILike
             )
             left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
             right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
-            return BinaryPredicate(operator, left, right)
+            return BinaryPredicate(pglast_op, left, right)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_BETWEEN":
             expression = pglast_data["A_Expr"]
@@ -866,34 +859,43 @@ def _pglast_parse_expression(pglast_data: dict, *, namespace: QueryNamespace, qu
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] == "AEXPR_IN":
             expression = pglast_data["A_Expr"]
-            left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
+            col = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
             raw_values = expression["rexpr"]["List"]["items"]
             values = [_pglast_parse_expression(value, namespace=namespace, query_txt=query_txt) for value in raw_values]
-            predicate = InPredicate(left, values)
-            operator = expression["name"][0]["String"]["sval"]
-            if operator == "=":
-                return predicate
-            elif operator == "<>":
-                return CompoundPredicate.create_not(predicate)
-            else:
-                raise ParserError("Invalid IN operator: " + operator)
+
+            pglast_op = expression["name"][0]["String"]["sval"]
+            match pglast_op:
+                case "=":
+                    operator = BinaryOperator.In
+                case "<>":
+                    operator = BinaryOperator.NotIn
+                case _:
+                    raise ParserError(f"Invalid IN operator for query: {query_txt}")
+
+            return InPredicate(col, values, operator=operator)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] in [
             "AEXPR_DISTINCT",
             "AEXPR_NOT_DISTINCT",
         ]:
             expression = pglast_data["A_Expr"]
-            operator = _PglastOperatorMap[expression["kind"]]
+            pglast_op = _PglastOperatorMap[expression["kind"]]
+            if not isinstance(pglast_op, BinaryOperator):
+                raise ParserError(f"Unexpected operator in query '{query_txt}'")
+
             left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
             right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
-            return BinaryPredicate(operator, left, right)
+            return BinaryPredicate(pglast_op, left, right)
 
         case "A_Expr" if pglast_data["A_Expr"]["kind"] in [
             "AEXPR_OP_ANY",
             "AEXPR_OP_ALL",
         ]:
             expression = pglast_data["A_Expr"]
-            operation = _pglast_parse_operator(expression["name"])
+            pglast_op = _pglast_parse_operator(expression["name"])
+            if not isinstance(pglast_op, BinaryOperator):
+                raise ParserError(f"Unexpected operator in query '{query_txt}'")
+
             left = _pglast_parse_expression(expression["lexpr"], namespace=namespace, query_txt=query_txt)
             right = _pglast_parse_expression(expression["rexpr"], namespace=namespace, query_txt=query_txt)
 
@@ -906,26 +908,51 @@ def _pglast_parse_expression(pglast_data: dict, *, namespace: QueryNamespace, qu
                     raise ParserError("Unknown quantifier operator: " + str(expression))
 
             return BinaryPredicate(
-                operation,
+                pglast_op,
                 left,
                 QuantifierExpression(right, quantifier=quantifier),
             )
 
         case "BoolExpr":
             expression = pglast_data["BoolExpr"]
-            operator = _PglastOperatorMap[expression["boolop"]]
+            pglast_op = _PglastOperatorMap[expression["boolop"]]
             children = [
                 _pglast_parse_predicate(child, namespace=namespace, query_txt=query_txt) for child in expression["args"]
             ]
-            if not isinstance(operator, CompoundOperator):
+            if not isinstance(pglast_op, CompoundOperator):
                 raise ParserError(f"Unexpected non-compound in query '{query_txt}'")
-            return CompoundPredicate.create(operator, children)
+            return CompoundPredicate.create(pglast_op, children)
 
         case "NullTest":
             expression = pglast_data["NullTest"]
             testexpr = _pglast_parse_expression(expression["arg"], namespace=namespace, query_txt=query_txt)
-            operation = LogicalOperator.Is if expression["nulltesttype"] == "IS_NULL" else LogicalOperator.IsNot
-            return BinaryPredicate(operation, testexpr, StaticValueExpression.null())
+            pglast_op = UnaryOperator.IsNull if expression["nulltesttype"] == "IS_NULL" else UnaryOperator.IsNotNull
+            return UnaryPredicate(testexpr, pglast_op)
+
+        case "BooleanTest":
+            expression = pglast_data["BooleanTest"]
+            testexpr = _pglast_parse_expression(expression["arg"], namespace=namespace, query_txt=query_txt)
+            match expression["booltesttype"]:
+                case "IS_TRUE":
+                    pglast_op = UnaryOperator.IsTrue
+                case "IS_NOT_TRUE":
+                    pglast_op = UnaryOperator.IsNotTrue
+
+                case "IS_FALSE":
+                    pglast_op = UnaryOperator.IsFalse
+                case "IS_NOT_FALSE":
+                    pglast_op = UnaryOperator.IsNotFalse
+
+                case "IS_UNKNOWN":
+                    pglast_op = (
+                        UnaryOperator.IsNull
+                    )  # let's not bother with this one, it is not really used in practice
+                case "IS_NOT_UNKNOWN":
+                    pglast_op = UnaryOperator.IsNotNull
+
+                case _:
+                    raise ParserError(f"Unknown boolean test type: {expression['booltesttype']}")
+            return UnaryPredicate(testexpr, pglast_op)
 
         case "FuncCall" if "over" not in pglast_data["FuncCall"]:  # normal functions, aggregates and UDFs
             expression: dict = pglast_data["FuncCall"]
@@ -1072,23 +1099,29 @@ def _pglast_parse_expression(pglast_data: dict, *, namespace: QueryNamespace, qu
                 query_txt=query_txt,
             )
             if sublink_type == "EXISTS_SUBLINK":
-                return UnaryPredicate.exists(subquery)
+                return UnaryPredicate.create_exists(subquery)  # type: ignore - see comment on build_query() in _qal
             elif sublink_type == "EXPR_SUBLINK":
-                return SubqueryExpression(subquery)
+                return SubqueryExpression(subquery)  # type: ignore - see comment on build_query() in _qal
 
             testexpr = _pglast_parse_expression(expression["testexpr"], namespace=namespace, query_txt=query_txt)
 
             if sublink_type == "ANY_SUBLINK" and "operName" not in expression:
-                return InPredicate.subquery(testexpr, subquery)
+                return InPredicate.create_subquery(testexpr, subquery)  # type: ignore - see comment on build_query() in _qal
 
             if sublink_type == "ANY_SUBLINK":
-                operator = _PglastOperatorMap[expression["operName"]]
-                subquery_expression = QuantifierExpression.any(subquery)
-                return BinaryPredicate(operator, testexpr, subquery_expression)
+                pglast_op = _PglastOperatorMap[expression["operName"]]
+                if not isinstance(pglast_op, BinaryOperator):
+                    raise ParserError(f"Unexpected operator in query '{query_txt}'")
+
+                subquery_expression = QuantifierExpression.any(subquery)  # type: ignore - see comment on build_query() in _qal
+                return BinaryPredicate(pglast_op, testexpr, subquery_expression)
             elif sublink_type == "ALL_SUBLINK":
-                operator = _PglastOperatorMap[expression["operName"]]
-                subquery_expression = QuantifierExpression.all(subquery)
-                return BinaryPredicate(operator, testexpr, subquery_expression)
+                pglast_op = _PglastOperatorMap[expression["operName"]]
+                if not isinstance(pglast_op, BinaryOperator):
+                    raise ParserError(f"Unexpected operator in query '{query_txt}'")
+
+                subquery_expression = QuantifierExpression.all(subquery)  # type: ignore - see comment on build_query() in _qal
+                return BinaryPredicate(pglast_op, testexpr, subquery_expression)
             else:
                 raise NotImplementedError("Subquery handling is not yet implemented")
 
@@ -1227,7 +1260,7 @@ def _pglast_parse_ctes(json_data: dict, *, parent_namespace: QueryNamespace, que
                 namespace=child_nsp,
                 query_txt=query_txt,
             )
-            parsed_cte = WithQuery(cte_query, target_table, materialized=force_materialization)
+            parsed_cte = WithQuery(cte_query, target_table, materialized=force_materialization)  # type: ignore - see comment on build_query() in _qal
 
         parsed_ctes.append(parsed_cte)
 
@@ -1451,7 +1484,7 @@ def _pglast_parse_from_entry(pglast_data: dict, *, namespace: QueryNamespace, qu
                 query_txt=query_txt,
             )
 
-            subquery_source = SubqueryTableSource(subquery, target_name=alias, lateral=is_lateral)
+            subquery_source = SubqueryTableSource(subquery, target_name=alias, lateral=is_lateral)  # type: ignore - see comment on build_query() in _qal
             return subquery_source
 
         case "RangeFunction":
@@ -1464,6 +1497,8 @@ def _pglast_parse_from_entry(pglast_data: dict, *, namespace: QueryNamespace, qu
 
             function_expr: dict = raw_function["functions"][0]["List"]["items"][0]
             parsed_function = _pglast_parse_expression(function_expr, namespace=namespace, query_txt=query_txt)
+            assert isinstance(parsed_function, FunctionExpression)
+
             return FunctionTableSource(parsed_function, alias=alias)
 
         case _:
@@ -1534,37 +1569,10 @@ def _pglast_parse_from(from_clause: list[dict], *, namespace: QueryNamespace, qu
     From
         The parsed *FROM* clause.
     """
-    contains_plain_table = False
-    contains_join = False
-    contains_mixed = False  # plain tables and explicit JOINs, subqueries or VALUES
-
     table_sources: list[TableSource] = []
     for entry in from_clause:
         current_table_source = _pglast_parse_from_entry(entry, namespace=namespace, query_txt=query_txt)
         table_sources.append(current_table_source)
-
-        match current_table_source:
-            case DirectTableSource():
-                contains_plain_table = True
-                if contains_join:
-                    contains_mixed = True
-            case JoinTableSource():
-                contains_join = True
-                if contains_plain_table:
-                    contains_mixed = True
-            case SubqueryTableSource():
-                contains_mixed = True
-            case ValuesTableSource():
-                contains_mixed = True
-            case FunctionTableSource():
-                contains_mixed = True
-            case _:
-                raise ParserError(f"Unknown table source type: {type(current_table_source).__name__}")
-
-    if not contains_join and not contains_mixed:
-        return ImplicitFromClause(table_sources)
-    if contains_join and not contains_mixed:
-        return ExplicitFromClause(table_sources)
 
     return From(table_sources)
 
@@ -1882,7 +1890,7 @@ def _pglast_parse_explain(pglast_data: dict) -> tuple[Optional[Explain], dict]:
     return explain_clause, pglast_data["query"]
 
 
-def _pglast_parse_query(stmt: dict, *, namespace: QueryNamespace, query_txt: str) -> SelectStatement:
+def _pglast_parse_query(stmt: dict, *, namespace: QueryNamespace, query_txt: str) -> SqlQuery:
     """Main entry point into the parsing logic.
 
     This function takes a single SQL SELECT query and provides the corresponding `SqlQuery` object.
@@ -1909,7 +1917,7 @@ def _pglast_parse_query(stmt: dict, *, namespace: QueryNamespace, query_txt: str
     if stmt["op"] != "SETOP_NONE":
         return _pglast_parse_setop(stmt, parent_namespace=namespace, query_txt=query_txt)
 
-    clauses: list[BaseClause] = []
+    clauses: list[SqlClause] = []
 
     if "withClause" in stmt:
         with_clause = _pglast_parse_ctes(stmt["withClause"], parent_namespace=namespace, query_txt=query_txt)
@@ -2049,11 +2057,11 @@ def _parse_hint_block(
 
 
 def _apply_extra_clauses(
-    parsed: SelectStatement,
+    parsed: SqlQuery,
     *,
     hint: Optional[Hint],
     explain_clause: Optional[Explain],
-) -> SelectStatement:
+) -> SqlQuery:
     clauses = list(parsed.clauses())
     if hint:
         clauses.append(hint)
@@ -2069,7 +2077,7 @@ def parse_query(
     include_hints: bool = True,
     bind_columns: bool | None = None,
     db_schema: Optional[DatabaseSchema] = None,
-) -> SqlQuery: ...
+) -> SelectStatement: ...
 
 
 @overload
@@ -2080,7 +2088,7 @@ def parse_query(
     include_hints: bool = True,
     bind_columns: Optional[bool] = None,
     db_schema: Optional[DatabaseSchema] = None,
-) -> SelectStatement: ...
+) -> SqlQuery: ...
 
 
 @overload
@@ -2091,17 +2099,17 @@ def parse_query(
     include_hints: bool = True,
     bind_columns: Optional[bool] = None,
     db_schema: Optional[DatabaseSchema] = None,
-) -> SqlQuery: ...
+) -> SelectStatement: ...
 
 
 def parse_query(
     query: str,
     *,
-    accept_set_query: bool = False,
+    accept_set_query: bool = True,
     include_hints: bool = True,
     bind_columns: Optional[bool] = None,
     db_schema: Optional[DatabaseSchema] = None,
-) -> SelectStatement:
+) -> SqlQuery:
     """Parses a query string into a proper `SqlQuery` object.
 
     During parsing, the appropriate type of SQL query (i.e. with implicit, explicit or mixed *FROM* clause) will be
@@ -2194,7 +2202,7 @@ def parse_query(
         namespace=QueryNamespace.empty(db_schema, top_level=True),
         query_txt=query,
     )
-    if not accept_set_query and isinstance(query, SetQuery):
+    if not accept_set_query and isinstance(parsed_query, SetQuery):
         raise ParserError("Input query is a set query")
 
     hint = _parse_hint_block(query, set_cmds=set_cmds) if include_hints else None
@@ -2210,7 +2218,7 @@ def load_query(
     include_hints: bool = True,
     bind_columns: Optional[bool] = None,
     db_schema: Optional[DatabaseSchema] = None,
-) -> SelectStatement:
+) -> SqlQuery:
     """Loads and parses a single query from a file.
 
     All parameters other than the query path are forwarded to the `parse_query` method.
@@ -2370,7 +2378,7 @@ def load_predicate_json(json_data):
     parsed_query = parse_query(emulated_query)
     if not parsed_query.where_clause:
         raise ParserError(f"No predicate found. Inferred query was '{parsed_query}'.")
-    return parsed_query.where_clause.predicate
+    return parsed_query.where_clause.root
 
 
 def load_operator_json(json_data: str) -> SqlOperator:
@@ -2378,8 +2386,10 @@ def load_operator_json(json_data: str) -> SqlOperator:
     json_data = json_data.removeprefix('"').removesuffix('"')
     if json_data in MathOperator:
         return MathOperator(json_data)
-    if json_data in LogicalOperator:
-        return LogicalOperator(json_data)
+    if json_data in BinaryOperator:
+        return BinaryOperator(json_data)
     if json_data in CompoundOperator:
         return CompoundOperator(json_data)
+    if json_data in UnaryOperator:
+        return UnaryOperator(json_data)
     raise ParserError(f"No matching operator found for JSON data {json_data}")

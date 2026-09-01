@@ -12,7 +12,7 @@ pg_connect_dir = "."
 
 
 class DummyJoinOrdering(pb.JoinOrderOptimization):
-    def optimize_join_order(self, query: pb.SqlQuery) -> pb.JoinTree:
+    def optimize_join_order(self, query: pb.Buffer) -> pb.JoinTree:
         join_tree = pb.JoinTree()
         for table in query.tables():
             join_tree = join_tree.join_with(table)
@@ -21,7 +21,7 @@ class DummyJoinOrdering(pb.JoinOrderOptimization):
 
 class DummyOperatorSelection(pb.PhysicalOperatorSelection):
     def select_physical_operators(
-        self, query: pb.SqlQuery, join_order: pb.JoinTree | None
+        self, query: pb.Buffer, join_order: pb.JoinTree | None
     ) -> pb.PhysicalOperatorAssignment:
         assignment = pb.PhysicalOperatorAssignment()
         for table in query.tables():
@@ -32,7 +32,7 @@ class DummyOperatorSelection(pb.PhysicalOperatorSelection):
 class DummyPlanParameterization(pb.ParameterGeneration):
     def generate_plan_parameters(
         self,
-        query: pb.SqlQuery,
+        query: pb.Buffer,
         join_order: pb.JoinTree | None,
         operator_assignment: pb.PhysicalOperatorAssignment | None,
     ) -> pb.PlanParameterization:
@@ -45,7 +45,7 @@ class DummyPlanParameterization(pb.ParameterGeneration):
 class DummyCardinalityEstimator(pb.CardinalityEstimator):
     def calculate_estimate(
         self,
-        query: pb.SqlQuery,
+        query: pb.Buffer,
         intermediate: pb.TableReference | Iterable[pb.TableReference],
     ) -> pb.Cardinality:
         intermediate = pb.util.enlist(intermediate)
@@ -56,7 +56,7 @@ class DummyCardinalityEstimator(pb.CardinalityEstimator):
 class FailingCardinalityEstimator(pb.CardinalityEstimator):
     def calculate_estimate(
         self,
-        query: pb.SqlQuery,
+        query: pb.Buffer,
         intermediate: pb.TableReference | Iterable[pb.TableReference],
     ) -> pb.Cardinality:
         raise RuntimeError("Cardinality estimation failed")
@@ -67,9 +67,7 @@ class DataDrivenOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_data_training = False
 
-    def optimize_query(
-        self, query: pb.SqlQuery, current_plan: pb.QueryPlan
-    ) -> pb.QueryPlan:
+    def optimize_query(self, query: pb.Buffer, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
     def fit_database(self, database) -> pb.train.TrainingMetrics:
@@ -85,14 +83,10 @@ class WorkloadDrivenOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_workload_training = False
 
-    def optimize_query(
-        self, query: pb.SqlQuery, current_plan: pb.QueryPlan
-    ) -> pb.QueryPlan:
+    def optimize_query(self, query: pb.Buffer, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
-    def fit_workload(
-        self, queries: pb.Workload, database: pb.Database
-    ) -> pb.train.TrainingMetrics:
+    def fit_workload(self, queries: pb.Workload, database: pb.Database) -> pb.train.TrainingMetrics:
         self.received_workload_training = True
         return {}
 
@@ -105,9 +99,7 @@ class OfflineLearnedOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_offline_training = False
 
-    def optimize_query(
-        self, query: pb.SqlQuery, current_plan: pb.QueryPlan
-    ) -> pb.QueryPlan:
+    def optimize_query(self, query: pb.Buffer, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
     def fit_samples(self, samples: pb.train.TrainingData) -> pb.train.TrainingMetrics:
@@ -126,13 +118,11 @@ class OnlineLearnedOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_online_training = False
 
-    def optimize_query(
-        self, query: pb.SqlQuery, current_plan: pb.QueryPlan
-    ) -> pb.QueryPlan:
+    def optimize_query(self, query: pb.Buffer, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
     def learn_from_feedback(
-        self, query: pb.SqlQuery, result_set: pb.db.ResultSet, *, exec_time: pb.TimeMs
+        self, query: pb.Buffer, result_set: pb.db.ResultSet, *, exec_time: pb.TimeMs
     ) -> pb.train.TrainingMetrics:
         self.received_online_training = True
         return {}
@@ -141,9 +131,7 @@ class OnlineLearnedOptimizer(pb.IncrementalOptimizationStep):
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
 class StatsBenchmarkTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.pg_instance = pb.postgres.connect(
-            config_file=f"{pg_connect_dir}/.psycopg_connection_stats"
-        )
+        self.pg_instance = pb.postgres.connect(config_file=f"{pg_connect_dir}/.psycopg_connection_stats")
         self.stats = pb.workloads.stats()
 
     def test_native_execution(self) -> None:
@@ -170,9 +158,7 @@ class StatsBenchmarkTests(unittest.TestCase):
         self.assertTrue((results["status"] == "ok").all())
 
     def test_timeouts(self) -> None:
-        native_results = pb.bench.execute_workload(
-            self.stats.first(3), on=self.pg_instance
-        )
+        native_results = pb.bench.execute_workload(self.stats.first(3), on=self.pg_instance)
 
         min_runtime = native_results["exec_time"].min()
         timeout_results = pb.bench.execute_workload(
@@ -208,7 +194,8 @@ class StatsBenchmarkTests(unittest.TestCase):
 
     def test_learned_estimators(self) -> None:
         dummy_training_data = pb.train.TrainingData(
-            pd.DataFrame(columns=["query"]), feature_map={"query": "query"}
+            pd.DataFrame(columns=["query"]),  # type: ignore
+            feature_map={"query": "query"},
         )
 
         data_driven_opt = DataDrivenOptimizer()
@@ -223,9 +210,7 @@ class StatsBenchmarkTests(unittest.TestCase):
             .use(online_opt)
         )
 
-        pb.bench.execute_workload(
-            self.stats.first(3), on=pipeline, training_data=dummy_training_data
-        )
+        pb.bench.execute_workload(self.stats.first(3), on=pipeline, training_data=dummy_training_data)
 
         self.assertTrue(
             data_driven_opt.database_fit_completed(),

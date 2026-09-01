@@ -10,7 +10,7 @@ from ._core import Cardinality, Cost, TableReference, TimeMs
 from ._hints import JoinTree, PhysicalOperatorAssignment, PlanParameterization
 from ._qep import QueryPlan
 from .db import Database, DatabasePool, ResultSet
-from .qal import SqlQuery
+from .qal import SelectStatement
 from .train import TrainingData, TrainingMetrics, TrainingSpec
 from .util.jsonize import jsondict
 from .validation import EmptyPreCheck, OptimizationPreCheck
@@ -300,7 +300,7 @@ class OptimizationStage:
         return getattr(cls, "fit_samples", None) != OptimizationStage.fit_samples
 
     def learn_from_feedback(
-        self, query: SqlQuery, result_set: ResultSet, *, exec_time: TimeMs
+        self, query: SelectStatement, result_set: ResultSet, *, exec_time: TimeMs
     ) -> TrainingMetrics:
         """Performs online learning based on the execution of a past query.
 
@@ -395,7 +395,7 @@ class CompleteOptimizationAlgorithm(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def optimize_query(self, query: SqlQuery) -> QueryPlan:
+    def optimize_query(self, query: SelectStatement) -> QueryPlan:
         """Constructs the optimized execution plan for an input query.
 
         Parameters
@@ -434,7 +434,7 @@ class JoinOrderOptimization(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SelectStatement) -> Optional[JoinTree]:
         """Performs the actual join ordering process.
 
         The join tree can be further annotated with an initial operator assignment, if that is an inherent part of
@@ -471,7 +471,7 @@ class JoinOrderOptimizationError(RuntimeError):
         A message containing more details about the specific error. Defaults to an empty string.
     """
 
-    def __init__(self, query: SqlQuery, message: str = "") -> None:
+    def __init__(self, query: SelectStatement, message: str = "") -> None:
         super().__init__(
             f"Join order optimization failed for query {query}"
             if not message
@@ -505,7 +505,7 @@ class PhysicalOperatorSelection(OptimizationStage, abc.ABC):
 
     @abc.abstractmethod
     def select_physical_operators(
-        self, query: SqlQuery, join_order: Optional[JoinTree]
+        self, query: SelectStatement, join_order: Optional[JoinTree]
     ) -> PhysicalOperatorAssignment:
         """Performs the operator assignment.
 
@@ -558,7 +558,7 @@ class ParameterGeneration(OptimizationStage, abc.ABC):
     @abc.abstractmethod
     def generate_plan_parameters(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         join_order: Optional[JoinTree],
         operator_assignment: Optional[PhysicalOperatorAssignment],
     ) -> PlanParameterization:
@@ -638,11 +638,11 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         super().__init__()
         self.allow_cross_products = allow_cross_products
         self.target_db: Database = None  # type: ignore
-        self.query: SqlQuery = None  # type: ignore
+        self.query: SelectStatement = None  # type: ignore
 
     @abc.abstractmethod
     def calculate_estimate(
-        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
+        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         """Determines the cardinality of a specific intermediate.
 
@@ -661,7 +661,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         """
         raise NotImplementedError
 
-    def initialize(self, target_db: Database, query: SqlQuery) -> None:
+    def initialize(self, target_db: Database, query: SelectStatement) -> None:
         """Hook method that is called before the actual optimization process starts.
 
         This method can be overwritten to set up any necessary data structures, etc. and will be called before each query.
@@ -689,7 +689,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         self.query = None  # type: ignore
 
     def generate_intermediates(
-        self, query: SqlQuery
+        self, query: SelectStatement
     ) -> Generator[frozenset[TableReference], None, None]:
         """Provides all intermediate results of a query.
 
@@ -719,7 +719,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
                 continue
             yield frozenset(candidate_join)
 
-    def estimate_cardinalities(self, query: SqlQuery) -> PlanParameterization:
+    def estimate_cardinalities(self, query: SelectStatement) -> PlanParameterization:
         """Produces all cardinality estimates for a specific query.
 
         The default implementation of this method delegates the actual estimation to the `calculate_estimate` method. It is
@@ -745,7 +745,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
 
     def generate_plan_parameters(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         join_order: Optional[JoinTree],
         operator_assignment: Optional[PhysicalOperatorAssignment],
     ) -> PlanParameterization:
@@ -785,7 +785,7 @@ class CostModel(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def estimate_cost(self, query: SqlQuery, plan: QueryPlan) -> Cost:
+    def estimate_cost(self, query: SelectStatement, plan: QueryPlan) -> Cost:
         """Computes the cost estimate for a specific plan.
 
         The following conventions are used for the estimation: the root node of the plan will not have any cost set. However,
@@ -814,7 +814,7 @@ class CostModel(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
-    def initialize(self, target_db: Database, query: SqlQuery) -> None:
+    def initialize(self, target_db: Database, query: SelectStatement) -> None:
         """Hook method that is called before the actual optimization process starts.
 
         This method can be overwritten to set up any necessary data structures, etc. and will be called before each query.
@@ -871,7 +871,7 @@ class PlanEnumerator(OptimizationStage, abc.ABC):
     @abc.abstractmethod
     def generate_execution_plan(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         *,
         cost_model: CostModel,
         cardinality_estimator: CardinalityEstimator,
@@ -924,7 +924,7 @@ class IncrementalOptimizationStep(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def optimize_query(self, query: SqlQuery, current_plan: QueryPlan) -> QueryPlan:
+    def optimize_query(self, query: SelectStatement, current_plan: QueryPlan) -> QueryPlan:
         """Determines the next query plan.
 
         If no further optimization steps are configured in the pipeline, this is also the final query plan.
@@ -1017,7 +1017,7 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
         assert self._plan_parameterization is not None
         return self._plan_parameterization
 
-    def optimize_query(self, query: SqlQuery) -> QueryPlan:
+    def optimize_query(self, query: SelectStatement) -> QueryPlan:
         join_order = (
             self._join_order_optimizer.optimize_join_order(query)
             if self._join_order_optimizer is not None

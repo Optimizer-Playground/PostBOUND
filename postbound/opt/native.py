@@ -46,7 +46,7 @@ from .._stages import (
 )
 from ..db import Database, DatabaseServerError, DatabaseUserError
 from ..postgres import PostgresInterface
-from ..qal import ColumnExpression, OrderBy, SqlQuery
+from ..qal import ColumnExpression, OrderBy, SelectStatement
 from ..util import jsondict
 
 
@@ -74,18 +74,18 @@ class NativeCostModel(CostModel):
         self._raise_on_error = raise_on_error
         self._verbose = verbose
 
-    def estimate_cost(self, query: SqlQuery, plan: QueryPlan) -> Cost:
+    def estimate_cost(self, query: SelectStatement, plan: QueryPlan) -> Cost:
+        assert self.target_db is not None
+
         matching_tables = query.tables() == plan.tables()
         intermediate_op = plan.operator in {
             IntermediateOperator.Materialize,
             IntermediateOperator.Memoize,
         }
         if intermediate_op and matching_tables:
-            raise ValueError(
-                "Cannot estimate the cost of intermediate operators as final operator in a plan."
-            )
+            raise ValueError("Cannot estimate the cost of intermediate operators as final operator in a plan.")
         if not intermediate_op and not matching_tables:
-            query = transform.extract_query_fragment(query, plan.tables())
+            query = transform.extract_subquery(query, plan.tables())
 
         match plan.operator:
             case ScanOperator.IndexScan | ScanOperator.IndexOnlyScan:
@@ -100,9 +100,7 @@ class NativeCostModel(CostModel):
                 # No action needed, processing starts below
                 pass
 
-        hinted_query = self.target_db.hinting().generate_hints(
-            query, plan.with_actual_card()
-        )
+        hinted_query = self.target_db.hinting().generate_hints(query, plan.with_actual_card())
         if self._raise_on_error:
             cost = self.target_db.optimizer().cost_estimate(hinted_query)
         else:
@@ -115,19 +113,19 @@ class NativeCostModel(CostModel):
     def describe(self) -> jsondict:
         return {
             "name": "native",
-            "database_system": self.target_db.describe()
-            if self.target_db is not None
-            else None,
+            "database_system": self.target_db.describe() if self.target_db is not None else None,
         }
 
-    def initialize(self, target_db: Database, query: SqlQuery) -> None:
+    def initialize(self, target_db: Database, query: SelectStatement) -> None:
         self.target_db = target_db
 
-    def _cost_index_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
+    def _cost_index_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of an index scan or index-only scan at the root of a specific query plan.
 
         This method purely exists to keep the rather complex logic of index costing out of the main cost estimation method.
         """
+        assert self.target_db is not None
+
         plan = plan.with_actual_card()
         original_query = self.target_db.hinting().generate_hints(query, plan)
         try:
@@ -149,26 +147,20 @@ class NativeCostModel(CostModel):
             cost = math.inf
 
         if math.isinf(cost) and self._raise_on_error:
-            raise DatabaseServerError(
-                f"Could not estimate the cost of index plan {plan}."
-            )
+            raise DatabaseServerError(f"Could not estimate the cost of index plan {plan}.")
         elif math.isinf(cost):
             return cost
 
         index_node = count_plan.outermost_scan()
-        count_plan_matches_original_plan = (
-            index_node and index_node.operator == plan.operator
-        )
+        count_plan_matches_original_plan = index_node and index_node.operator == plan.operator
         if not count_plan_matches_original_plan and self._raise_on_error:
-            raise DatabaseServerError(
-                f"Could not estimate the cost of index plan {plan}."
-            )
+            raise DatabaseServerError(f"Could not estimate the cost of index plan {plan}.")
         elif not count_plan_matches_original_plan:
             return math.inf
 
         return index_node.estimated_cost
 
-    def _cost_materialize_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
+    def _cost_materialize_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of a materialize node at the root of a specific query plan.
 
         Parameters
@@ -225,18 +217,12 @@ class NativeCostModel(CostModel):
 
         # Now that we have a table to join with, we can build the updated plan.
         topped_scan = QueryPlan(ScanOperator.SequentialScan, base_table=topped_table)
-        topped_plan = QueryPlan(
-            JoinOperator.NestedLoopJoin, children=[topped_scan, plan]
-        )
+        topped_plan = QueryPlan(JoinOperator.NestedLoopJoin, children=[topped_scan, plan])
 
         # Based on the plan we need to construct a suitable query and retrieve its execution plan.
-        query_fragment = transform.extract_query_fragment(
-            query, plan.tables() | {topped_table}
-        )
+        query_fragment = transform.extract_subquery(query, plan.tables() | {topped_table})
         query_fragment = transform.as_star_query(query_fragment)
-        topped_query = self.target_db.hinting().generate_hints(
-            query_fragment, topped_plan
-        )
+        topped_query = self.target_db.hinting().generate_hints(query_fragment, topped_plan)
         try:
             topped_explain = self.target_db.optimizer().query_plan(topped_query)
         except (DatabaseServerError, DatabaseUserError):
@@ -248,8 +234,7 @@ class NativeCostModel(CostModel):
 
         # Finally, we need to extract the cost estimate of the materialize node.
         intermediate_node = topped_explain.find_first_node(
-            lambda node: node.node_type == IntermediateOperator.Materialize
-            and node.tables == plan.tables()
+            lambda node: node.node_type == IntermediateOperator.Materialize and node.tables == plan.tables()
         )
         if not intermediate_node:
             warnings.warn(
@@ -259,7 +244,7 @@ class NativeCostModel(CostModel):
             return math.inf
         return intermediate_node.estimated_cost
 
-    def _cost_memoize_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
+    def _cost_memoize_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of a memoize node at the root of a specific query plan.
 
         Parameters
@@ -301,9 +286,7 @@ class NativeCostModel(CostModel):
 
         cache_key = plan.lookup_key
         if not cache_key:
-            raise ValueError(
-                "Cannot estimate the cost of memoize operators without a lookup key."
-            )
+            raise ValueError("Cannot estimate the cost of memoize operators without a lookup key.")
         if not isinstance(cache_key, ColumnExpression):
             warnings.warn(
                 "Can only estimate the cost of memoize for single column cache keys. Returning infinite costs.",
@@ -311,12 +294,18 @@ class NativeCostModel(CostModel):
             )
             return math.inf
 
+        column = cache_key.column
+        if not ColumnReference.assert_bound(column):
+            warnings.warn(
+                "Can only estimate the cost of memoize for cache keys that are bound to a table. Returning infinite costs.",
+                category=CostEstimationWarning,
+            )
+            return math.inf
+
         # Our join partner has to be a table that is not already part of the plan. Based on these tables, we need to determine
         # all tables that have a suitable join condition with our cache key.
         free_tables = query.tables() - plan.tables()
-        candidate_joins = query.predicates().joins_between(
-            free_tables, cache_key.column.table
-        )
+        candidate_joins = query.predicates().joins_between(free_tables, column.table)
         if not candidate_joins:
             warnings.warn(
                 "Could not find a suitable consumer of the materialized table. Returning infinite costs.",
@@ -331,18 +320,12 @@ class NativeCostModel(CostModel):
 
         # Now that we have a table to join with, we can build the updated plan.
         topped_scan = QueryPlan(ScanOperator.SequentialScan, base_table=topped_table)
-        topped_plan = QueryPlan(
-            JoinOperator.NestedLoopJoin, children=[topped_scan, plan]
-        )
+        topped_plan = QueryPlan(JoinOperator.NestedLoopJoin, children=[topped_scan, plan])
 
         # Based on the plan we need to construct a suitable query and retrieve its execution plan.
-        query_fragment = transform.extract_query_fragment(
-            query, plan.tables() | {topped_table}
-        )
+        query_fragment = transform.extract_subquery(query, plan.tables() | {topped_table})
         query_fragment = transform.as_star_query(query_fragment)
-        topped_query = self.target_db.hinting().generate_hints(
-            query_fragment, topped_plan
-        )
+        topped_query = self.target_db.hinting().generate_hints(query_fragment, topped_plan)
         try:
             topped_explain = self.target_db.optimizer().query_plan(topped_query)
         except (DatabaseServerError, DatabaseUserError):
@@ -354,8 +337,7 @@ class NativeCostModel(CostModel):
 
         # Finally, we need to extract the cost estimate of the materialize node.
         intermediate_node = topped_explain.find_first_node(
-            lambda node: node.node_type == IntermediateOperator.Memoize
-            and node.tables == plan.tables()
+            lambda node: node.node_type == IntermediateOperator.Memoize and node.tables == plan.tables()
         )
         if not intermediate_node:
             warnings.warn(
@@ -365,7 +347,7 @@ class NativeCostModel(CostModel):
             return math.inf
         return intermediate_node.estimated_cost
 
-    def _cost_sort_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
+    def _cost_sort_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of a sort node at the root of a specific query plan.
 
         Parameters
@@ -376,13 +358,14 @@ class NativeCostModel(CostModel):
         plan : QueryPlan
             The plan that should be estimated. The root node of this plan is expected to be a sort node.
         """
+        assert self.target_db is not None
 
         # Estimating the cost of a sort node is a bit tricky but not too difficult compared with costing memoize or materialize
         # nodes. The trick is to determine the cost of a modified ORDER BY query which encodes the desired sort order.
         # We just need to be a bit careful because the sort column might not be referenced in the plan, yet, nor must it be
         # present in the query (e.g. for cheap merge joins).
 
-        query_fragment = transform.extract_query_fragment(query, plan.tables())
+        query_fragment = transform.extract_subquery(query, plan.tables())
         query_fragment = transform.as_star_query(query_fragment)
         target_columns: set[ColumnReference] = util.set_union(
             [self.target_db.schema().columns(tab) for tab in plan.tables()]
@@ -392,16 +375,16 @@ class NativeCostModel(CostModel):
         for sort_key in plan.sort_keys:
             col = next(
                 (
-                    col
+                    col.column
                     for col in sort_key.equivalence_class
-                    if isinstance(col, ColumnExpression)
-                    and col.column in target_columns
+                    if isinstance(col, ColumnExpression) and col.column in target_columns
                 )
             )
             orderby_cols.append(col)
         orderby_clause = OrderBy.create_for(orderby_cols)
         query_fragment = transform.add_clause(query_fragment, orderby_clause)
 
+        assert plan.input_node
         return self.estimate_cost(query_fragment, plan.input_node)
 
     def _warn(self, msg: str) -> None:
@@ -418,22 +401,22 @@ class NativeCardinalityEstimator(CardinalityEstimator):
         self._target_db: Optional[Database] = target_db
 
     def calculate_estimate(
-        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
+        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
+        assert self._target_db is not None
+
         intermediate = util.enlist(intermediate)
-        subquery = transform.extract_query_fragment(query, intermediate)
+        subquery = transform.extract_subquery(query, intermediate)
         subquery = transform.as_star_query(subquery)
         return self._target_db.optimizer().cardinality_estimate(subquery)
 
     def describe(self) -> jsondict:
         return {
             "name": "native",
-            "database_system": self._target_db.describe()
-            if self._target_db is not None
-            else None,
+            "database_system": self._target_db.describe() if self._target_db is not None else None,
         }
 
-    def initialize(self, target_db: Database, query: SqlQuery) -> None:
+    def initialize(self, target_db: Database, query: SelectStatement) -> None:
         self._target_db = target_db
 
 
@@ -450,7 +433,7 @@ class NativeJoinOrderOptimizer(JoinOrderOptimization):
         super().__init__()
         self.db_instance = db_instance
 
-    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SelectStatement) -> Optional[JoinTree]:
         query_plan = self.db_instance.optimizer().query_plan(query)
         return jointree_from_plan(query_plan)
 
@@ -474,13 +457,9 @@ class NativePhysicalOperatorSelection(PhysicalOperatorSelection):
         super().__init__()
         self.db_instance = db_instance
 
-    def select_physical_operators(
-        self, query: SqlQuery, join_order: Optional[JoinTree]
-    ) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SelectStatement, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
         if join_order:
-            query = self.db_instance.hinting().generate_hints(
-                query, join_order=join_order
-            )
+            query = self.db_instance.hinting().generate_hints(query, join_order=join_order)
         query_plan = self.db_instance.optimizer().query_plan(query)
         return operators_from_plan(query_plan)
 
@@ -506,16 +485,16 @@ class NativePlanParameterization(ParameterGeneration):
 
     def generate_plan_parameters(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         join_order: Optional[JoinTree],
         operator_assignment: Optional[PhysicalOperatorAssignment],
-    ) -> Optional[PlanParameterization]:
+    ) -> PlanParameterization:
         if join_order or operator_assignment:
             query = self.db_instance.hinting().generate_hints(
                 query, join_order=join_order, physical_operators=operator_assignment
             )
         query_plan = self.db_instance.optimizer().query_plan(query)
-        parameters_from_plan(query_plan)
+        return parameters_from_plan(query_plan)
 
     def describe(self) -> jsondict:
         return {"name": "native", "database_system": self.db_instance.describe()}
@@ -534,7 +513,7 @@ class NativeOptimizer(CompleteOptimizationAlgorithm):
         super().__init__()
         self.db_instance = db_instance
 
-    def optimize_query(self, query: SqlQuery) -> QueryPlan:
+    def optimize_query(self, query: SelectStatement) -> QueryPlan:
         return self.db_instance.optimizer().query_plan(query)
 
     def describe(self) -> jsondict:

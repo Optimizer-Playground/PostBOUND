@@ -39,15 +39,14 @@ import enum
 import functools
 import operator
 import typing
-from collections.abc import Generator, Iterable, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from typing import Optional
-
-from postbound.qal._qal import AndPredicate, NotPredicate, OrPredicate
 
 from . import transform, util
 from ._core import ColumnReference, TableReference
 from .qal import (
     AbstractPredicate,
+    AndPredicate,
     ArrayExpression,
     BetweenPredicate,
     BinaryPredicate,
@@ -59,25 +58,26 @@ from .qal import (
     DirectTableSource,
     ExpressionCollector,
     FunctionExpression,
-    ImplicitSqlQuery,
     InPredicate,
     JoinTableSource,
-    LogicalOperator,
     MathExpression,
+    NotPredicate,
     OrderByExpression,
+    OrPredicate,
     PredicateVisitor,
     QuantifierExpression,
-    SelectStatement,
+    SqlQuery,
     SetOperator,
     SetQuery,
     SqlExpression,
     SqlExpressionVisitor,
-    SqlQuery,
+    SelectStatement,
     StarExpression,
     StaticValueExpression,
     SubqueryExpression,
     SubqueryTableSource,
     TableSource,
+    UnaryOperator,
     UnaryPredicate,
     WindowExpression,
 )
@@ -206,7 +206,7 @@ class RelNode(abc.ABC):
         frozenset[expressions.SqlExpression]
             The expressions
         """
-        return util.set_union(child.provided_expressions() for child in self.children())
+        return frozenset(util.set_union(child.provided_expressions() for child in self.children()))
 
     @abc.abstractmethod
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
@@ -713,7 +713,7 @@ class Union(RelNode):
         return [self._left_input, self._right_input]
 
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
-        return visitor.visit_union(visitor)
+        return visitor.visit_union(self)
 
     def mutate(
         self,
@@ -820,7 +820,7 @@ class Intersection(RelNode):
         return [self._left_input, self._right_input]
 
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
-        return visitor.visit_intersection(visitor)
+        return visitor.visit_intersection(self)
 
     def mutate(
         self,
@@ -928,7 +928,7 @@ class Difference(RelNode):
         return [self._left_input, self._right_input]
 
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
-        return visitor.visit_difference(visitor)
+        return visitor.visit_difference(self)
 
     def mutate(
         self,
@@ -1392,14 +1392,14 @@ class Grouping(RelNode):
         return self._group_columns
 
     @property
-    def aggregates(self) -> util.frozendict[SqlExpression, FunctionExpression]:
+    def aggregates(self) -> util.frozendict[frozenset[SqlExpression], frozenset[FunctionExpression]]:
         """Get the aggregates that should be computed.
 
         Aggregates map from the input expressions to the desired aggregation function.
 
         Returns
         -------
-        util.frozendict[SqlExpression, FunctionExpression]
+        util.frozendict[frozenset[SqlExpression], frozenset[FunctionExpression]]
             The aggregations. Can be empty if only a grouping should be performed.
         """
         return self._aggregates
@@ -1730,7 +1730,7 @@ class Map(RelNode):
     def __init__(
         self,
         input_node: RelNode,
-        mapping: dict[frozenset[SqlExpression | ColumnReference], frozenset[SqlExpression]],
+        mapping: Mapping[frozenset[SqlExpression | ColumnReference], frozenset[SqlExpression]],
         *,
         parent_node: Optional[RelNode] = None,
     ) -> None:
@@ -1938,7 +1938,7 @@ class SemiJoin(RelNode):
         # TODO: dependent iff predicate is None
         self._input_node = input_node
 
-        self._subquery_node = subquery_node.mutate()
+        self._subquery_node: SubqueryScan = subquery_node.mutate()
         self._subquery_node._parent = self  # we need to set the parent manually to prevent infinite recursion
 
         self._predicate = predicate
@@ -2035,6 +2035,7 @@ class SemiJoin(RelNode):
         return super().mutate(**params)
 
     def _update_child_nodes(self, children: Sequence[RelNode]) -> None:
+        assert isinstance(children[1], SubqueryScan)
         self._assert_correct_update_child_count(children)
         self._input_node = children[0]
         self._subquery_node = children[1]
@@ -2090,7 +2091,7 @@ class AntiJoin(RelNode):
         # TODO: dependent iff predicate is None
         self._input_node = input_node
 
-        self._subquery_node = subquery_node.mutate()
+        self._subquery_node: SubqueryScan = subquery_node.mutate()
         self._subquery_node._parent = self  # we need to set the parent manually to prevent infinite recursion
 
         self._predicate = predicate
@@ -2187,6 +2188,7 @@ class AntiJoin(RelNode):
         return super().mutate(**params)
 
     def _update_child_nodes(self, children: Sequence[RelNode]) -> None:
+        assert isinstance(children[1], SubqueryScan)
         self._assert_correct_update_child_count(children)
         self._input_node = children[0]
         self._subquery_node = children[1]
@@ -2231,7 +2233,7 @@ class SubqueryScan(RelNode):
     def __init__(
         self,
         input_node: RelNode,
-        subquery: SqlQuery,
+        subquery: SelectStatement,
         *,
         parent_node: Optional[RelNode] = None,
     ) -> None:
@@ -2251,7 +2253,7 @@ class SubqueryScan(RelNode):
         return self._input_node
 
     @property
-    def subquery(self) -> SqlQuery:
+    def subquery(self) -> SelectStatement:
         """Get the actual subquery.
 
         Returns
@@ -2268,7 +2270,7 @@ class SubqueryScan(RelNode):
         return [self._input_node]
 
     def provided_expressions(self) -> frozenset[SqlExpression]:
-        return {SubqueryExpression(self._subquery)} | super().provided_expressions()
+        return frozenset({SubqueryExpression(self._subquery)} | super().provided_expressions())
 
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_subquery(self)
@@ -2277,7 +2279,7 @@ class SubqueryScan(RelNode):
         self,
         *,
         input_node: Optional[RelNode] = None,
-        subquery: Optional[SqlQuery] = None,
+        subquery: Optional[SelectStatement] = None,
         as_root: bool = False,
     ) -> SubqueryScan:
         """Creates a new subquery scan with modified attributes.
@@ -2463,8 +2465,9 @@ class _RelNodeUpdateManager:
             The updated relalg tree.
         """
         as_root: bool = kwargs.get("as_root", False)
-        updated_root: RelNode = None
-        updated_initiator: RelNode = None
+
+        updated_root: RelNode
+        updated_initiator: RelNode
 
         while self._node_working_set:
             current_node = self._node_working_set.pop(0)
@@ -2539,7 +2542,8 @@ class _RelNodeUpdateManager:
             The updated child node
         """
         internal_node_working_set: list[RelNode] = list(_collect_leaf_nodes(child_node))
-        updated_child: RelNode = None
+
+        updated_child: RelNode
 
         while internal_node_working_set:
             current_node = internal_node_working_set.pop(0)
@@ -2700,7 +2704,7 @@ class _SubquerySet:
         The subqueries that are currently in the set. Can be empty if there are no subqueries.
     """
 
-    subqueries: frozenset[SqlQuery]
+    subqueries: frozenset[SelectStatement]
 
     @staticmethod
     def empty() -> _SubquerySet:
@@ -2708,12 +2712,13 @@ class _SubquerySet:
         return _SubquerySet(frozenset())
 
     @staticmethod
-    def of(subqueries: Iterable[SqlQuery]) -> _SubquerySet:
+    def of(subqueries: SelectStatement | Iterable[SelectStatement]) -> _SubquerySet:
         """Generates a new subquery set containing specific subqueries.
 
         This factory handles the generation of an appropriate frozenset.
         """
-        return _SubquerySet(frozenset([subqueries]))
+        subqueries = util.enlist(subqueries)
+        return _SubquerySet(frozenset(subqueries))
 
     def __add__(self, other: _SubquerySet) -> _SubquerySet:
         if not isinstance(other, type(self)):
@@ -2828,16 +2833,16 @@ class _BaseTableLookup(SqlExpressionVisitor[Optional[TableReference]], Predicate
 
     def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> TableReference:
         base_tables = (
-            predicate.first_argument.accept_visitor(self),
-            predicate.second_argument.accept_visitor(self),
+            predicate.lhs.accept_visitor(self),
+            predicate.rhs.accept_visitor(self),
         )
         return self._fetch_valid_base_tables(set(base_tables))
 
     def visit_between_predicate(self, predicate: BetweenPredicate, *args, **kwargs) -> TableReference:
         base_tables = (
             predicate.column.accept_visitor(self),
-            predicate.interval_start.accept_visitor(self),
-            predicate.interval_end.accept_visitor(self),
+            predicate.lower.accept_visitor(self),
+            predicate.upper.accept_visitor(self),
         )
         return self._fetch_valid_base_tables(set(base_tables))
 
@@ -2847,7 +2852,7 @@ class _BaseTableLookup(SqlExpressionVisitor[Optional[TableReference]], Predicate
         return self._fetch_valid_base_tables(base_tables)
 
     def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> TableReference:
-        return predicate.column.accept_visitor(self)
+        return predicate.expression.accept_visitor(self)
 
     def visit_static_value_expr(self, expression: StaticValueExpression, *args, **kwargs) -> Optional[TableReference]:
         return None
@@ -2975,6 +2980,7 @@ def _determine_expression_phase(expression: SqlExpression) -> EvaluationPhase:
             | CaseExpression()
             | QuantifierExpression()
             | ArrayExpression()
+            | AbstractPredicate()
         ):
             own_phase = EvaluationPhase.Join if len(expression.tables()) > 1 else EvaluationPhase.BaseTable
             child_phase = max(_determine_expression_phase(child_expr) for child_expr in expression.iterchildren())
@@ -3055,7 +3061,7 @@ def _filter_eval_phase(
     if eval_phase < expected_eval_phase:
         return None
 
-    if isinstance(predicate, CompoundPredicate) and predicate.operation == CompoundOperator.And:
+    if isinstance(predicate, AndPredicate):
         child_predicates = [
             child for child in predicate.children if _determine_predicate_phase(child) == expected_eval_phase
         ]
@@ -3069,7 +3075,7 @@ class _ImplicitRelalgParser:
 
     Parameters
     ----------
-    query : ImplicitSqlQuery
+    query : SqlQuery
         The query to parse
     provided_base_tables : Optional[dict[TableReference, RelNode]], optional
         When parsing subqueries, these are the tables that are provided by the outer query and their corresponding relational
@@ -3113,7 +3119,7 @@ class _ImplicitRelalgParser:
 
     def __init__(
         self,
-        query: ImplicitSqlQuery,
+        query: SelectStatement,
         *,
         provided_base_tables: Optional[dict[TableReference, RelNode]] = None,
     ) -> None:
@@ -3153,14 +3159,14 @@ class _ImplicitRelalgParser:
         util.collections.foreach(self._query.from_clause.items, self._add_table_source)
 
         if self._query.where_clause:
-            self._add_predicate(self._query.where_clause.predicate, eval_phase=EvaluationPhase.BaseTable)
+            self._add_predicate(self._query.where_clause.root, eval_phase=EvaluationPhase.BaseTable)
 
         final_fragment = self._generate_initial_join_order()
 
         if self._query.where_clause:
             # add all post-join filters here
             final_fragment = self._add_predicate(
-                self._query.where_clause.predicate,
+                self._query.where_clause.root,
                 input_node=final_fragment,
                 eval_phase=EvaluationPhase.PostJoin,
             )
@@ -3179,7 +3185,7 @@ class _ImplicitRelalgParser:
         final_fragment = self._add_final_projection(final_fragment)
         return final_fragment
 
-    def _update_query(self, query: SelectStatement) -> None:
+    def _update_query(self, query: SqlQuery) -> None:
         self._query = query
         query_cols = self._query.columns()
         util.collections.foreach(query_cols, lambda col: self._required_columns[col.table].add(col))
@@ -3209,9 +3215,9 @@ class _ImplicitRelalgParser:
                 parser._update_query(cte.query)
                 parser.generate_relnode()  # we don't care about the result, we just want to add the CTE to the base tables
 
-        parser._update_query(query.left_query)
+        parser._update_query(query.lhs)
         left_relalg = parser.generate_relnode()
-        parser._update_query(query.right_query)
+        parser._update_query(query.rhs)
         right_relalg = parser.generate_relnode()
 
         match query.set_operation:
@@ -3273,10 +3279,12 @@ class _ImplicitRelalgParser:
                     # have already been included in the base table fragments.
                     return self._base_table_fragments[table_source.table]
                 return self._add_table(table_source.table)
-            case SubqueryTableSource():
-                subquery_root = self._add_subquery(table_source.query)
-                self._base_table_fragments[table_source.target_table] = subquery_root
-                return self._add_table(table_source.target_table, input_node=subquery_root)
+            case SubqueryTableSource(subquery, alias):
+                if alias is None:
+                    raise ValueError(f"Subqueries without an alias cannot be converted: {self._query}")
+                subquery_root = self._add_subquery(subquery)
+                self._base_table_fragments[alias] = subquery_root
+                return self._add_table(alias, input_node=subquery_root)
             case JoinTableSource():
                 raise ValueError(f"Explicit JOIN syntax is currently not supported: '{table_source}'")
             case _:
@@ -3300,7 +3308,7 @@ class _ImplicitRelalgParser:
             joined_tables |= table_source.tables()
 
         if self._query.where_clause:
-            self._add_predicate(self._query.where_clause.predicate, eval_phase=EvaluationPhase.Join)
+            self._add_predicate(self._query.where_clause.root, eval_phase=EvaluationPhase.Join)
 
         head_nodes = set(self._base_table_fragments.values())
         if len(head_nodes) == 1:
@@ -3504,9 +3512,9 @@ class _ImplicitRelalgParser:
             final_fragment = Selection(final_fragment, predicate)
             return final_fragment
         elif isinstance(predicate, UnaryPredicate):
-            subquery_target = "semijoin" if predicate.operation == LogicalOperator.Exists else "antijoin"
+            subquery_target = "semijoin" if predicate.operator == UnaryOperator.Exists else "antijoin"
             return self._add_expression(
-                predicate.column,
+                predicate.expression,
                 input_node=final_fragment,
                 subquery_target=subquery_target,
             )
@@ -3518,8 +3526,8 @@ class _ImplicitRelalgParser:
         elif isinstance(predicate, BetweenPredicate):
             # BETWEEN predicate with scalar subquery
             final_fragment = self._add_expression(predicate.column, input_node=final_fragment)
-            final_fragment = self._add_expression(predicate.interval_start, input_node=final_fragment)
-            final_fragment = self._add_expression(predicate.interval_end, input_node=final_fragment)
+            final_fragment = self._add_expression(predicate.lower, input_node=final_fragment)
+            final_fragment = self._add_expression(predicate.upper, input_node=final_fragment)
             final_fragment = Selection(final_fragment, predicate)
             return final_fragment
 
@@ -3559,15 +3567,15 @@ class _ImplicitRelalgParser:
             final_fragment = Selection(final_fragment, predicate)
             return final_fragment
         elif isinstance(predicate, BinaryPredicate):
-            if predicate.first_argument.accept_visitor(contains_subqueries):
+            if predicate.lhs.accept_visitor(contains_subqueries):
                 final_fragment = self._add_expression(
-                    predicate.first_argument,
+                    predicate.lhs,
                     input_node=final_fragment,
                     subquery_target="scalar",
                 )
-            if predicate.second_argument.accept_visitor(contains_subqueries):
+            if predicate.rhs.accept_visitor(contains_subqueries):
                 final_fragment = self._add_expression(
-                    predicate.second_argument,
+                    predicate.rhs,
                     input_node=final_fragment,
                     subquery_target="scalar",
                 )
@@ -3575,10 +3583,8 @@ class _ImplicitRelalgParser:
             final_fragment = Selection(final_fragment, predicate)
             return final_fragment
 
-        if not isinstance(predicate, CompoundPredicate):
-            raise ValueError(f"Unknown predicate type: '{predicate}'")
-        match predicate.operation:
-            case CompoundOperator.And | CompoundOperator.Or:
+        match predicate:
+            case AndPredicate() | OrPredicate():
                 regular_predicates: list[AbstractPredicate] = []
                 subquery_predicates: list[AbstractPredicate] = []
                 for child_pred in predicate.iterchildren():
@@ -3598,17 +3604,17 @@ class _ImplicitRelalgParser:
                     final_fragment = Union(final_fragment, subquery_branch)
                 return final_fragment
 
-            case CompoundOperator.Not:
-                if not predicate.children.accept_visitor(contains_subqueries):
+            case NotPredicate():
+                if not predicate.child.accept_visitor(contains_subqueries):
                     final_fragment = self._ensure_predicate_applicability(predicate, final_fragment)
                     final_fragment = Selection(final_fragment, predicate)
                     return final_fragment
-                subquery_branch = self._convert_predicate(predicate.children, input_node=input_node)
+                subquery_branch = self._convert_predicate(predicate.child, input_node=input_node)
                 final_fragment = Difference(final_fragment, subquery_branch)
                 return final_fragment
 
             case _:
-                raise ValueError(f"Unknown operation for composite predicate '{predicate}'")
+                raise ValueError(f"Unknown predicate type: '{predicate}'")
 
     def _convert_join_predicate(self, predicate: AbstractPredicate) -> RelNode:
         """Generates the appropriate join nodes for a specific predicate.
@@ -3643,7 +3649,7 @@ class _ImplicitRelalgParser:
         required_expressions = util.set_union(_collect_all_expressions(e) for e in predicate.iterexpressions())
         if isinstance(predicate, BinaryPredicate):
             first_input, second_input = table_fragments
-            first_arg, second_arg = predicate.first_argument, predicate.second_argument
+            first_arg, second_arg = predicate.lhs, predicate.rhs
             if first_arg.tables() <= first_input.tables(
                 ignore_subqueries=True
             ) and second_arg.tables() <= second_input.tables(ignore_subqueries=True):
@@ -3678,11 +3684,8 @@ class _ImplicitRelalgParser:
                 right_input = Map(right_input, _generate_expression_mapping_dict(right_mappings))
             return ThetaJoin(left_input, right_input, predicate)
 
-        if not isinstance(predicate, CompoundPredicate):
-            raise ValueError(f"Unsupported join predicate '{predicate}'. Perhaps this should be a post-join filter?")
-
-        match predicate.operation:
-            case CompoundOperator.And | CompoundOperator.Or:
+        match predicate:
+            case AndPredicate() | OrPredicate():
                 regular_predicates: list[AbstractPredicate] = []
                 subquery_predicates: list[AbstractPredicate] = []
                 for child_pred in predicate.children:
@@ -3700,11 +3703,13 @@ class _ImplicitRelalgParser:
                     final_fragment = self._convert_predicate(subquery_pred, input_node=final_fragment)
                 return final_fragment
 
-            case CompoundOperator.Not:
+            case NotPredicate():
                 pass
 
             case _:
-                raise ValueError(f"Unknown operation for composite predicate '{predicate}'")
+                raise ValueError(
+                    f"Unsupported join predicate '{predicate}'. Perhaps this should be a post-join filter?"
+                )
 
     def _add_expression(
         self,
@@ -3762,7 +3767,10 @@ class _ImplicitRelalgParser:
                     case "in" if not expression.query.is_scalar():
                         unwrapped_scan = subquery_root.input_node
                         assert isinstance(unwrapped_scan, Projection) and len(unwrapped_scan.columns) == 1
-                        in_predicate = BinaryPredicate.equal(in_column, unwrapped_scan.columns[0])
+                        assert in_column is not None, (
+                            "IN predicate with subquery must provide the column to compare against"
+                        )
+                        in_predicate = BinaryPredicate.create_equal(in_column, unwrapped_scan.columns[0])
                         return SemiJoin(input_node, subquery_root, in_predicate)
             case CastExpression() | FunctionExpression() | MathExpression():
                 return self._ensure_expression_applicability(expression, input_node)
@@ -3771,7 +3779,7 @@ class _ImplicitRelalgParser:
             case _:
                 raise ValueError(f"Did not expect expression '{expression}'")
 
-    def _add_subquery(self, subquery: SqlQuery) -> SubqueryScan:
+    def _add_subquery(self, subquery: SelectStatement) -> SubqueryScan:
         """Generates the appropriate algebra fragment to include a subquery in the current algebra tree."""
         subquery_parser = _ImplicitRelalgParser(subquery, provided_base_tables=self._base_table_fragments)
         subquery_root = subquery_parser.generate_relnode()
@@ -3796,22 +3804,25 @@ class _ImplicitRelalgParser:
         during the base table evaluation phase.
         """
         if not pred.is_filter():
-            raise ValueError(f"Not a filter predicate: '{pred}'")
+            raise ValueError(f"Not a filter predicate: {pred}")
 
-        if not isinstance(pred, CompoundPredicate):
-            return {_BaseTableLookup()(pred): pred}
-        if pred.operation != CompoundOperator.And:
-            return {_BaseTableLookup()(pred): pred}
+        match pred:
+            case AndPredicate(children):
+                raw_predicate_components: dict[TableReference, set[AbstractPredicate]] = collections.defaultdict(set)
+                for child_pred in children:
+                    child_split = self._split_filter_predicate(child_pred)
+                    for tab, pred in child_split.items():
+                        raw_predicate_components[tab].add(pred)
+                return {
+                    base_table: CompoundPredicate.create_and(list(predicates))
+                    for base_table, predicates in raw_predicate_components.items()
+                }
 
-        raw_predicate_components: dict[TableReference, set[AbstractPredicate]] = collections.defaultdict(set)
-        for child_pred in pred.children:
-            child_split = self._split_filter_predicate(child_pred)
-            for tab, pred in child_split.items():
-                raw_predicate_components[tab].add(pred)
-        return {
-            base_table: CompoundPredicate.create_and(predicates)
-            for base_table, predicates in raw_predicate_components.items()
-        }
+            case OrPredicate() | NotPredicate():
+                return {_BaseTableLookup()(pred): pred}
+
+            case _:
+                return {_BaseTableLookup()(pred): pred}
 
     def _split_join_predicate(self, predicate: AbstractPredicate) -> set[AbstractPredicate]:
         """Provides all individual join predicates that have to be evaluated.
@@ -3821,7 +3832,7 @@ class _ImplicitRelalgParser:
         """
         if not predicate.is_join():
             raise ValueError(f"Not a join predicate: '{predicate}'")
-        if isinstance(predicate, CompoundPredicate) and predicate.operation == CompoundOperator.And:
+        if isinstance(predicate, AndPredicate):
             return set(predicate.children)
         return {predicate}
 
@@ -3886,12 +3897,12 @@ class _ImplicitRelalgParser:
         return util.set_union(node.provided_expressions() for node in nodes) | outer_table_expressions
 
 
-def parse_relalg(query: ImplicitSqlQuery) -> RelNode:
+def parse_relalg(query: SelectStatement) -> RelNode:
     """Converts an SQL query to a representation in relational algebra.
 
     Parameters
     ----------
-    query : util.ImplicitSqlQuery
+    query : SqlQuery
         The query to convert
 
     Returns

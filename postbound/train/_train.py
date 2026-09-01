@@ -22,9 +22,7 @@ However, there are two requirements:
    *__json__* method.
 """
 
-type TrainingFeature = (
-    Literal["query", "runtime_ms", "query_plan", "estimated_cost", "cardinality"] | str
-)
+type TrainingFeature = Literal["query", "runtime_ms", "query_plan", "estimated_cost", "cardinality"] | str
 """The kinds of training data that PostBOUND supports out-of-the-box.
 
 Currently, these have no actual functionality attached to them, but they serve as a common vocabulary for the training data
@@ -83,10 +81,8 @@ class TrainingSpec:
     specific to a particular optimizer.
     """
 
-    def __init__(
-        self, features: TrainingFeature | Iterable[TrainingFeature], *args
-    ) -> None:
-        features = util.enlist(features)
+    def __init__(self, features: TrainingFeature | Iterable[TrainingFeature], *args) -> None:
+        features = [features] if isinstance(features, str) else list(features)
         self._features: list[TrainingFeature] = list(features)
         self._features.extend(args)
         self._feature_set = frozenset(self._features)
@@ -111,7 +107,7 @@ class TrainingSpec:
         This is method implements the exact same logic as `requires`. It is only provided for semantic clarity to support the
         two views on the training spec (as a provider spec and as a requirements spec).
         """
-        feature: set[TrainingFeature] = set(util.enlist(feature))
+        feature = {feature} if isinstance(feature, str) else set(feature)
         return feature.issubset(self._feature_set)
 
     def requires(self, feature: TrainingFeature | Iterable[TrainingFeature]) -> bool:
@@ -158,9 +154,7 @@ class TrainingSpec:
         return hash(self._feature_set)
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, TrainingSpec) and self._feature_set == other._feature_set
-        )
+        return isinstance(other, TrainingSpec) and self._feature_set == other._feature_set
 
     def __repr__(self) -> str:
         return f"TrainingSpec({self.features})"
@@ -262,9 +256,7 @@ class TrainingData:
     """
 
     @staticmethod
-    def from_df(
-        df: pd.DataFrame | Path | str, *, source: Optional[Path | str] = None
-    ) -> TrainingData:
+    def from_df(df: pd.DataFrame | Path | str, *, source: Optional[Path | str] = None) -> TrainingData:
         """Reads training data from a data frame or a file.
 
         The features of the dataset are inferred from the column names of the data frame. If the raw data contains a *query*
@@ -293,9 +285,7 @@ class TrainingData:
         return TrainingData(df, source=source, feature_map=feature_map)
 
     @staticmethod
-    def merge(
-        datasets: Iterable[TrainingData], *, according_to: TrainingSpec
-    ) -> TrainingData:
+    def merge(datasets: Iterable[TrainingData], *, according_to: TrainingSpec) -> TrainingData:
         """Combines multiple datasets into a single large dataset.
 
         All input datasets need to satisfy the same spec, which is given by the `according_to` parameter. The resulting dataset
@@ -369,9 +359,7 @@ class TrainingData:
         """
         return self._spec.satisfies(spec)
 
-    def conform_to(
-        self, features: Iterable[TrainingFeature] | TrainingSpec
-    ) -> TrainingData:
+    def conform_to(self, features: Iterable[TrainingFeature] | TrainingSpec) -> TrainingData:
         """Modifies the dataset to satisfy exactly the given spec.
 
         If the dataset does not satisfy the given spec, an error is raised.
@@ -389,19 +377,13 @@ class TrainingData:
             A new dataset that provides exactly the features required by the given spec, exactly in the order required by the
             spec.
         """
-        spec = (
-            features if isinstance(features, TrainingSpec) else TrainingSpec(features)
-        )
+        spec = features if isinstance(features, TrainingSpec) else TrainingSpec(features)
         if not self._spec.satisfies(spec):
             raise ValueError("Requested spec is not compatible with the training data")
         reduced_spec: dict[TrainingFeature, str] = {
-            feature: col
-            for feature, col in self._feature_map.items()
-            if spec.requires(feature)
+            feature: col for feature, col in self._feature_map.items() if spec.requires(feature)
         }
-        return TrainingData(
-            self._samples, source=self._source, feature_map=reduced_spec
-        )
+        return TrainingData(self._samples, source=self._source, feature_map=reduced_spec)
 
     def as_df(self, requested_spec: Optional[TrainingSpec] = None) -> pd.DataFrame:
         """Provides the training samples as a data frame.

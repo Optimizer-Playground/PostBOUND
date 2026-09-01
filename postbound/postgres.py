@@ -79,9 +79,7 @@ from .db import (
     simplify_result_set,
 )
 from .qal import (
-    Explain,
     Hint,
-    Limit,
     SqlQuery,
 )
 from .util import StateError, Version, jsondict
@@ -883,7 +881,9 @@ class PostgresInterface(Database):
             pass
         return self._init_connection()
 
-    def cursor(self) -> psycopg.Cursor:
+    def cursor(self) -> psycopg.Cursor:  # type: ignore - see comment below
+        # The psycopg client is not entirely DB API 2.0 compatible because it violates (for the most part) unimportant
+        # details of the execute() method
         return self._cursor
 
     def connection(self) -> psycopg.Connection:
@@ -933,7 +933,7 @@ class PostgresInterface(Database):
 
         Parameters
         ----------
-        tables : Optional[TableReference  |  Iterable[TableReference]], optional
+        tables : Optional[TableReference | Iterable[TableReference]], optional
             The tables that should be placed into the buffer pool
         *more_tables : TableReference
             More tables that should be placed into the buffer pool, enabling a more convenient usage of this method.
@@ -961,20 +961,25 @@ class PostgresInterface(Database):
         >>> pg.prewarm_tables(query.tables())
         """
         self._assert_active_extension("pg_prewarm")
-        if tables is not None:
-            tables = list(util.enlist(tables))
-        else:
-            tables = []
+
+        match tables:
+            case None:
+                tables = []
+            case TableReference():
+                tables = [tables]
+            case _:
+                tables = list(tables)
         tables += list(more_tables)
 
         if not tables:
             return
-        tables = set(
+
+        selected_tables: set[str] = set(
             tab.full_name for tab in tables if not tab.virtual
         )  # eliminate duplicates if tables are selected multiple times
 
         table_indexes = (
-            [self._fetch_index_relnames(tab) for tab in tables]
+            [self._fetch_index_relnames(tab) for tab in selected_tables]
             if include_primary_index or include_secondary_indexes
             else []
         )
@@ -983,11 +988,12 @@ class PostgresInterface(Database):
             for idx, primary in util.flatten(table_indexes)
             if (primary and include_primary_index) or (not primary and include_secondary_indexes)
         }
-        tables = indexes_to_prewarm if exclude_table_pages else tables | indexes_to_prewarm
-        if not tables:
+
+        rels_to_prewarm = indexes_to_prewarm if exclude_table_pages else (selected_tables | indexes_to_prewarm)
+        if not rels_to_prewarm:
             return
 
-        prewarm_invocations = [f"pg_prewarm('{tab}')" for tab in tables]
+        prewarm_invocations = [f"pg_prewarm('{rel}')" for rel in rels_to_prewarm]
         prewarm_text = ", ".join(prewarm_invocations)
         prewarm_query = f"SELECT {prewarm_text}"
 
@@ -1033,18 +1039,25 @@ class PostgresInterface(Database):
         pg_lab : https://github.com/rbergm/pg_lab
         """
         self._assert_active_extension("pg_temperature")
-        if tables is not None:
-            tables = list(util.enlist(tables))
-        else:
-            tables = []
+
+        match tables:
+            case None:
+                tables = []
+            case TableReference():
+                tables = [tables]
+            case _:
+                tables = list(tables)
         tables += list(more_tables)
 
         if not tables:
             return
-        tables = set(tab.full_name for tab in tables)  # eliminate duplicates if tables are selected multiple times
+
+        selected_tables: set[str] = set(
+            tab.full_name for tab in tables if not tab.virtual
+        )  # eliminate duplicates if tables are selected multiple times
 
         table_indexes = (
-            [self._fetch_index_relnames(tab) for tab in tables]
+            [self._fetch_index_relnames(tab) for tab in selected_tables]
             if include_primary_index or include_secondary_indexes
             else []
         )
@@ -1053,11 +1066,12 @@ class PostgresInterface(Database):
             for idx, primary in util.flatten(table_indexes)
             if (primary and include_primary_index) or (not primary and include_secondary_indexes)
         }
-        tables = indexes_to_cooldown if exclude_table_pages else tables | indexes_to_cooldown
-        if not tables:
+
+        rels_to_cooldown = indexes_to_cooldown if exclude_table_pages else (selected_tables | indexes_to_cooldown)
+        if not rels_to_cooldown:
             return
 
-        cooldown_invocations = [f"pg_cooldown('{tab}')" for tab in tables]
+        cooldown_invocations = [f"pg_cooldown('{tab}')" for tab in rels_to_cooldown]
         cooldown_text = ", ".join(cooldown_invocations)
         cooldown_query = f"SELECT {cooldown_text}"
 
@@ -1882,7 +1896,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         mcvs = self._retrieve_most_common_values_from_stats(column, k=None)
 
         normalized_bounds = []
-        normalized_frequencies = []
+        normalized_frequencies: list[int] = []
         lo = None
         hist_iter = iter(bounds)
         mcv_iter = iter(mcvs)
@@ -1901,7 +1915,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
                 )
 
             if cur_hist is None:
-                assert cur_mcv_val is not None
+                assert cur_mcv_val is not None and cur_mcv_freq is not None
                 normalized_bounds.append(cur_mcv_val)
                 normalized_frequencies.append(cur_mcv_freq)
                 cur_mcv = next(mcv_iter, None)
@@ -1926,7 +1940,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
                     normalized_frequencies[-1] += bucket_freq
 
             else:
-                assert cur_mcv_val < cur_hist
+                assert cur_mcv_val < cur_hist and cur_mcv_freq is not None
                 normalized_bounds.append(cur_mcv_val)
                 normalized_frequencies.append(cur_mcv_freq)
                 cur_mcv = next(mcv_iter, None)
@@ -2035,58 +2049,6 @@ PostgresPlanHints = {
     HintType.Operator,
 }
 """All non-operator hints supported by Postgres, that can be used to enforce additional optimizer behaviour."""
-
-
-class PostgresExplainClause(Explain):
-    """A specialized *EXPLAIN* clause implementation to handle Postgres custom syntax for query plans.
-
-    If *ANALYZE* is enabled, this also retrieves information about shared buffer usage (page hits and disk reads).
-
-    Parameters
-    ----------
-    original_clause : Explain
-        The actual *EXPLAIN* clause. The new explain clause acts as a decorator around the original clause.
-    """
-
-    def __init__(self, original_clause: Explain) -> None:
-        super().__init__(original_clause.analyze, original_clause.target_format)
-
-    def __str__(self) -> str:
-        explain_args = "(SETTINGS, SUMMARY ON, "
-        if self.analyze:
-            explain_args += "ANALYZE, BUFFERS, "
-        explain_args += f"FORMAT {self.target_format})"
-        return f"EXPLAIN {explain_args}"
-
-
-class PostgresLimitClause(Limit):
-    """A specialized *LIMIT* clause implementation to handle Postgres custom syntax for limits / offsets
-
-    Parameters
-    ----------
-    original_clause : Limit
-        The actual *LIMIT* clause. The new limit clause acts as a decorator around the original clause.
-    """
-
-    def __init__(self, original_clause: Limit) -> None:
-        super().__init__(
-            limit=original_clause.limit,
-            offset=original_clause.offset,
-            fetch_direction=original_clause.fetch_direction,
-        )
-
-    def __str__(self) -> str:
-        if self.fetch_direction != "first":
-            return super().__str__()
-
-        if self.limit and self.offset:
-            return f"LIMIT {self.limit} OFFSET {self.offset}"
-        elif self.limit:
-            return f"LIMIT {self.limit}"
-        elif self.offset:
-            return f"OFFSET {self.offset}"
-        else:
-            return ""
 
 
 PostgresHintingBackend = Literal["pg_hint_plan", "pg_lab", "none"]
@@ -2523,12 +2485,6 @@ class PostgresHintService(HintService):
     ) -> SqlQuery:
         self._assert_active_backend()
 
-        adapted_query = query
-        if adapted_query.explain and not isinstance(adapted_query.explain, PostgresExplainClause):
-            adapted_query = transform.replace_clause(adapted_query, PostgresExplainClause(adapted_query.explain))
-        if adapted_query.limit_clause and not isinstance(adapted_query.limit_clause, PostgresLimitClause):
-            adapted_query = transform.replace_clause(adapted_query, PostgresLimitClause(adapted_query.limit_clause))
-
         has_param = any(param is not None for param in (join_order, physical_operators, plan_parameters))
         if plan is not None and has_param:
             raise ValueError("Can only hint an entire query plan, or individual parts, not both.")
@@ -2561,12 +2517,9 @@ class PostgresHintService(HintService):
                     plan_parameters,
                 )
 
-        query = transform.add_clause(adapted_query, hints)
-        return query
+        return transform.add_clause(query, hints)
 
     def format_query(self, query: SqlQuery) -> str:
-        if query.explain:
-            query = transform.replace_clause(query, PostgresExplainClause(query.explain))
         return qal.format_quick(query, flavor="postgres")
 
     def supports_hint(self, hint: PhysicalOperator | HintType) -> bool:
@@ -2832,9 +2785,6 @@ class PostgresOptimizer(OptimizerInterface):
         status = "on" if enabled else "off"
         self._pg_instance.cursor.execute(f"SET {setting_name} TO {status}")  # type: ignore
 
-    def uses_geqo(self, query: SqlQuery) -> bool:
-        pass
-
     def _explainify(self, query: str) -> str:
         if not query.upper().startswith("EXPLAIN (FORMAT JSON)"):
             query = f"EXPLAIN (FORMAT JSON) {query}"
@@ -2900,7 +2850,7 @@ def _read_connection_from_file(config_file: Path) -> str:
             raise ValueError(f"Unsupported config file format. Could read config file '{config_file}'.")
 
     with open(config_file, mode) as f:
-        config_data = reader(f)
+        config_data = reader(f)  #  type: ignore - correct mode is guarded by the match above
     parts = (f"{param} = '{value}'" for param, value in config_data.items())
     return " ".join(parts)
 
@@ -3066,7 +3016,7 @@ def start(pgdata: str | Path = "", *, logfile: str | Path = "") -> None:
     This function assumes that *pg_ctl* is available on the system PATH and either the server's data directory is specified
     explicitly, or set via the *PGDATA* environment variable.
     """
-    if os.system("which pg_ctl") != 0:
+    if subprocess.call("which pg_ctl") != 0:
         raise ValueError("Cannot start Postgres server: pg_ctl is not on PATH")
 
     pgdata = pgdata or os.environ.get("PGDATA", "")
@@ -3093,7 +3043,7 @@ def stop(pgdata: str | Path = "", *, raise_on_error: bool = False) -> None:
     If the server cannot be stopped due to whatever reason, an error can be raised by setting the corresponding parameter.
     Otherwise, it is silently ignored.
     """
-    if os.system("which pg_ctl") != 0:
+    if subprocess.call("which pg_ctl") != 0:
         raise ValueError("Cannot stop Postgres server: pg_ctl is not on PATH")
 
     pgdata = pgdata or os.environ.get("PGDATA", "")
@@ -3113,7 +3063,7 @@ def is_running(pgdata: str | Path = "") -> bool:
     a server is running for the specific database. If *pgdata* is not supplied, the *PGDATA* environment variable is used as
     a fallback.
     """
-    if os.system("which pg_ctl") != 0:
+    if subprocess.call("which pg_ctl") != 0:
         raise ValueError("Cannot start Postgres server: pg_ctl is not on PATH")
 
     cmd = ["pg_ctl"]
@@ -3186,11 +3136,11 @@ def _parallel_query_worker(
     connection.rollback()
     cursor = connection.cursor()
     if timeout:
-        cursor.execute(f"SET statement_timeout = '{timeout}s';")
+        cursor.execute(f"SET statement_timeout = '{timeout}s';")  # type: ignore - weird psycopg stuff
 
     log(f"[worker id={threading.get_ident()}, ts={util.timestamp()}] Now executing query {query}")
     try:
-        cursor.execute(str(query))
+        cursor.execute(str(query))  # type: ignore - weird psycopg stuff
         log(f"[worker id={threading.get_ident()}, ts={util.timestamp()}] Executed query {query}")
     except psycopg.errors.QueryCanceled as e:
         if "canceling statement due to statement timeout" in e.args:
@@ -3261,7 +3211,7 @@ class ParallelQueryExecutor:
                 self._connect_string,
                 self._thread_data,
             ),
-        )
+        )  # type: ignore - Python's type hints cannot capture the true TPE signature
         self._tasks: list[concurrent.futures.Future] = []
         self._results: list[Any] = []
         self._queries: dict[concurrent.futures.Future, SqlQuery | str] = {}
@@ -3604,9 +3554,18 @@ class TimeoutQueryExecutor:
     """
 
     def __init__(self, postgres_instance: Optional[PostgresInterface] = None) -> None:
-        self._pg_instance: PostgresInterface = (
-            postgres_instance if postgres_instance is not None else DatabasePool.get_instance().current_database()
-        )
+        self._pg_instance: PostgresInterface
+        if postgres_instance is not None:
+            self._pg_instance = postgres_instance
+        else:
+            fallback = DatabasePool.get_instance().current_database()
+            if not isinstance(fallback, PostgresInterface):
+                raise ValueError(
+                    "Cannot create TimeoutQueryExecutor: No Postgres instance was supplied and the current database is not a "
+                    "Postgres instance."
+                )
+            self._pg_instance = fallback
+
         self._timeout_watchdog = None
 
     def execute_query(self, query: SqlQuery | str, timeout: float, **kwargs) -> Any:

@@ -40,7 +40,7 @@ from .db import (
     TimeoutSupport,
     simplify_result_set,
 )
-from .qal import SqlQuery
+from .qal import SelectStatement
 from .train import TrainingData, TrainingDataRepository
 from .util.jsonize import Jsonizable
 from .workloads import Workload, generate_workload
@@ -73,7 +73,7 @@ For errors, the actual reason is contained in the `failure_reason` column of the
 class ExecutionResult:
     """Captures all relevant components of a query optimization and execution result."""
 
-    query: SqlQuery
+    query: SelectStatement
     """The query that was executed. If the query was optimized and transformed, these modifications are included."""
 
     status: ExecStatus = "ok"
@@ -104,7 +104,7 @@ class ExecutionResult:
 
     @staticmethod
     def passed(
-        query: SqlQuery,
+        query: SelectStatement,
         *,
         query_result: ResultSet,
         execution_time: float,
@@ -123,9 +123,7 @@ class ExecutionResult:
         )
 
     @staticmethod
-    def execution_error(
-        query: SqlQuery, *, optimization_time: float = np.nan
-    ) -> ExecutionResult:
+    def execution_error(query: SelectStatement, *, optimization_time: float = np.nan) -> ExecutionResult:
         """Constructs an `ExecutionResult` for a query that failed during execution."""
         return ExecutionResult(
             query=query,
@@ -136,7 +134,7 @@ class ExecutionResult:
         )
 
     @staticmethod
-    def optimization_error(query: SqlQuery) -> ExecutionResult:
+    def optimization_error(query: SelectStatement) -> ExecutionResult:
         return ExecutionResult(
             query=query,
             status="optimization-error",
@@ -249,9 +247,7 @@ class QueryPreparation:
 
         self.preparatory_stmts = preparatory_statements or []
 
-    def prepare_query(
-        self, query: SqlQuery, *, on: Optional[Database] = None
-    ) -> SqlQuery:
+    def prepare_query(self, query: SelectStatement, *, on: Optional[Database] = None) -> SelectStatement:
         """Applies the selected transformations to the given input query and executes the preparatory statements
 
         Parameters
@@ -318,7 +314,7 @@ class QueryPreparation:
 
 
 def _wrap_workload(
-    queries: Iterable[SqlQuery] | Workload,
+    queries: Iterable[SelectStatement] | Workload,
 ) -> Workload:
     """Transforms an iterable of queries into a proper workload object to enable execution by the runner methods."""
     return queries if isinstance(queries, Workload) else generate_workload(queries)
@@ -331,11 +327,7 @@ def _wrap_optimization_stage(stage: OptimizationStage) -> OptimizationPipeline:
         case CompleteOptimizationAlgorithm():
             pipeline = IntegratedOptimizationPipeline(target_db)
             pipeline.setup_optimization_algorithm(stage).build()
-        case (
-            JoinOrderOptimization()
-            | PhysicalOperatorSelection()
-            | ParameterGeneration()
-        ):
+        case JoinOrderOptimization() | PhysicalOperatorSelection() | ParameterGeneration():
             pipeline = MultiStageOptimizationPipeline(target_db)
             pipeline.use(stage).build()
         case PlanEnumerator() | CostModel():
@@ -361,7 +353,7 @@ class _BenchmarkConfig:
     shuffled: bool
     query_prep: QueryPreparation | None
     timeout: float | None
-    pre_exec_callback: Callable[[SqlQuery], None | dict] | None
+    pre_exec_callback: Callable[[SelectStatement], None | dict] | None
     post_exec_callback: Callable[[ExecutionResult], None | dict] | None
     log: _LoggerImpl
     error_action: ErrorHandling
@@ -416,9 +408,7 @@ def _finalize_benchmark_log(experiment: str, *, cfg: _BenchmarkConfig) -> None:
     out_dir = cfg.output.parent
     log_file = out_dir / "experiment_log.json"
     if cfg.start_time is None:
-        raise ValueError(
-            f"Malformed experiment log '{log_file}': start time is missing!"
-        )
+        raise ValueError(f"Malformed experiment log '{log_file}': start time is missing!")
 
     with open(log_file, "r+", encoding="utf-8") as f:
         existing_logs = json.load(f)
@@ -433,17 +423,13 @@ def _finalize_benchmark_log(experiment: str, *, cfg: _BenchmarkConfig) -> None:
         json.dump(existing_logs, f, indent=2)
 
 
-def _failed_benchmark_log(
-    experiment: str, *, cfg: _BenchmarkConfig, error: Exception
-) -> None:
+def _failed_benchmark_log(experiment: str, *, cfg: _BenchmarkConfig, error: Exception) -> None:
     if not cfg.output:
         return
     out_dir = cfg.output.parent
     log_file = out_dir / "experiment_log.json"
     if cfg.start_time is None:
-        raise ValueError(
-            f"Malformed experiment log '{log_file}': start time is missing!"
-        )
+        raise ValueError(f"Malformed experiment log '{log_file}': start time is missing!")
 
     with open(log_file, "r+", encoding="utf-8") as f:
         existing_logs = json.load(f)
@@ -473,7 +459,7 @@ ExecutionTarget = Database | OptimizationPipeline | OptimizationStage
 
 @dataclass
 class _SuccessfullOptimization:
-    optimized_query: SqlQuery
+    optimized_query: SelectStatement
     optimization_time: float
 
 
@@ -490,9 +476,7 @@ class _NoOptimization:
 _InternalOptResult = _SuccessfullOptimization | _FailedOptimization | _NoOptimization
 
 
-def _optimize_query(
-    query: SqlQuery, *, pipeline: Optional[OptimizationPipeline] = None
-) -> _InternalOptResult:
+def _optimize_query(query: SelectStatement, *, pipeline: Optional[OptimizationPipeline] = None) -> _InternalOptResult:
     """Tries to run a query through the optimization pipeline while gracefully handling errors."""
     if pipeline is None:
         return _NoOptimization()
@@ -502,9 +486,7 @@ def _optimize_query(
         optimized_query = pipeline.optimize_query(query)
         opt_end = time.perf_counter_ns()
         optimization_time = (opt_end - opt_start) / 10**9  # convert to seconds
-        return _SuccessfullOptimization(
-            optimized_query=optimized_query, optimization_time=optimization_time
-        )
+        return _SuccessfullOptimization(optimized_query=optimized_query, optimization_time=optimization_time)
     except Exception as e:
         return _FailedOptimization(error=e)
 
@@ -529,7 +511,7 @@ _InternalExecResult = _SuccessfullExecution | _TimeoutExecution | _FailedExecuti
 
 
 def _execute_query(
-    query: SqlQuery,
+    query: SelectStatement,
     *,
     on: Database,
     timeout: Optional[float] = None,
@@ -549,7 +531,7 @@ def _execute_query(
     try:
         if timeout:
             exec_start = time.perf_counter_ns()
-            result_set = on.execute_with_timeout(query, timeout=timeout)  # type: ignore[arg-type]
+            result_set = on.execute_with_timeout(query, timeout=timeout)  # type: ignore - guarded by the ceheck above
             exec_end = time.perf_counter_ns()
             if result_set is None:
                 return _TimeoutExecution(timeout=timeout)
@@ -580,9 +562,7 @@ class _NoOpLogger:
 
 
 class _CustomLogger:
-    def __init__(
-        self, logger: Callable[[str], None], *, workload_reps: int = 1
-    ) -> None:
+    def __init__(self, logger: Callable[[str], None], *, workload_reps: int = 1) -> None:
         self._logger = logger
         self._workload_reps = workload_reps
         self._workload_iter: int = 0
@@ -599,9 +579,7 @@ class _CustomLogger:
 
 
 class _TqdmLogger:
-    def __init__(
-        self, *, workload_reps: int = 1, query_reps: int = 1, total_queries: int
-    ) -> None:
+    def __init__(self, *, workload_reps: int = 1, query_reps: int = 1, total_queries: int) -> None:
         from tqdm import tqdm
 
         self._rep_progress = tqdm(total=workload_reps, desc="Workload Rep.", unit="rep")
@@ -639,7 +617,7 @@ class _ResultSample:
     def __init__(
         self,
         *,
-        query: SqlQuery,
+        query: SelectStatement,
         label: str,
         initial_exec_idx: int,
         current_workload_rep: int,
@@ -657,7 +635,7 @@ class _ResultSample:
         self.status: list[ExecStatus] = []
         self.optimization_time: float = np.nan
         self.optimization_pipeline: OptimizationPipeline | None = None
-        self.optimized_query: SqlQuery | None = None
+        self.optimized_query: SelectStatement | None = None
         self.failure_reasons: list[str] = []
         self.result_sets: list[ResultSet | None] = []
         self.exec_times: list[float] = []
@@ -674,7 +652,7 @@ class _ResultSample:
     def optimization_results(
         self,
         *,
-        optimized_query: SqlQuery,
+        optimized_query: SelectStatement,
         pipeline: OptimizationPipeline | None,
         optimization_time: float,
     ) -> None:
@@ -682,9 +660,7 @@ class _ResultSample:
         self.optimization_pipeline = pipeline
         self.optimized_query = optimized_query
 
-    def optimization_failure(
-        self, reason: Exception, *, pipeline: OptimizationPipeline | None
-    ) -> None:
+    def optimization_failure(self, reason: Exception, *, pipeline: OptimizationPipeline | None) -> None:
         self._optimization_failure = reason
         self.optimization_pipeline = pipeline
         self.timestamps += [None] * self._max_query_reps
@@ -697,9 +673,7 @@ class _ResultSample:
     def start_execution(self) -> None:
         self.timestamps.append(datetime.now())
 
-    def add_exec_sample(
-        self, result_set: ResultSet, *, exec_time: float, db_config: util.jsondict
-    ) -> None:
+    def add_exec_sample(self, result_set: ResultSet, *, exec_time: float, db_config: util.jsondict) -> None:
         self.status.append("ok")
         self.failure_reasons.append("")
         self.result_sets.append(result_set)
@@ -862,9 +836,7 @@ class _ResultSample:
         file.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(file, index=False, **writer_args)
 
-    def _write_parquet(
-        self, df: pd.DataFrame, file: Path, *, writer_args: dict
-    ) -> None:
+    def _write_parquet(self, df: pd.DataFrame, file: Path, *, writer_args: dict) -> None:
         if file.is_file():
             existing_results = pd.read_parquet(file)
             df = pd.concat([existing_results, df], ignore_index=True)
@@ -925,7 +897,7 @@ class _ExecutionResults:
     def next_workload_repetition(self) -> None:
         self._workload_rep += 1
 
-    def next_query(self, query: SqlQuery, *, label: str) -> _ResultSample:
+    def next_query(self, query: SelectStatement, *, label: str) -> _ResultSample:
         if self._samples:
             last_sample = self._samples[-1]
             self._execution_counter += last_sample.num_executions()
@@ -954,7 +926,7 @@ class _ExecutionResults:
 
 
 def _exec_ctl_loop(
-    query: SqlQuery,
+    query: SelectStatement,
     *,
     sample: _ResultSample,
     cfg: _BenchmarkConfig,
@@ -973,9 +945,7 @@ def _exec_ctl_loop(
 
     db_config = cfg.target_db.describe()
     sample.start_execution()
-    match _execute_query(
-        query, on=cfg.target_db, timeout=cfg.timeout, query_prep=cfg.query_prep
-    ):
+    match _execute_query(query, on=cfg.target_db, timeout=cfg.timeout, query_prep=cfg.query_prep):
         case _SuccessfullExecution(result_set, exec_time):
             sample.add_exec_sample(result_set, exec_time=exec_time, db_config=db_config)
         case _TimeoutExecution(exec_time):
@@ -1001,9 +971,7 @@ def _exec_ctl_loop(
         sample.write_progressive(cfg.output, cfg.output_args)
 
 
-def _workload_ctl_loop(
-    queries: Workload, *, results: _ExecutionResults, cfg: _BenchmarkConfig
-) -> None:
+def _workload_ctl_loop(queries: Workload, *, results: _ExecutionResults, cfg: _BenchmarkConfig) -> None:
     """
     The workload control loop handles the query optimization for each query in the workload and sets up the _exec_ctl_loop for
     the actual execution.
@@ -1055,13 +1023,11 @@ def _workload_ctl_loop(
         for exec_result in sample.to_execution_results():
             assert exec_result.query_result is not None
             exec_time = 1000 * exec_result.execution_time
-            pipeline.learn_from_feedback(
-                query, exec_result.query_result, exec_time=exec_time
-            )
+            pipeline.learn_from_feedback(query, exec_result.query_result, exec_time=exec_time)
 
 
 def execute_workload(
-    queries: Iterable[SqlQuery] | Workload,
+    queries: Iterable[SelectStatement] | Workload,
     on: ExecutionTarget,
     *,
     name: str = "<unnamed>",
@@ -1072,7 +1038,7 @@ def execute_workload(
     training_data: Optional[TrainingData | TrainingDataRepository] = None,
     timeout: Optional[float] = None,
     exec_callback: Optional[Callable[[ExecutionResult], None]] = None,
-    pre_exec_callback: Optional[Callable[[SqlQuery], None | dict]] = None,
+    pre_exec_callback: Optional[Callable[[SelectStatement], None | dict]] = None,
     post_exec_callback: Optional[Callable[[ExecutionResult], None | dict]] = None,
     repetition_callback: Optional[Callable[[int], None]] = None,
     progressive_output: Optional[str | Path] = None,
@@ -1238,16 +1204,13 @@ def execute_workload(
             pass
 
     query_preparation = (
-        QueryPreparation(**query_preparation)  # type: ignore
-        if isinstance(query_preparation, dict)
-        else query_preparation
+        QueryPreparation(**query_preparation) if isinstance(query_preparation, dict) else query_preparation
     )
     progressive_output = Path(progressive_output) if progressive_output else None
 
     if exec_callback is not None:
         warnings.warn(
-            "exec_callback is deprecated. "
-            "Use the functionally equivalent post_exec_callback instead.",
+            "exec_callback is deprecated. Use the functionally equivalent post_exec_callback instead.",
             category=DeprecationWarning,
         )
         if post_exec_callback is not None:
@@ -1286,9 +1249,7 @@ def execute_workload(
         log=log,
         error_action=error_action,
     )
-    results = _ExecutionResults(
-        query_reps=per_query_repetitions, query_prep=query_preparation
-    )
+    results = _ExecutionResults(query_reps=per_query_repetitions, query_prep=query_preparation)
 
     _init_benchmark_log(name, cfg=cfg)
 
@@ -1390,6 +1351,4 @@ def sort_results(
     pd.DataFrame
         A reordered data frame. The original data frame is not modified
     """
-    return results_df.sort_values(
-        by=by_column, key=lambda series: np.argsort(natsort.index_natsorted(series))
-    )
+    return results_df.sort_values(by=by_column, key=lambda series: np.argsort(natsort.index_natsorted(series)))

@@ -17,4 +17,8 @@ class SupportsGT[T](Protocol):
     def __gt__(self, other: T) -> bool: ...
 
 
+class SupportsSubtraction[T](Protocol):
+    def __sub__(self, other: T) -> T: ...
+
+
 type SupportsRichComparison[T] = SupportsLT[T] | SupportsGT[T]

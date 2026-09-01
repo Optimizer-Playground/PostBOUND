@@ -21,27 +21,21 @@ def pretty_print_plan(plan: QueryPlan, p: pretty.PrettyPrinter, cycle: bool) -> 
     p.text(plan.explain())
 
 
-def pretty_print_join_tree(
-    join_tree: JoinTree, p: pretty.PrettyPrinter, cycle: bool
-) -> None:
+def pretty_print_join_tree(join_tree: JoinTree, p: pretty.PrettyPrinter, cycle: bool) -> None:
     if cycle:
         p.text("JoinTree(...)")
         return
     p.text(join_tree.inspect())
 
 
-def pretty_print_physical_ops(
-    assignment: PhysicalOperatorAssignment, p: pretty.PrettyPrinter, cycle: bool
-) -> None:
+def pretty_print_physical_ops(assignment: PhysicalOperatorAssignment, p: pretty.PrettyPrinter, cycle: bool) -> None:
     if cycle:
         p.text("PhysicalOperatorAssignment(...)")
         return
     p.text(assignment.inspect())
 
 
-def pretty_print_plan_params(
-    parameters: PlanParameterization, p: pretty.PrettyPrinter, cycle: bool
-) -> None:
+def pretty_print_plan_params(parameters: PlanParameterization, p: pretty.PrettyPrinter, cycle: bool) -> None:
     if cycle:
         p.text("PlanParameterization(...)")
         return

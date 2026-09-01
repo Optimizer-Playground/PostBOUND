@@ -31,10 +31,7 @@ from typing import Any, Literal, Optional, Protocol, Type, overload, runtime_che
 
 import networkx as nx
 
-from postbound.util import set_union
-
 from .. import util
-from .._base import SupportsRichComparison
 from .._core import (
     BoundColumnReference,
     Cardinality,
@@ -53,7 +50,7 @@ from .._hints import (
 )
 from .._qep import QueryPlan
 from ..qal import SqlQuery
-from ..util import jsondict
+from ..util import jsondict, set_union
 
 ResultRow = tuple
 """Simple type alias to denote a single tuple from a result set."""
@@ -1787,7 +1784,15 @@ def _infer_histogram_bounds[T](
     return frequencies[0][0], bounds, buckets
 
 
-class Histogram[T: SupportsRichComparison[T]]:
+class _HistElem[T](Protocol):
+    def __sub__(self, other: T) -> T: ...
+
+    def __lt__(self, other: T) -> bool: ...
+
+    def __gt__(self, other: T) -> bool: ...
+
+
+class Histogram[T: _HistElem]:
     """Histograms are a common way to approximate the distribution of values in a column.
 
     Our implementation models a general histogram as a list of buckets. Each bucket is associated with a frequency, i.e.

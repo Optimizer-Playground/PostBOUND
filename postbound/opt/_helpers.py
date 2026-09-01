@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import warnings
-from typing import Literal, Optional, Union
+from typing import Literal, Optional
 
 from .. import Cardinality, parser
 from .._core import (
@@ -11,7 +11,6 @@ from .._core import (
     JoinOperator,
     PhysicalOperator,
     ScanOperator,
-    TableReference,
 )
 from .._hints import (
     DirectionalJoinOperatorAssignment,
@@ -26,7 +25,7 @@ from .._hints import (
     parameters_from_plan,
 )
 from .._qep import PlanEstimates, PlanMeasures, PlanParams, QueryPlan, SortKey, Subplan
-from ..qal import SqlQuery
+from ..qal import SqlExpression, SelectStatement
 
 
 def read_operator_json(
@@ -64,26 +63,18 @@ def read_operator_json(
         parsed_table = parser.load_table_json(json_data["table"])
         scan_operator = ScanOperator(json_data["operator"])
         return ScanOperatorAssignment(scan_operator, parsed_table, parallel_workers)
-    elif "join" not in json_data and not (
-        "inner" in json_data and "outer" in json_data
-    ):
-        raise ValueError(
-            f"Malformed operator JSON: either 'table' or 'join' must be given: '{json_data}'"
-        )
+    elif "join" not in json_data and not ("inner" in json_data and "outer" in json_data):
+        raise ValueError(f"Malformed operator JSON: either 'table' or 'join' must be given: '{json_data}'")
 
     directional = json_data["directional"]
     join_operator = JoinOperator(json_data["operator"])
     if directional:
         inner = [parser.load_table_json(tab) for tab in json_data["inner"]]
         outer = [parser.load_table_json(tab) for tab in json_data["outer"]]
-        return DirectionalJoinOperatorAssignment(
-            join_operator, inner, outer, parallel_workers=parallel_workers
-        )
+        return DirectionalJoinOperatorAssignment(join_operator, inner, outer, parallel_workers=parallel_workers)
 
     joined_tables = [parser.load_table_json(tab) for tab in json_data["join"]]
-    return JoinOperatorAssignment(
-        join_operator, joined_tables, parallel_workers=parallel_workers
-    )
+    return JoinOperatorAssignment(join_operator, joined_tables, parallel_workers=parallel_workers)
 
 
 def read_operator_assignment_json(json_data: dict | str) -> PhysicalOperatorAssignment:
@@ -110,33 +101,21 @@ def read_operator_assignment_json(json_data: dict | str) -> PhysicalOperatorAssi
             case "join":
                 assignment.global_settings[JoinOperator(hint["operator"])] = enabled
             case "intermediate":
-                assignment.global_settings[IntermediateOperator(hint["operator"])] = (
-                    enabled
-                )
+                assignment.global_settings[IntermediateOperator(hint["operator"])] = enabled
             case _:
                 raise ValueError(f"Unknown operator kind: {hint['kind']}")
 
     for hint in json_data.get("scan_operators", []):
         parsed_table = parser.load_table_json(hint["table"])
-        assignment.scan_operators[parsed_table] = ScanOperatorAssignment(
-            ScanOperator(hint["operator"]), parsed_table
-        )
+        assignment.scan_operators[parsed_table] = ScanOperatorAssignment(ScanOperator(hint["operator"]), parsed_table)
 
     for hint in json_data.get("join_operators", []):
-        parsed_tables = frozenset(
-            parser.load_table_json(tab) for tab in hint["intermediate"]
-        )
-        assignment.join_operators[parsed_tables] = JoinOperatorAssignment(
-            JoinOperator(hint["operator"]), parsed_tables
-        )
+        parsed_tables = frozenset(parser.load_table_json(tab) for tab in hint["intermediate"])
+        assignment.join_operators[parsed_tables] = JoinOperatorAssignment(JoinOperator(hint["operator"]), parsed_tables)
 
     for hint in json_data.get("intermediate_operators", []):
-        parsed_tables = frozenset(
-            parser.load_table_json(tab) for tab in hint["intermediate"]
-        )
-        assignment.intermediate_operators[parsed_tables] = IntermediateOperator(
-            hint["operator"]
-        )
+        parsed_tables = frozenset(parser.load_table_json(tab) for tab in hint["intermediate"])
+        assignment.intermediate_operators[parsed_tables] = IntermediateOperator(hint["operator"])
 
     return assignment
 
@@ -215,34 +194,29 @@ def update_plan(
     """
     query_plan = query_plan.canonical() if simplify else query_plan
 
-    updated_operator = (
-        operators.get(query_plan.tables(), query_plan.operator)
-        if operators
-        else query_plan.operator
-    )
+    updated_operator = operators.get(query_plan.tables(), query_plan.operator) if operators else query_plan.operator
+    match updated_operator:
+        case ScanOperatorAssignment(op):
+            updated_operator = op
+        case JoinOperatorAssignment(op):
+            updated_operator = op
+        case _:
+            pass
+
     updated_card_est = (
         params.cardinalities.get(query_plan.tables(), query_plan.estimated_cardinality)
         if params
         else query_plan.estimated_cardinality
     )
     updated_workers = (
-        params.parallel_workers.get(
-            query_plan.tables(), query_plan.params.parallel_workers
-        )
+        params.parallel_workers.get(query_plan.tables(), query_plan.params.parallel_workers)
         if params
         else query_plan.params.parallel_workers
     )
 
-    updated_params = PlanParams(
-        **(query_plan.params.items() | {"parallel_workers": updated_workers})
-    )
-    updated_estimates = PlanEstimates(
-        **(query_plan.estimates.items() | {"estimated_cardinality": updated_card_est})
-    )
-    updated_children = [
-        update_plan(child, operators=operators, params=params)
-        for child in query_plan.children
-    ]
+    updated_params = query_plan.params.update({"parallel_workers": updated_workers})
+    updated_estimates = query_plan.estimates.update({"estimated_cardinality": updated_card_est})
+    updated_children = [update_plan(child, operators=operators, params=params) for child in query_plan.children]
 
     return QueryPlan(
         query_plan.node_type,
@@ -255,66 +229,12 @@ def update_plan(
     )
 
 
-NestedTableSequence = Union[
-    tuple["NestedTableSequence", "NestedTableSequence"], TableReference
-]
-"""Type alias for a convenient format to notate join trees.
-
-The notation is composed of nested lists. These lists can either contain more lists, or references to base tables.
-Each list correponds to a branch in the join tree and the each table reference to a leaf.
-
-Examples
---------
-
-The nested sequence ``[[S, T], R]`` corresponds to the following tree:
-
-::
-
-    ⨝
-    ├── ⨝
-    │   ├── S
-    │   └── T
-    └── R
-
-In this example, tables are simply denoted by their full name.
-"""
-
-
-def parse_nested_table_sequence(sequence: list[dict | list]) -> NestedTableSequence:
-    """Loads the table sequence that is encoded by JSON-representation of the base tables.
-
-    This is the inverse operation to writing a proper nested table sequence to a JSON object.
-
-    Parameters
-    ----------
-    sequence : list[dict  |  list]
-        The (parsed) JSON data. Each table is represented as a dictionary/nested JSON object.
-
-    Returns
-    -------
-    NestedTableSequence
-        The corresponding table sequence
-
-    Raises
-    ------
-    TypeError
-        If the list contains something other than more lists and dictionaries.
-    """
-    if isinstance(sequence, list):
-        return [parse_nested_table_sequence(item) for item in sequence]
-    elif isinstance(sequence, dict):
-        table_name, alias = sequence["full_name"], sequence.get("alias", "")
-        return TableReference(table_name, alias)
-    else:
-        raise TypeError(f"Unknown list element: {sequence}")
-
-
 def _make_simple_plan(
     join_tree: JoinTree,
     *,
     scan_op: ScanOperator,
     join_op: JoinOperator,
-    query: Optional[SqlQuery] = None,
+    query: Optional[SelectStatement] = None,
     plan_params: Optional[PlanParameterization] = None,
 ) -> QueryPlan:
     """Handler function to create a query plan with default operators.
@@ -355,9 +275,7 @@ def _make_simple_plan(
 
     predicates = query.predicates()
     filter_condition = (
-        predicates.joins_between(
-            join_tree.outer_child.tables(), join_tree.inner_child.tables()
-        )
+        predicates.joins_between(join_tree.outer_child.tables(), join_tree.inner_child.tables())
         if join_tree.is_join()
         else predicates.filters_for(join_tree.base_table)
     )
@@ -373,7 +291,7 @@ def _make_custom_plan(
     join_tree: JoinTree,
     *,
     physical_ops: PhysicalOperatorAssignment,
-    query: Optional[SqlQuery] = None,
+    query: Optional[SelectStatement] = None,
     plan_params: Optional[PlanParameterization] = None,
     fallback_scan_op: Optional[ScanOperator] = None,
     fallback_join_op: Optional[JoinOperator] = None,
@@ -394,24 +312,38 @@ def _make_custom_plan(
     else:
         cardinality = math.nan
 
-    par_workers = (
-        plan_params.parallel_workers.get(tables, None) if plan_params else None
-    )
+    par_workers = plan_params.parallel_workers.get(tables, None) if plan_params else None
 
     operator = physical_ops.get(tables)
-    if not operator and len(tables) == 1:
-        operator = fallback_scan_op
-    elif not operator and len(tables) > 1:
-        operator = fallback_join_op
-    if not operator:
+    match operator:
+        case ScanOperatorAssignment(op):
+            operator = op
+        case JoinOperatorAssignment(op):
+            operator = op
+        case None if len(tables) == 1:
+            operator = fallback_scan_op
+        case None if len(tables) > 1:
+            operator = fallback_join_op
+        case _:
+            pass
+
+    if operator is None:
         raise ValueError("No operator assignment found for join: " + str(tables))
 
     if join_tree.is_join():
-        outer_plan = _make_simple_plan(
-            join_tree.outer_child, physical_ops=physical_ops, plan_params=plan_params
+        outer_plan = _make_custom_plan(
+            join_tree.outer_child,
+            physical_ops=physical_ops,
+            query=query,
+            plan_params=plan_params,
+            fallback_scan_op=fallback_scan_op,
         )
-        inner_plan = _make_simple_plan(
-            join_tree.inner_child, physical_ops=physical_ops, plan_params=plan_params
+        inner_plan = _make_custom_plan(
+            join_tree.inner_child,
+            physical_ops=physical_ops,
+            query=query,
+            plan_params=plan_params,
+            fallback_scan_op=fallback_scan_op,
         )
         children = (outer_plan, inner_plan)
     else:
@@ -427,9 +359,7 @@ def _make_custom_plan(
     else:
         predicates = query.predicates()
         filter_condition = (
-            predicates.joins_between(
-                join_tree.outer_child.tables(), join_tree.inner_child.tables()
-            )
+            predicates.joins_between(join_tree.outer_child.tables(), join_tree.inner_child.tables())
             if join_tree.is_join()
             else predicates.filters_for(join_tree.base_table)
         )
@@ -457,7 +387,7 @@ def _make_custom_plan(
 def to_query_plan(
     join_tree: JoinTree,
     *,
-    query: Optional[SqlQuery] = None,
+    query: Optional[SelectStatement] = None,
     physical_ops: Optional[PhysicalOperatorAssignment] = None,
     plan_params: Optional[PlanParameterization] = None,
     scan_op: Optional[ScanOperator] = None,
@@ -525,9 +455,7 @@ def to_query_plan(
             plan_params=plan_params,
         )
     else:
-        raise ValueError(
-            "Either operator assignment or default operators must be provided"
-        )
+        raise ValueError("Either operator assignment or default operators must be provided")
 
 
 def read_query_plan_json(json_data: dict | str) -> QueryPlan:
@@ -545,7 +473,9 @@ def read_query_plan_json(json_data: dict | str) -> QueryPlan:
     """
     json_data = json.loads(json_data) if isinstance(json_data, str) else json_data
     node_type: str = json_data["node_type"]
-    operator: PhysicalOperator = read_operator_json(json_data.get("operator"))
+    operator = read_operator_json(json_data["operator"])
+    if not isinstance(operator, PhysicalOperator):
+        raise ValueError(f"Malformed query plan. Expected physical operator but got: {operator}")
     children = [read_query_plan_json(child) for child in json_data.get("children", [])]
 
     params_json: dict = json_data.get("plan_params", {})
@@ -553,18 +483,15 @@ def read_query_plan_json(json_data: dict | str) -> QueryPlan:
     base_table = parser.load_table_json(base_table_json) if base_table_json else None
 
     predicate_json: dict | None = params_json.get("filter_predicate")
-    filter_predicate = (
-        parser.load_predicate_json(predicate_json) if predicate_json else None
-    )
+    filter_predicate = parser.load_predicate_json(predicate_json) if predicate_json else None
 
     sort_keys: list[SortKey] = []
     for sort_key_json in params_json.get("sort_keys", []):
-        sort_column = [
-            parser.load_expression_json(col)
-            for col in sort_key_json.get("equivalence_class", [])
+        sort_column: list[SqlExpression] = [
+            parser.load_expression_json(col) for col in sort_key_json.get("equivalence_class", [])
         ]
         ascending = sort_key_json["ascending"]
-        sort_keys.append(SortKey.of(sort_column, ascending))
+        sort_keys.append(SortKey(sort_column, ascending=ascending))
 
     index = params_json.get("index", "")
     additional_params = {
@@ -584,14 +511,8 @@ def read_query_plan_json(json_data: dict | str) -> QueryPlan:
     estimates_json: dict = json_data.get("estimates", {})
     cardinality = estimates_json.get("cardinality", math.nan)
     cost = estimates_json.get("cost", math.nan)
-    additional_estimates = {
-        key: value
-        for key, value in estimates_json.items()
-        if key not in {"cardinality", "cost"}
-    }
-    estimates = PlanEstimates(
-        cardinality=cardinality, cost=cost, **additional_estimates
-    )
+    additional_estimates = {key: value for key, value in estimates_json.items() if key not in {"cardinality", "cost"}}
+    estimates = PlanEstimates(cardinality=cardinality, cost=cost, **additional_estimates)
 
     measures_json: dict = json_data.get("measures", {})
     cardinality = measures_json.get("cardinality", math.nan)
@@ -613,7 +534,7 @@ def read_query_plan_json(json_data: dict | str) -> QueryPlan:
 
     subplan_json: dict = json_data.get("subplan", {})
     if subplan_json:
-        subplan_root = parser.parse_query(subplan_json["root"])
+        subplan_root = read_query_plan_json(subplan_json["root"])
         subplan_target = subplan_json.get("target_name", "")
         subplan = Subplan(root=subplan_root, target_name=subplan_target)
     else:
@@ -628,18 +549,6 @@ def read_query_plan_json(json_data: dict | str) -> QueryPlan:
         measures=measures,
         subplan=subplan,
     )
-
-
-def jointree_from_sequence(sequence: NestedTableSequence) -> JoinTree[None]:
-    """Creates a raw join tree from a table sequence.
-
-    The table sequence encodes the join structure using nested lists, see `NestedTableSequence` for details.
-    """
-    if isinstance(sequence, TableReference):
-        return JoinTree(base_table=sequence)
-
-    outer, inner = sequence
-    return JoinTree.join(jointree_from_sequence(outer), jointree_from_sequence(inner))
 
 
 def read_jointree_json(json_data: dict | str) -> JoinTree:
@@ -662,15 +571,15 @@ def read_jointree_json(json_data: dict | str) -> JoinTree:
     table_json = json_data.get("table", None)
     if table_json:
         base_table = parser.load_table_json(table_json)
-        return JoinTree.scan(base_table, annotation=annotation)
+        return JoinTree.create_scan(base_table, annotation=annotation)
 
     outer_child = read_jointree_json(json_data["outer"])
     inner_child = read_jointree_json(json_data["inner"])
-    return JoinTree.join(outer_child, inner_child, annotation=annotation)
+    return JoinTree.create_join(outer_child, inner_child, annotation=annotation)
 
 
 def explode_query_plan(
-    query_plan: QueryPlan, *, card_source: Literal["estimated", "actual"] = "estimated"
+    query_plan: QueryPlan, *, card_source: Literal["estimates", "actual"] = "estimates"
 ) -> tuple[LogicalJoinTree, PhysicalOperatorAssignment, PlanParameterization]:
     """Extracts the join tree, physical operators, and plan parameters from a query plan.
 
@@ -678,7 +587,7 @@ def explode_query_plan(
     ----------
     query_plan : QueryPlan
         The query plan to extract the information from
-    card_source : Literal["estimated", "actual"], optional
+    card_source : Literal["estimates", "actual"], optional
         Which cardinalities to use in the join tree and the plan parameters. Defaults to the estimated cardinalities.
 
     Returns

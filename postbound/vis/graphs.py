@@ -32,13 +32,9 @@ def plot_graph(
         for n, d in graph.nodes.data():
             unique_color_labels.add(d[color])
         viridis = mpl.cm.viridis
-        normalized_colors = mpl.colors.Normalize(
-            vmin=0, vmax=len(unique_color_labels) - 1
-        )
+        normalized_colors = mpl.colors.Normalize(vmin=0, vmax=len(unique_color_labels) - 1)
         for i, color_label in enumerate(unique_color_labels):
-            color_mapping[color_label] = mpl.colors.rgb2hex(
-                viridis(normalized_colors(i))
-            )
+            color_mapping[color_label] = mpl.colors.rgb2hex(viridis(normalized_colors(i)))
     for n, d in graph.nodes.data():
         atts = {"color": color_mapping[d[color]]} if color_mapping else {}
         gv_graph.node(str(n), label=gv.escape(str(n)), style="bold", **atts)

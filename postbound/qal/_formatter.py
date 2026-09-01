@@ -5,12 +5,13 @@ from __future__ import annotations
 import functools
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Literal, Optional
+from typing import Literal, Optional, overload
 
 from .. import util
 from .._core import quote
 from ._qal import (
     AbstractPredicate,
+    AndPredicate,
     ArrayAccessExpression,
     ArrayExpression,
     BetweenPredicate,
@@ -19,30 +20,29 @@ from ._qal import (
     CastExpression,
     ColumnExpression,
     CommonTableExpression,
-    CompoundOperator,
     CompoundPredicate,
     DirectTableSource,
     ExceptClause,
-    ExplicitFromClause,
+    Explain,
     From,
     FunctionExpression,
     FunctionTableSource,
     GroupBy,
     Hint,
-    ImplicitFromClause,
     InPredicate,
     IntersectClause,
     JoinTableSource,
     Limit,
     MathExpression,
+    NotPredicate,
     OrderBy,
     OrderByExpression,
+    OrPredicate,
     QuantifierExpression,
     Select,
-    SelectStatement,
+    SqlQuery,
     SetQuery,
     SqlExpression,
-    SqlQuery,
     StarExpression,
     StaticValueExpression,
     SubqueryExpression,
@@ -63,9 +63,7 @@ SqlDialect = Literal["vanilla", "postgres"]
 """The different flavors of SQL syntax that are supported by the formatter."""
 
 
-def _increase_indentation(
-    content: str, indentation: int = DefaultIndent
-) -> str:
+def _increase_indentation(content: str, indentation: int = DefaultIndent) -> str:
     """Prefixes all lines in a string by a given amount of whitespace.
 
     This breaks the input string into separate lines and adds whitespace equal to the desired amount at the start of
@@ -136,42 +134,41 @@ class FormattingSubqueryExpression(SubqueryExpression):
             return prefix + formatted
 
         lines = formatted.split("\n")
-        indented_lines = [f"\n{prefix}{lines[0]}"] + [
-            prefix + line for line in lines[1:]
-        ]
+        indented_lines = [f"\n{prefix}{lines[0]}"] + [prefix + line for line in lines[1:]]
         return "\n".join(indented_lines)
 
 
 class FormattingCaseExpression(CaseExpression):
-    def __init__(
-        self, cases, *, simple_expr, else_expr, indentation: int
-    ) -> None:
+    def __init__(self, cases, *, simple_expr, else_expr, indentation: int) -> None:
         super().__init__(cases, simple_expr=simple_expr, else_expr=else_expr)
         self._indentation = indentation
 
     def __str__(self) -> str:
         case_indentation = " " * (self._indentation + 2)
-        preamble = (
-            f"CASE {self.simple_expression}"
-            if self.simple_expression
-            else "CASE"
-        )
+        preamble = f"CASE {self.simple_expression}" if self.simple_expression else "CASE"
         case_block_entries = [preamble]
         for case, value in self.cases:
-            case_block_entries.append(
-                f"{case_indentation}WHEN {case} THEN {value}"
-            )
+            case_block_entries.append(f"{case_indentation}WHEN {case} THEN {value}")
         if self.else_expression is not None:
-            case_block_entries.append(
-                f"{case_indentation}ELSE {self.else_expression}"
-            )
+            case_block_entries.append(f"{case_indentation}ELSE {self.else_expression}")
         case_block_entries.append("END")
         return "\n".join(case_block_entries)
 
 
-def _quick_format_cte(
-    cte_clause: CommonTableExpression, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_explain(explain_clause: Explain, *, flavor: SqlDialect) -> list[str]:
+    if flavor != "postgres":
+        return [str(explain_clause)]
+
+    options = ["SETTINGS", "SUMMARY"]
+    if explain_clause.analyze:
+        options.append("ANALYZE")
+    options.append("FORMAT JSON")
+
+    args = ", ".join(options)
+    return [f"EXPLAIN ({args})"]
+
+
+def _quick_format_cte(cte_clause: CommonTableExpression, *, flavor: SqlDialect) -> list[str]:
     """Formatting logic for Common Table Expressions
 
     Parameters
@@ -191,13 +188,9 @@ def _quick_format_cte(
     if len(cte_clause.queries) == 1:
         cte_query = cte_clause.queries[0]
         if isinstance(cte_query, ValuesWithQuery):
-            cte_structure = ", ".join(
-                quote(target.name) for target in cte_query.cols
-            )
+            cte_structure = ", ".join(quote(target.name) for target in cte_query.cols)
             cte_structure = f"({cte_structure})" if cte_structure else ""
-            cte_header = (
-                f"WITH {quote(cte_query.target_name)}{cte_structure} AS ("
-            )
+            cte_header = f"WITH {quote(cte_query.target_name)}{cte_structure} AS ("
             cte_rows: list[str] = []
             for row in cte_query.rows:
                 row_values = ", ".join(str(value) for value in row)
@@ -214,23 +207,15 @@ def _quick_format_cte(
                     mat_info = "NOT MATERIALIZED "
 
             cte_header = f"WITH {recursive_info}{quote(cte_query.target_name)} AS {mat_info}("
-            cte_content = format_quick(
-                cte_query.query, flavor=flavor, trailing_semicolon=False
-            )
+            cte_content = format_quick(cte_query.query, flavor=flavor, trailing_semicolon=False)
         cte_content = _increase_indentation(cte_content)
         cte_footer = ")"
         return [cte_header, cte_content, cte_footer]
 
     first_cte, *remaining_ctes = cte_clause.queries
-    first_content = _increase_indentation(
-        format_quick(first_cte.query, flavor=flavor, trailing_semicolon=False)
-    )
+    first_content = _increase_indentation(format_quick(first_cte.query, flavor=flavor, trailing_semicolon=False))
     mat_info = (
-        ""
-        if first_cte.materialized is None
-        else (
-            "MATERIALIZED " if first_cte.materialized else "NOT MATERIALIZED "
-        )
+        "" if first_cte.materialized is None else ("MATERIALIZED " if first_cte.materialized else "NOT MATERIALIZED ")
     )
     formatted_parts: list[str] = [
         f"WITH {recursive_info} {quote(first_cte.target_name)} AS {mat_info}(",
@@ -246,11 +231,7 @@ def _quick_format_cte(
                 mat_info = "NOT MATERIALIZED "
 
         current_header = f"), {quote(next_cte.target_name)} AS {mat_info}("
-        cte_content = _increase_indentation(
-            format_quick(
-                next_cte.query, flavor=flavor, trailing_semicolon=False
-            )
-        )
+        cte_content = _increase_indentation(format_quick(next_cte.query, flavor=flavor, trailing_semicolon=False))
 
         formatted_parts.append(current_header)
         formatted_parts.append(cte_content)
@@ -288,9 +269,7 @@ def _quick_format_select(
     hint_text = f"{inlined_hint_block} " if inlined_hint_block else ""
     if select_clause.is_distinct():
         on_cols = ", ".join(str(col) for col in select_clause.distinct_on)
-        select_prefix = (
-            f"SELECT DISTINCT ON ({on_cols})" if on_cols else "SELECT DISTINCT"
-        )
+        select_prefix = f"SELECT DISTINCT ON ({on_cols})" if on_cols else "SELECT DISTINCT"
     else:
         on_cols = ""
         select_prefix = "SELECT"
@@ -298,28 +277,20 @@ def _quick_format_select(
     if len(select_clause.targets) >= 3 or on_cols:
         first_target, *remaining_targets = select_clause.targets
         formatted_targets = (
-            [f"{hint_text}{prefix}{first_target}"]
-            if on_cols
-            else [f"{select_prefix} {hint_text}{first_target}"]
+            [f"{hint_text}{prefix}{first_target}"] if on_cols else [f"{select_prefix} {hint_text}{first_target}"]
         )
-        formatted_targets += [
-            f"{prefix}{target}" for target in remaining_targets
-        ]
+        formatted_targets += [f"{prefix}{target}" for target in remaining_targets]
         for i in range(len(formatted_targets) - 1):
             formatted_targets[i] += ","
         if on_cols:
             formatted_targets.insert(0, select_prefix)
         return formatted_targets
     else:
-        targets_text = ", ".join(
-            str(target) for target in select_clause.targets
-        )
+        targets_text = ", ".join(str(target) for target in select_clause.targets)
         return [f"{select_prefix} {hint_text}{targets_text}"]
 
 
-def _quick_format_implicit_from(
-    from_clause: ImplicitFromClause, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_implicit_from(from_clause: From, *, flavor: SqlDialect) -> list[str]:
     """Quick and dirty formatting logic for implicit *FROM* clauses.
 
     Up to 3 tables are put on the same line, otherwise each table is put on its own line.
@@ -336,15 +307,13 @@ def _quick_format_implicit_from(
     list[str]
         The pretty-printed parts of the clause, indented as necessary.
     """
-    tables = list(from_clause.itertables())
+    tables = list(from_clause.tables())
     if not tables:
         return []
     elif len(tables) > 3:
         first_table, *remaining_tables = tables
         formatted_tables = [f"FROM {first_table}"]
-        formatted_tables += [
-            ((" " * DefaultIndent) + str(tab)) for tab in remaining_tables
-        ]
+        formatted_tables += [((" " * DefaultIndent) + str(tab)) for tab in remaining_tables]
         for i in range(len(formatted_tables) - 1):
             formatted_tables[i] += ","
         return formatted_tables
@@ -353,9 +322,7 @@ def _quick_format_implicit_from(
         return [f"FROM {tables_str}"]
 
 
-def _quick_format_tablesource(
-    table_source: TableSource, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_tablesource(table_source: TableSource, *, flavor: SqlDialect) -> list[str]:
     """Quick and dirty formatting logic for table sources.
 
     Parameters
@@ -378,12 +345,8 @@ def _quick_format_tablesource(
 
         case SubqueryTableSource():
             elems: list[str] = ["LATERAL ("] if table_source.lateral else ["("]
-            subquery_elems = format_quick(
-                table_source.query, flavor=flavor, trailing_semicolon=False
-            ).split("\n")
-            subquery_elems = [
-                ((" " * DefaultIndent) + str(child)) for child in subquery_elems
-            ]
+            subquery_elems = format_quick(table_source.query, flavor=flavor, trailing_semicolon=False).split("\n")
+            subquery_elems = [((" " * DefaultIndent) + str(child)) for child in subquery_elems]
             elems.extend(subquery_elems)
             elems.append(")")
             if table_source.target_name:
@@ -391,49 +354,28 @@ def _quick_format_tablesource(
             return elems
 
         case JoinTableSource():
-            if isinstance(table_source.left, DirectTableSource) and isinstance(
-                table_source.right, DirectTableSource
-            ):
+            if isinstance(table_source.lhs, DirectTableSource) and isinstance(table_source.rhs, DirectTableSource):
                 # case R JOIN S ON ...
                 elems = [
-                    str(table_source.left),
-                    f"{prefix}{table_source.join_type} {table_source.right}",
+                    str(table_source.lhs),
+                    f"{prefix}{table_source.join_type} {table_source.rhs}",
                 ]
                 if table_source.join_condition:
                     elems[-1] += f" ON {table_source.join_condition}"
                 return elems
 
-            if isinstance(table_source.left, JoinTableSource) and isinstance(
-                table_source.right, DirectTableSource
-            ):
+            if isinstance(table_source.lhs, JoinTableSource) and isinstance(table_source.rhs, DirectTableSource):
                 # case R JOIN S ON ... JOIN T ON ...
-                elems = _quick_format_tablesource(
-                    table_source.left, flavor=flavor
-                )
-                join_condition = (
-                    f" ON {table_source.join_condition}"
-                    if table_source.join_condition
-                    else ""
-                )
-                elems.append(
-                    f"{prefix}{table_source.join_type} {table_source.right}{join_condition}"
-                )
+                elems = _quick_format_tablesource(table_source.lhs, flavor=flavor)
+                join_condition = f" ON {table_source.join_condition}" if table_source.join_condition else ""
+                elems.append(f"{prefix}{table_source.join_type} {table_source.rhs}{join_condition}")
                 return elems
 
-            if isinstance(table_source.left, DirectTableSource) and isinstance(
-                table_source.right, JoinTableSource
-            ):
-                elems = [str(table_source.left)]
-                right_children = _quick_format_tablesource(
-                    table_source.right, flavor=flavor
-                )
-                right_children[0] = (
-                    f"{table_source.join_type} ({right_children[0]}"
-                )
-                right_children[1:] = [
-                    ((" " * DefaultIndent) + str(child))
-                    for child in right_children[1:]
-                ]
+            if isinstance(table_source.lhs, DirectTableSource) and isinstance(table_source.rhs, JoinTableSource):
+                elems = [str(table_source.lhs)]
+                right_children = _quick_format_tablesource(table_source.rhs, flavor=flavor)
+                right_children[0] = f"{table_source.join_type} ({right_children[0]}"
+                right_children[1:] = [((" " * DefaultIndent) + str(child)) for child in right_children[1:]]
                 elems += right_children
                 elems.append(")")
                 if table_source.join_condition:
@@ -441,49 +383,19 @@ def _quick_format_tablesource(
                 return elems
 
             elems: list[str] = []
-            elems += _quick_format_tablesource(table_source.left, flavor=flavor)
+            elems += _quick_format_tablesource(table_source.lhs, flavor=flavor)
             elems.append(f"{table_source.join_type}")
-            elems += _quick_format_tablesource(
-                table_source.right, flavor=flavor
-            )
+            elems += _quick_format_tablesource(table_source.rhs, flavor=flavor)
             if table_source.join_condition:
                 elems[-1] += f" ON {table_source.join_condition}"
             elems = [((" " * DefaultIndent) + str(child)) for child in elems]
             return elems
 
         case _:
-            raise ValueError(
-                "Unsupported table source type: " + str(table_source)
-            )
+            raise ValueError("Unsupported table source type: " + str(table_source))
 
 
-def _quick_format_explicit_from(
-    from_clause: ExplicitFromClause, *, flavor: SqlDialect
-) -> list[str]:
-    """Quick and dirty formatting logic for explicit *FROM* clauses.
-
-    This function just puts each *JOIN ON* statement on a separate line.
-
-    Parameters
-    ----------
-    from_clause : ExplicitFromClause
-        The clause to format
-    flavor : SqlDialect
-        The SQL dialect to emit
-
-    Returns
-    -------
-    list[str]
-        The pretty-printed parts of the clause, indented as necessary.
-    """
-    items = _quick_format_tablesource(from_clause.root, flavor=flavor)
-    items[0] = f"FROM {items[0]}"
-    return items
-
-
-def _quick_format_general_from(
-    from_clause: From, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_from(from_clause: From, *, flavor: SqlDialect) -> list[str]:
     """Quick and dirty formatting logic for general *FROM* clauses.
 
     This function just puts each part of the *FROM* clause on a separate line.
@@ -503,18 +415,14 @@ def _quick_format_general_from(
     elems: list[str] = ["FROM"]
     for table_source in from_clause.items:
         current_elems = _quick_format_tablesource(table_source, flavor=flavor)
-        current_elems = [
-            ((" " * DefaultIndent) + str(child)) for child in current_elems
-        ]
+        current_elems = [((" " * DefaultIndent) + str(child)) for child in current_elems]
         current_elems[-1] += ","
         elems += current_elems
     elems[-1] = elems[-1].removesuffix(",")
     return elems
 
 
-def _quick_format_predicate(
-    predicate: AbstractPredicate, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_predicate(predicate: AbstractPredicate, *, flavor: SqlDialect) -> list[str]:
     """Quick and dirty formatting logic for arbitrary (i.e. also compound) predicates.
 
     *AND* conditions are put on separate lines, everything else is put on one line.
@@ -533,18 +441,14 @@ def _quick_format_predicate(
     """
     if not isinstance(predicate, CompoundPredicate):
         return [str(predicate)]
-    compound_pred: CompoundPredicate = predicate
-    if compound_pred.operation == CompoundOperator.And:
-        first_child, *remaining_children = compound_pred.children
-        return [str(first_child)] + [
-            "AND " + str(child) for child in remaining_children
-        ]
-    return [str(compound_pred)]
+
+    if isinstance(predicate, AndPredicate):
+        first_child, *remaining_children = predicate.children
+        return [str(first_child)] + ["AND " + str(child) for child in remaining_children]
+    return [str(predicate)]
 
 
-def _quick_format_where(
-    where_clause: Where, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_where(where_clause: Where, *, flavor: SqlDialect) -> list[str]:
     """Quick and dirty formatting logic for *WHERE* clauses.
 
     This function just puts each part of an *AND* condition on a separate line and leaves the parts of *OR*
@@ -562,17 +466,11 @@ def _quick_format_where(
     list[str]
         The pretty-printed parts of the clause, indented as necessary.
     """
-    first_pred, *additional_preds = _quick_format_predicate(
-        where_clause.predicate, flavor=flavor
-    )
-    return [f"WHERE {first_pred}"] + [
-        ((" " * DefaultIndent) + str(pred)) for pred in additional_preds
-    ]
+    first_pred, *additional_preds = _quick_format_predicate(where_clause.root, flavor=flavor)
+    return [f"WHERE {first_pred}"] + [((" " * DefaultIndent) + str(pred)) for pred in additional_preds]
 
 
-def _quick_format_groupby(
-    groupby_clause: GroupBy, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_groupby(groupby_clause: GroupBy, *, flavor: SqlDialect) -> list[str]:
     """Quick and dirty formatting logic for *GROUP BY* clauses.
 
     Parameters
@@ -591,10 +489,7 @@ def _quick_format_groupby(
     if len(groupby_clause.group_columns) > 3:
         first_target, *remaining_targets = groupby_clause.group_columns
         formatted_targets = [f"GROUP BY {distinct_text}{first_target}"]
-        formatted_targets += [
-            ((" " * DefaultIndent) + str(target))
-            for target in remaining_targets
-        ]
+        formatted_targets += [((" " * DefaultIndent) + str(target)) for target in remaining_targets]
         for i in range(len(formatted_targets) - 1):
             formatted_targets[i] += ","
         return formatted_targets
@@ -603,9 +498,7 @@ def _quick_format_groupby(
         return [f"GROUP BY {distinct_text}{targets_text}"]
 
 
-def _quick_format_limit(
-    limit_clause: Limit, *, flavor: SqlDialect
-) -> list[str]:
+def _quick_format_limit(limit_clause: Limit, *, flavor: SqlDialect) -> list[str]:
     """Quick and dirty formatting logic for *FETCH FIRST* / *LIMIT* clauses.
 
     This produces output that is equivalent to the SQL standard's syntax to denote limit clauses and splits the limit
@@ -632,9 +525,7 @@ def _quick_format_limit(
                     f"OFFSET {limit_clause.offset} ROWS",
                 ]
             elif limit_clause.limit:
-                return [
-                    f"FETCH {fetch_direction} {limit_clause.limit} ROWS ONLY"
-                ]
+                return [f"FETCH {fetch_direction} {limit_clause.limit} ROWS ONLY"]
             elif limit_clause.offset:
                 return [f"OFFSET {limit_clause.offset} ROWS"]
             else:
@@ -653,20 +544,28 @@ def _quick_format_limit(
             return []
 
         case "postgres" if limit_clause.fetch_direction in {"prior", "last"}:
-            warnings.warn(
-                "Postgres does not support FETCH PRIOR and FETCH LAST. Falling back to naive formatting"
-            )
+            warnings.warn("Postgres does not support FETCH PRIOR and FETCH LAST. Falling back to naive formatting")
             return [str(limit_clause)]
 
         case _:
-            warnings.warn(
-                "Unknown SQL flavor for LIMIT clauses. Falling back to naive formatting"
-            )
+            warnings.warn("Unknown SQL flavor for LIMIT clauses. Falling back to naive formatting")
             return [str(limit_clause)]
 
 
+@overload
 def _expression_prettifier(
-    expression: SqlExpression,
+    expression: AbstractPredicate, *, flavor: SqlDialect, inline_hints: bool, indentation: int
+) -> AbstractPredicate: ...
+
+
+@overload
+def _expression_prettifier[T: SqlExpression](
+    expression: T, *, flavor: SqlDialect, inline_hints: bool, indentation: int
+) -> T: ...
+
+
+def _expression_prettifier[T: SqlExpression](
+    expression: T,
     *,
     flavor: SqlDialect,
     inline_hints: bool,
@@ -691,10 +590,10 @@ def _expression_prettifier(
     SqlExpression
         A semantically equivalent version of the original expression that uses our custom formatting rules
     """
-    target = type(expression)
     match expression:
         case StaticValueExpression() | ColumnExpression() | StarExpression():
             return expression
+
         case SubqueryExpression():
             return FormattingSubqueryExpression(
                 expression,
@@ -702,8 +601,9 @@ def _expression_prettifier(
                 inline_hint_block=inline_hints,
                 indentation=indentation,
             )
+
         case CaseExpression(cases, simple_expr, else_expr):
-            replaced_cases: list[tuple[AbstractPredicate, SqlExpression]] = []
+            replaced_cases: list[tuple[SqlExpression, SqlExpression]] = []
             for condition, result in cases:
                 replaced_condition = _expression_prettifier(
                     condition,
@@ -744,7 +644,10 @@ def _expression_prettifier(
                 else_expr=replaced_else,
                 indentation=indentation,
             )
+
         case CastExpression(casted_expression, typ, params, array):
+            target = type(expression)
+
             replaced_cast = _expression_prettifier(
                 casted_expression,
                 flavor=flavor,
@@ -754,11 +657,12 @@ def _expression_prettifier(
             return (
                 target(replaced_cast, typ, type_params=params)
                 if flavor == "vanilla"
-                else _PostgresCastExpression(
-                    replaced_cast, typ, type_params=params, array_type=array
-                )
+                else _PostgresCastExpression(replaced_cast, typ, type_params=params, array_type=array)
             )
+
         case MathExpression(op, lhs, rhs):
+            target = type(expression)
+
             replaced_lhs = _expression_prettifier(
                 lhs,
                 flavor=flavor,
@@ -777,8 +681,11 @@ def _expression_prettifier(
             ]
             replaced_rhs = util.simplify(replaced_rhs)
             return target(op, replaced_lhs, replaced_rhs)
+
         case ArrayAccessExpression(array, ind, lo, hi):
             # This has to be implemented before the FunctionExpression since that is a supertype of this
+            target = type(expression)
+
             replaced_array = _expression_prettifier(
                 array,
                 flavor=flavor,
@@ -821,7 +728,10 @@ def _expression_prettifier(
                 lower_idx=replaced_lo,
                 upper_idx=replaced_hi,
             )
+
         case FunctionExpression(fn, args, kw_args, distinct, cond):
+            target = type(expression)
+
             replaced_args = [
                 _expression_prettifier(
                     arg,
@@ -850,14 +760,17 @@ def _expression_prettifier(
                 if cond
                 else None
             )
-            return FunctionExpression(
+            return target(
                 fn,
                 replaced_args,
                 keyword_args=replaced_kwargs,
                 distinct=distinct,
                 filter_where=replaced_cond,
             )
+
         case WindowExpression(fn, parts, ordering, cond):
+            target = type(expression)
+
             replaced_fn = _expression_prettifier(
                 fn,
                 flavor=flavor,
@@ -892,14 +805,8 @@ def _expression_prettifier(
                     inline_hints=inline_hints,
                     indentation=indentation,
                 )
-                replaced_order_exprs.append(
-                    OrderByExpression(
-                        replaced_expr, order.ascending, order.nulls_first
-                    )
-                )
-            replaced_ordering = (
-                OrderBy(replaced_order_exprs) if replaced_order_exprs else None
-            )
+                replaced_order_exprs.append(OrderByExpression(replaced_expr, order.ascending, order.nulls_first))
+            replaced_ordering = OrderBy(replaced_order_exprs) if replaced_order_exprs else None
 
             return target(
                 replaced_fn,
@@ -907,7 +814,9 @@ def _expression_prettifier(
                 ordering=replaced_ordering,
                 filter_condition=replaced_cond,
             )
+
         case ArrayExpression(elems):
+            target = type(expression)
             pretty_elems = [
                 _expression_prettifier(
                     elem,
@@ -918,7 +827,9 @@ def _expression_prettifier(
                 for elem in elems
             ]
             return target(pretty_elems)
+
         case QuantifierExpression(child, quantifier):
+            target = type(expression)
             replaced_child = _expression_prettifier(
                 child,
                 flavor=flavor,
@@ -926,7 +837,9 @@ def _expression_prettifier(
                 indentation=indentation,
             )
             return target(replaced_child, quantifier=quantifier)
+
         case BinaryPredicate(op, lhs, rhs):
+            target = type(expression)
             replaced_lhs = _expression_prettifier(
                 lhs,
                 flavor=flavor,
@@ -939,8 +852,10 @@ def _expression_prettifier(
                 inline_hints=inline_hints,
                 indentation=indentation,
             )
-            return BinaryPredicate(op, replaced_lhs, replaced_rhs)
+            return target(op, replaced_lhs, replaced_rhs)
+
         case BetweenPredicate(col, lo, hi):
+            target = type(expression)
             replaced_col = _expression_prettifier(
                 col,
                 flavor=flavor,
@@ -960,7 +875,9 @@ def _expression_prettifier(
                 indentation=indentation,
             )
             return target(replaced_col, (replaced_lo, replaced_hi))
-        case InPredicate(col, vals):
+
+        case InPredicate(col, vals, op):
+            target = type(expression)
             replaced_col = _expression_prettifier(
                 col,
                 flavor=flavor,
@@ -976,19 +893,20 @@ def _expression_prettifier(
                 )
                 for val in vals
             ]
-            return target(replaced_col, replaced_vals)
+            return target(replaced_col, replaced_vals, operator=op)
+
         case UnaryPredicate(col, op):
+            target = type(expression)
             replaced_col = _expression_prettifier(
                 col,
                 flavor=flavor,
                 inline_hints=inline_hints,
                 indentation=indentation,
             )
-            return UnaryPredicate(replaced_col, op)
-        case CompoundPredicate(op, children) if op in {
-            CompoundOperator.And,
-            CompoundOperator.Or,
-        }:
+            return target(replaced_col, op)
+
+        case AndPredicate(children):
+            target = type(expression)
             replaced_children = [
                 _expression_prettifier(
                     child,
@@ -998,19 +916,33 @@ def _expression_prettifier(
                 )
                 for child in children
             ]
-            return target(op, replaced_children)
-        case CompoundPredicate(op, child) if op == CompoundOperator.Not:
+            return target(replaced_children)
+
+        case OrPredicate(children):
+            target = type(expression)
+            replaced_children = [
+                _expression_prettifier(
+                    child,
+                    flavor=flavor,
+                    inline_hints=inline_hints,
+                    indentation=indentation,
+                )
+                for child in children
+            ]
+            return target(replaced_children)
+
+        case NotPredicate(child):
+            target = type(expression)
             replaced_child = _expression_prettifier(
                 child,
                 flavor=flavor,
                 inline_hints=inline_hints,
                 indentation=indentation,
             )
-            return target(op, [replaced_child])
+            return target(replaced_child)
+
         case _:
-            raise ValueError(
-                f"Unsupported expression type {type(expression)}: {expression}"
-            )
+            raise ValueError(f"Unsupported expression type {type(expression)}: {expression}")
 
 
 def _quick_format_set_query(
@@ -1054,7 +986,7 @@ def _quick_format_set_query(
         query_parts.extend(_quick_format_cte(query.cte_clause, flavor=flavor))
 
     left_query = format_quick(
-        query.left_query,
+        query.lhs,
         flavor=flavor,
         inline_hint_block=inline_hint_block,
         trailing_semicolon=False,
@@ -1066,7 +998,7 @@ def _quick_format_set_query(
     query_parts.append(f"{prefix}{query.set_operation.value}")
 
     right_query = format_quick(
-        query.right_query,
+        query.rhs,
         flavor=flavor,
         inline_hint_block=inline_hint_block,
         trailing_semicolon=False,
@@ -1124,7 +1056,7 @@ class _PostgresCastExpression(CastExpression):
 
 
 def format_quick(
-    query: SelectStatement,
+    query: SqlQuery,
     *,
     flavor: SqlDialect = "vanilla",
     inline_hint_block: bool = False,
@@ -1195,10 +1127,10 @@ def format_quick(
             continue
 
         match clause:
+            case Explain():
+                pretty_query_parts.extend(_quick_format_explain(clause, flavor=flavor))
             case CommonTableExpression():
-                pretty_query_parts.extend(
-                    _quick_format_cte(clause, flavor=flavor)
-                )
+                pretty_query_parts.extend(_quick_format_cte(clause, flavor=flavor))
             case Select():
                 pretty_query_parts.extend(
                     _quick_format_select(
@@ -1207,34 +1139,18 @@ def format_quick(
                         inlined_hint_block=inlined_hint_block,
                     )
                 )
-            case ImplicitFromClause():
-                pretty_query_parts.extend(
-                    _quick_format_implicit_from(clause, flavor=flavor)
-                )
-            case ExplicitFromClause():
-                pretty_query_parts.extend(
-                    _quick_format_explicit_from(clause, flavor=flavor)
-                )
+            case From() if query.has_simple_from():
+                pretty_query_parts.extend(_quick_format_implicit_from(clause, flavor=flavor))
             case From():
-                pretty_query_parts.extend(
-                    _quick_format_general_from(clause, flavor=flavor)
-                )
+                pretty_query_parts.extend(_quick_format_from(clause, flavor=flavor))
             case Where():
-                pretty_query_parts.extend(
-                    _quick_format_where(clause, flavor=flavor)
-                )
+                pretty_query_parts.extend(_quick_format_where(clause, flavor=flavor))
             case GroupBy():
-                pretty_query_parts.extend(
-                    _quick_format_groupby(clause, flavor=flavor)
-                )
+                pretty_query_parts.extend(_quick_format_groupby(clause, flavor=flavor))
             case Limit():
-                pretty_query_parts.extend(
-                    _quick_format_limit(clause, flavor=flavor)
-                )
+                pretty_query_parts.extend(_quick_format_limit(clause, flavor=flavor))
             case UnionClause() | IntersectClause() | ExceptClause():
-                raise RuntimeError(
-                    "Set operations should not appear in this context"
-                )
+                raise RuntimeError("Set operations should not appear in this context")
             case _:
                 pretty_query_parts.append(str(clause))
 

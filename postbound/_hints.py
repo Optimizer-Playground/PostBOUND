@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Collection, Container, Iterable
 from enum import Enum
-from typing import Any, Generic, Literal, Optional, Self, TypeVar
+from typing import Any, Literal, Optional, Self, Sequence, assert_never
 
 from . import util
 from ._base import T
@@ -17,9 +18,6 @@ from ._core import (
 )
 from ._qep import JoinDirection, QueryPlan
 from .util import StateError, jsondict
-
-JoinTreeAnnotation = TypeVar("JoinTreeAnnotation")
-"""The concrete annotation used to augment information stored in the join tree."""
 
 
 class PhysicalOperatorAssignment:
@@ -69,17 +67,11 @@ class PhysicalOperatorAssignment:
 
     def __init__(self) -> None:
         self.global_settings: dict[PhysicalOperator, bool] = {}
-        self.join_operators: dict[
-            frozenset[TableReference], JoinOperatorAssignment
-        ] = {}
-        self.intermediate_operators: dict[
-            frozenset[TableReference], IntermediateOperator
-        ] = {}
+        self.join_operators: dict[frozenset[TableReference], JoinOperatorAssignment] = {}
+        self.intermediate_operators: dict[frozenset[TableReference], IntermediateOperator] = {}
         self.scan_operators: dict[TableReference, ScanOperatorAssignment] = {}
 
-    def get_globally_enabled_operators(
-        self, include_by_default: bool = True
-    ) -> frozenset[PhysicalOperator]:
+    def get_globally_enabled_operators(self, include_by_default: bool = True) -> frozenset[PhysicalOperator]:
         """Provides all operators that are enabled globally.
 
         This differs from just calling ``assignment.global_settings`` directly, since all operators are checked, not just the
@@ -98,14 +90,10 @@ class PhysicalOperatorAssignment:
             determines the appropriate action.
         """
         enabled_scan_ops = [
-            scan_op
-            for scan_op in ScanOperator
-            if self.global_settings.get(scan_op, include_by_default)
+            scan_op for scan_op in ScanOperator if self.global_settings.get(scan_op, include_by_default)
         ]
         enabled_join_ops = [
-            join_op
-            for join_op in JoinOperator
-            if self.global_settings.get(join_op, include_by_default)
+            join_op for join_op in JoinOperator if self.global_settings.get(join_op, include_by_default)
         ]
         enabled_intermediate_ops = [
             intermediate_op
@@ -202,6 +190,8 @@ class PhysicalOperatorAssignment:
         one also distinguishes between inner and outer relations of the join.
         """
         if isinstance(operator, JoinOperator):
+            if tables is None:
+                raise ValueError("Tables must be given if a plain join operator is passed")
             operator = JoinOperatorAssignment(operator, tables)
 
         self.join_operators[operator.join] = operator
@@ -232,15 +222,15 @@ class PhysicalOperatorAssignment:
             The assignment is updated in place and returned for chaining.
         """
         if isinstance(operator, ScanOperator):
+            if table is None:
+                raise ValueError("Table must be given if a plain join operator is passed")
             table = util.simplify(table)
             operator = ScanOperatorAssignment(operator, table)
 
         self.scan_operators[operator.table] = operator
         return self
 
-    def set_intermediate_operator(
-        self, operator: IntermediateOperator, tables: Iterable[TableReference]
-    ) -> Self:
+    def set_intermediate_operator(self, operator: IntermediateOperator, tables: Iterable[TableReference]) -> Self:
         """Enforces an intermediate operator to process specific tables.
 
         This overwrites all previous assignments for the same intermediate. Global settings are left unmodified since
@@ -318,9 +308,7 @@ class PhysicalOperatorAssignment:
         """
         return self.set_operator_enabled_globally(operator, enabled)
 
-    def merge_with(
-        self, other_assignment: PhysicalOperatorAssignment
-    ) -> PhysicalOperatorAssignment:
+    def merge_with(self, other_assignment: PhysicalOperatorAssignment) -> PhysicalOperatorAssignment:
         """Combines the current assignment with additional operators.
 
         In case of assignments to the same operators, the settings from the other assignment take precedence. None of the input
@@ -337,18 +325,10 @@ class PhysicalOperatorAssignment:
             The combined assignment
         """
         merged_assignment = PhysicalOperatorAssignment()
-        merged_assignment.global_settings = (
-            self.global_settings | other_assignment.global_settings
-        )
-        merged_assignment.join_operators = (
-            self.join_operators | other_assignment.join_operators
-        )
-        merged_assignment.scan_operators = (
-            self.scan_operators | other_assignment.scan_operators
-        )
-        merged_assignment.intermediate_operators = (
-            self.intermediate_operators | other_assignment.intermediate_operators
-        )
+        merged_assignment.global_settings = self.global_settings | other_assignment.global_settings
+        merged_assignment.join_operators = self.join_operators | other_assignment.join_operators
+        merged_assignment.scan_operators = self.scan_operators | other_assignment.scan_operators
+        merged_assignment.intermediate_operators = self.intermediate_operators | other_assignment.intermediate_operators
         return merged_assignment
 
     def integrate_workers_from(
@@ -374,9 +354,7 @@ class PhysicalOperatorAssignment:
         for intermediate, workers in params.parallel_workers.items():
             operator = assignment.get(intermediate)
             if not operator and fail_on_missing:
-                raise ValueError(
-                    f"Cannot integrate workers - no operator set for {list(intermediate)}"
-                )
+                raise ValueError(f"Cannot integrate workers - no operator set for {list(intermediate)}")
             elif not operator:
                 continue
 
@@ -384,13 +362,9 @@ class PhysicalOperatorAssignment:
                 case ScanOperatorAssignment(op, tab):
                     updated_assignment = ScanOperatorAssignment(op, tab, workers)
                 case DirectionalJoinOperatorAssignment(op, outer, inner):
-                    updated_assignment = DirectionalJoinOperatorAssignment(
-                        op, inner, outer, parallel_workers=workers
-                    )
+                    updated_assignment = DirectionalJoinOperatorAssignment(op, inner, outer, parallel_workers=workers)
                 case JoinOperatorAssignment(op, join):
-                    updated_assignment = JoinOperatorAssignment(
-                        op, join, parallel_workers=workers
-                    )
+                    updated_assignment = JoinOperatorAssignment(op, join, parallel_workers=workers)
                 case _:
                     raise RuntimeError(f"Unexpected operator type: {operator}")
 
@@ -477,17 +451,13 @@ class PhysicalOperatorAssignment:
         if self.scan_operators:
             lines.append(f"{padding}Scan operators:")
             for scan in self.scan_operators.values():
-                lines.append(
-                    f"{padding * 2}+- {scan.table.identifier()}: {scan.operator.value}"
-                )
+                lines.append(f"{padding * 2}+- {scan.table.identifier()}: {scan.operator.value}")
 
         if self.join_operators:
             lines.append(f"{padding}Join operators:")
             for join in self.join_operators.values():
                 intermediate = ", ".join(tab.identifier() for tab in join.join)
-                lines.append(
-                    f"{padding * 2}+- {{{intermediate}}}: {join.operator.value}"
-                )
+                lines.append(f"{padding * 2}+- {{{intermediate}}}: {join.operator.value}")
 
         if self.intermediate_operators:
             lines.append(f"{padding}Intermediate operators:")
@@ -501,12 +471,10 @@ class PhysicalOperatorAssignment:
         jsonized = {
             "global_settings": [],
             "scan_operators": [
-                {"table": scan.table, "operator": scan.operator}
-                for scan in self.scan_operators.values()
+                {"table": scan.table, "operator": scan.operator} for scan in self.scan_operators.values()
             ],
             "join_operators": [
-                {"intermediate": join.join, "operator": join.operator}
-                for join in self.join_operators.values()
+                {"intermediate": join.join, "operator": join.operator} for join in self.join_operators.values()
             ],
             "intermediate_operators": [
                 {"intermediate": intermediate, "operator": op}
@@ -518,13 +486,9 @@ class PhysicalOperatorAssignment:
         for operator, enabled in self.global_settings.items():
             match operator:
                 case ScanOperator():
-                    global_settings.append(
-                        {"operator": operator, "enabled": enabled, "kind": "scan"}
-                    )
+                    global_settings.append({"operator": operator, "enabled": enabled, "kind": "scan"})
                 case JoinOperator():
-                    global_settings.append(
-                        {"operator": operator, "enabled": enabled, "kind": "join"}
-                    )
+                    global_settings.append({"operator": operator, "enabled": enabled, "kind": "join"})
                 case IntermediateOperator():
                     global_settings.append(
                         {
@@ -554,11 +518,7 @@ class PhysicalOperatorAssignment:
             return item in self.scan_operators
 
         items = frozenset(item)
-        return (
-            item in self.scan_operators
-            if len(items) == 1
-            else items in self.join_operators
-        )
+        return item in self.scan_operators if len(items) == 1 else items in self.join_operators
 
     def __getitem__(
         self,
@@ -594,30 +554,22 @@ class PhysicalOperatorAssignment:
         return str(self)
 
     def __str__(self) -> str:
-        global_str = ", ".join(
-            f"{op.value}: {enabled}" for op, enabled in self.global_settings.items()
-        )
+        global_str = ", ".join(f"{op.value}: {enabled}" for op, enabled in self.global_settings.items())
 
         scans_str = ", ".join(
-            f"{scan.table.identifier()}: {scan.operator.value}"
-            for scan in self.scan_operators.values()
+            f"{scan.table.identifier()}: {scan.operator.value}" for scan in self.scan_operators.values()
         )
 
         joins_keys = (
-            (join, " ⨝ ".join(tab.identifier() for tab in join.join))
-            for join in self.join_operators.values()
+            (join, " ⨝ ".join(tab.identifier() for tab in join.join)) for join in self.join_operators.values()
         )
-        joins_str = ", ".join(
-            f"{key}: {join.operator.value}" for join, key in joins_keys
-        )
+        joins_str = ", ".join(f"{key}: {join.operator.value}" for join, key in joins_keys)
 
         intermediates_keys = (
-            (intermediate, " ⨝ ".join(tab.identifier() for tab in intermediate))
-            for intermediate in self.intermediate_operators.keys()
+            (op, " ⨝ ".join(tab.identifier() for tab in intermediate))
+            for intermediate, op in self.intermediate_operators.items()
         )
-        intermediates_str = ", ".join(
-            f"{key}: {intermediate.value}" for intermediate, key in intermediates_keys
-        )
+        intermediates_str = ", ".join(f"{intermediate}: {op}" for op, intermediate in intermediates_keys)
 
         return f"global=[{global_str}] scans=[{scans_str}] joins=[{joins_str}] intermediates=[{intermediates_str}]"
 
@@ -703,9 +655,7 @@ class PlanParameterization:
         optimizer (*None*). The default is *None*.
         """
 
-    def add_cardinality(
-        self, tables: Iterable[TableReference], cardinality: Cardinality | int | float
-    ) -> Self:
+    def add_cardinality(self, tables: Iterable[TableReference], cardinality: Cardinality | int | float) -> Self:
         """Assigns a specific cardinality hint to a (join of) tables.
 
         Parameters
@@ -748,9 +698,7 @@ class PlanParameterization:
         self.parallel_workers[frozenset(tables)] = num_workers
         return self
 
-    def set_system_settings(
-        self, setting_name: str = "", setting_value: Any = None, **kwargs
-    ) -> Self:
+    def set_system_settings(self, setting_name: str = "", setting_value: Any = None, **kwargs) -> Self:
         """Stores a specific system setting.
 
         This may happen in one of two ways: giving the setting name and value as two different parameters, or combining their
@@ -798,9 +746,7 @@ class PlanParameterization:
 
         return self
 
-    def merge_with(
-        self, other_parameters: PlanParameterization
-    ) -> PlanParameterization:
+    def merge_with(self, other_parameters: PlanParameterization) -> PlanParameterization:
         """Combines the current parameters with additional hints.
 
         In case of assignments to the same hints, the values from the other parameters take precedence. None of the input
@@ -817,15 +763,9 @@ class PlanParameterization:
             The merged parameters. The original parameterizations are not modified.
         """
         merged_params = PlanParameterization()
-        merged_params.cardinalities = (
-            self.cardinalities | other_parameters.cardinalities
-        )
-        merged_params.parallel_workers = (
-            self.parallel_workers | other_parameters.parallel_workers
-        )
-        merged_params.system_settings = (
-            self.system_settings | other_parameters.system_settings
-        )
+        merged_params.cardinalities = self.cardinalities | other_parameters.cardinalities
+        merged_params.parallel_workers = self.parallel_workers | other_parameters.parallel_workers
+        merged_params.system_settings = self.system_settings | other_parameters.system_settings
         return merged_params
 
     def drop_workers(self) -> PlanParameterization:
@@ -866,8 +806,7 @@ class PlanParameterization:
     def __json__(self) -> jsondict:
         return {
             "cardinalities": [
-                {"intermediate": intermediate, "cardinality": card}
-                for intermediate, card in self.cardinalities.items()
+                {"intermediate": intermediate, "cardinality": card} for intermediate, card in self.cardinalities.items()
             ],
             "parallel_workers": [
                 {"intermediate": intermediate, "workers": workers}
@@ -1012,14 +951,14 @@ class JoinOperatorAssignment:
     def __init__(
         self,
         operator: JoinOperator,
-        join: Collection[TableReference],
+        join: Iterable[TableReference],
         *,
         parallel_workers: float | int = math.nan,
     ) -> None:
-        if len(join) < 2:
-            raise ValueError("At least 2 join tables must be given")
         self._operator = operator
         self._join = frozenset(join)
+        if len(self._join) < 2:
+            raise ValueError("At least 2 tables required")
         self._parallel_workers = parallel_workers
 
         self._hash_val = hash((self._operator, self._join, self._parallel_workers))
@@ -1166,9 +1105,7 @@ class DirectionalJoinOperatorAssignment(JoinOperatorAssignment):
             raise ValueError("Both inner and outer relations must be given")
         self._inner = frozenset(inner)
         self._outer = frozenset(outer)
-        super().__init__(
-            operator, self._inner | self._outer, parallel_workers=parallel_workers
-        )
+        super().__init__(operator, self._inner | self._outer, parallel_workers=parallel_workers)
 
     __match_args__ = ("operator", "outer", "inner", "parallel_workers")
 
@@ -1233,7 +1170,7 @@ class HintType(Enum):
     Cardinality = "Cardinality"
 
 
-class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
+class JoinTree[JoinTreeAnnotation](Container[TableReference]):
     """A join tree models the sequence in which joins should be performed in a query plan.
 
     A join tree is a composite structure that contains base tables at its leaves and joins as inner nodes. Each node can
@@ -1282,7 +1219,7 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
     # These methods should also be kept in sync.
 
     @staticmethod
-    def scan(
+    def create_scan(
         table: TableReference, *, annotation: Optional[JoinTreeAnnotation] = None
     ) -> JoinTree[JoinTreeAnnotation]:
         """Creates a new join tree with a single base table.
@@ -1302,7 +1239,7 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
         return JoinTree(base_table=table, annotation=annotation)
 
     @staticmethod
-    def join(
+    def create_join(
         outer: JoinTree[JoinTreeAnnotation],
         inner: JoinTree[JoinTreeAnnotation],
         *,
@@ -1382,9 +1319,7 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
         return self._inner
 
     @property
-    def children(
-        self,
-    ) -> tuple[JoinTree[JoinTreeAnnotation], JoinTree[JoinTreeAnnotation]]:
+    def children(self) -> Sequence[JoinTree[JoinTreeAnnotation]]:
         """Get the children of the current node.
 
         For base tables, this is an empty tuple. For join nodes, this is a tuple of the outer and inner child.
@@ -1393,10 +1328,12 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
             raise StateError("This join tree is empty.")
         if self.is_scan():
             return ()
+
+        assert self._outer is not None and self._inner is not None
         return self._outer, self._inner
 
     @property
-    def annotation(self) -> JoinTreeAnnotation:
+    def annotation(self) -> Optional[JoinTreeAnnotation]:
         """Get the annotation of the current node."""
         if self.is_empty():
             raise StateError("Join tree is empty.")
@@ -1431,6 +1368,8 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
             raise StateError("An empty join tree does not have a shape.")
         if self.is_scan():
             return True
+
+        assert self._outer is not None and self._inner is not None
         return self._outer.is_scan() or self._inner.is_scan()
 
     def is_bushy(self) -> bool:
@@ -1447,7 +1386,11 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
 
     def is_base_join(self) -> bool:
         """Checks, whether the current join node joins two base tables directly."""
-        return self.is_join() and self._outer.is_scan() and self._inner.is_scan()
+        if not self.is_join():
+            return False
+
+        assert self._outer is not None and self._inner is not None
+        return self._outer.is_scan() and self._inner.is_scan()
 
     def tables(self) -> set[TableReference]:
         """Provides all tables that are scanned in the join tree.
@@ -1457,7 +1400,10 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
         if self.is_empty():
             return set()
         if self.is_scan():
+            assert self._table is not None
             return {self._table}
+
+        assert self._outer is not None and self._inner is not None
         return self._outer.tables() | self._inner.tables()
 
     def plan_depth(self) -> int:
@@ -1470,11 +1416,11 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
             return 0
         if self.is_scan():
             return 1
+
+        assert self._outer is not None and self._inner is not None
         return 1 + max(self._outer.plan_depth(), self._inner.plan_depth())
 
-    def lookup(
-        self, table: TableReference | Iterable[TableReference]
-    ) -> Optional[JoinTree[JoinTreeAnnotation]]:
+    def lookup(self, table: TableReference | Iterable[TableReference]) -> Optional[JoinTree[JoinTreeAnnotation]]:
         """Traverses the join tree to find a specific (intermediate) node.
 
         Parameters
@@ -1504,9 +1450,7 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
 
         return None
 
-    def update_annotation(
-        self, new_annotation: JoinTreeAnnotation
-    ) -> JoinTree[JoinTreeAnnotation]:
+    def update_annotation(self, new_annotation: JoinTreeAnnotation) -> JoinTree[JoinTreeAnnotation]:
         """Creates a new join tree with the same structure, but a different annotation.
 
         The original join tree is not modified.
@@ -1561,12 +1505,10 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
         if isinstance(partner, JoinTree) and partner_annotation is not None:
             partner = partner.update_annotation(partner_annotation)
         elif isinstance(partner, TableReference):
-            partner = JoinTree.scan(partner, annotation=partner_annotation)
+            partner = JoinTree.create_scan(partner, annotation=partner_annotation)
 
-        outer, inner = (
-            (self, partner) if partner_direction == "inner" else (partner, self)
-        )
-        return JoinTree.join(outer, inner, annotation=annotation)
+        outer, inner = (self, partner) if partner_direction == "inner" else (partner, self)
+        return JoinTree.create_join(outer, inner, annotation=annotation)
 
     def inspect(self) -> str:
         """Provides a pretty-printed an human-readable representation of the join tree."""
@@ -1576,23 +1518,32 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
         """Provides all nodes in the join tree, with outer nodes coming first."""
         if self.is_empty():
             return []
+
         if self.is_scan():
             return [self]
-        return [self] + self._outer.iternodes() + self._inner.iternodes()
+
+        assert self._outer is not None and self._inner is not None
+        return [self] + list(self._outer.iternodes()) + list(self._inner.iternodes())
 
     def itertables(self) -> Iterable[TableReference]:
         """Provides all tables that are scanned in the join tree. Outer tables appear first."""
         if self.is_empty():
             return []
+
         if self.is_scan():
+            assert self._table is not None
             return [self._table]
-        return self._outer.itertables() + self._inner.itertables()
+
+        assert self._outer is not None and self._inner is not None
+        return list(self._outer.itertables()) + list(self._inner.itertables())
 
     def iterjoins(self) -> Iterable[JoinTree[JoinTreeAnnotation]]:
         """Provides all join nodes in the join tree, with outer nodes coming first."""
         if self.is_empty() or self.is_scan():
             return []
-        return self._outer.iterjoins() + self._inner.iterjoins() + [self]
+
+        assert self._outer is not None and self._inner is not None
+        return list(self._outer.iterjoins()) + list(self._inner.iterjoins()) + [self]
 
     def _init_empty_join_tree(
         self,
@@ -1602,7 +1553,7 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
     ) -> JoinTree[JoinTreeAnnotation]:
         """Handler method to create a new join tree when the current tree is empty."""
         if isinstance(partner, TableReference):
-            return JoinTree.scan(partner, annotation=annotation)
+            return JoinTree.create_scan(partner, annotation=annotation)
 
         if annotation is not None:
             partner = partner.update_annotation(annotation)
@@ -1625,8 +1576,8 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
     def __bool__(self) -> bool:
         return not self.is_empty()
 
-    def __contains__(self, x: object) -> bool:
-        return self.lookup(x)
+    def __contains__(self, item: TableReference) -> bool:
+        return self.lookup(item) is not None
 
     def __len__(self) -> int:
         return len(self.tables())
@@ -1647,114 +1598,20 @@ class JoinTree(Container[TableReference], Generic[JoinTreeAnnotation]):
 
     def __str__(self):
         if self.is_scan():
+            assert self._table is not None
             return self._table.identifier()
         return f"({self._outer} ⋈ {self._inner})"
 
 
-class LogicalJoinTree(JoinTree[Cardinality]):
-    """A logical join tree is a special kind of join tree that has cardinality estimates attached to each node.
+LogicalJoinTree = JoinTree[Cardinality]
+"""A logical join tree is a special kind of join tree that has cardinality estimates attached to each node.
 
-    Other than the annotation type, it behaves exactly like a regular `JoinTree`. The cardinality estimates can be directly
-    accessed using the `cardinality` property.
-    """
-
-    @staticmethod
-    def scan(
-        table: TableReference, *, annotation: Optional[Cardinality] = None
-    ) -> LogicalJoinTree:
-        return LogicalJoinTree(table=table, annotation=annotation)
-
-    @staticmethod
-    def join(
-        outer: LogicalJoinTree,
-        inner: LogicalJoinTree,
-        *,
-        annotation: Optional[Cardinality] = None,
-    ) -> LogicalJoinTree:
-        return LogicalJoinTree(outer=outer, inner=inner, annotation=annotation)
-
-    @staticmethod
-    def empty() -> LogicalJoinTree:
-        return LogicalJoinTree()
-
-    def __init__(
-        self,
-        *,
-        table: TableReference | None = None,
-        outer: LogicalJoinTree | None = None,
-        inner: LogicalJoinTree | None = None,
-        annotation: Cardinality | None = None,
-    ) -> None:
-        super().__init__(
-            base_table=table,
-            outer_child=outer,
-            inner_child=inner,
-            annotation=annotation,
-        )
-
-    @property
-    def cardinality(self) -> Cardinality:
-        return self.annotation
-
-    @property
-    def outer_child(self) -> LogicalJoinTree:
-        return super().outer_child
-
-    @property
-    def inner_child(self) -> LogicalJoinTree:
-        return super().inner_child
-
-    @property
-    def children(self) -> tuple[LogicalJoinTree, LogicalJoinTree]:
-        return super().children
-
-    def lookup(
-        self, table: TableReference | Iterable[TableReference]
-    ) -> Optional[LogicalJoinTree]:
-        return super().lookup(table)
-
-    def update_annotation(self, new_annotation: Cardinality) -> LogicalJoinTree:
-        return super().update_annotation(new_annotation)
-
-    def join_with(
-        self,
-        partner: LogicalJoinTree | TableReference,
-        *,
-        annotation: Optional[Cardinality] = None,
-        partner_annotation: Cardinality | None = None,
-        partner_direction: JoinDirection = "inner",
-    ) -> LogicalJoinTree:
-        return super().join_with(
-            partner,
-            annotation=annotation,
-            partner_annotation=partner_annotation,
-            partner_direction=partner_direction,
-        )
-
-    def iternodes(self) -> Iterable[LogicalJoinTree]:
-        return super().iternodes()
-
-    def iterjoins(self) -> Iterable[LogicalJoinTree]:
-        return super().iterjoins()
-
-    def __json__(self) -> jsondict:
-        if self.is_scan():
-            return {
-                "type": "join_tree_logical",
-                "table": self._table,
-                "annotation": self._annotation,
-            }
-        return {
-            "type": "join_tree_logical",
-            "outer": self._outer,
-            "inner": self._inner,
-            "annotation": self._annotation,
-        }
+Other than the annotation type, it behaves exactly like a regular `JoinTree`. The cardinality estimates can be directly
+accessed using the `cardinality` property.
+"""
 
 
-def _inspectify(
-    join_tree: JoinTree[JoinTreeAnnotation], *, indentation: int = 0
-) -> str:
+def _inspectify[JoinTreeAnnotation](join_tree: JoinTree[JoinTreeAnnotation], *, indentation: int = 0) -> str:
     """Handler method to generate a human-readable string representation of a join tree."""
     padding = " " * indentation
     prefix = "<- " if padding else ""
@@ -1763,9 +1620,7 @@ def _inspectify(
         return f"{padding}{prefix}{join_tree.base_table} ({join_tree.annotation})"
 
     join_node = f"{padding}{prefix}⨝ ({join_tree.annotation})"
-    child_inspections = [
-        _inspectify(child, indentation=indentation + 2) for child in join_tree.children
-    ]
+    child_inspections = [_inspectify(child, indentation=indentation + 2) for child in join_tree.children]
     return f"{join_node}\n" + "\n".join(child_inspections)
 
 
@@ -1777,26 +1632,25 @@ def jointree_from_plan(
     The cardinality estimates of the join tree can be inferred from either the estimated cardinalities or from the measured
     actual cardinalities of the query plan.
     """
-    card = (
-        plan.estimated_cardinality
-        if card_source == "estimates"
-        else plan.actual_cardinality
-    )
+    card = plan.estimated_cardinality if card_source == "estimates" else plan.actual_cardinality
     if plan.is_scan():
-        return JoinTree.scan(plan.base_table, annotation=card)
+        assert plan.base_table
+        return LogicalJoinTree.create_scan(plan.base_table, annotation=card)
     elif plan.is_join():
+        assert plan.outer_child and plan.inner_child
         outer = jointree_from_plan(plan.outer_child, card_source=card_source)
         inner = jointree_from_plan(plan.inner_child, card_source=card_source)
-        return JoinTree.join(outer, inner, annotation=card)
+        return LogicalJoinTree.create_join(outer, inner, annotation=card)
     else:
         # auxiliary node handler
+        assert plan.input_node
         return jointree_from_plan(plan.input_node, card_source=card_source)
 
 
 def parameters_from_plan(
     query_plan: QueryPlan | LogicalJoinTree,
     *,
-    target_cardinality: Literal["estimated", "actual"] = "estimated",
+    target_cardinality: Literal["estimates", "actual"] = "estimates",
     fallback_estimated: bool = False,
 ) -> PlanParameterization:
     """Extracts the cardinality estimates from a join tree.
@@ -1809,7 +1663,7 @@ def parameters_from_plan(
     """
     params = PlanParameterization()
 
-    if isinstance(query_plan, LogicalJoinTree):
+    if isinstance(query_plan, JoinTree):
         card = query_plan.annotation
         parallel_workers = None
     else:
@@ -1825,7 +1679,7 @@ def parameters_from_plan(
             )
         parallel_workers = query_plan.params.parallel_workers
 
-    if not math.isnan(card):
+    if card is not None and not math.isnan(card):
         params.add_cardinality(query_plan.tables(), card)
     if parallel_workers:
         params.set_workers(query_plan.tables(), parallel_workers)
@@ -1841,9 +1695,7 @@ def parameters_from_plan(
     return params
 
 
-def operators_from_plan(
-    query_plan: QueryPlan, *, include_workers: bool = False
-) -> PhysicalOperatorAssignment:
+def operators_from_plan(query_plan: QueryPlan, *, include_workers: bool = False) -> PhysicalOperatorAssignment:
     """Extracts the operator assignment from a whole query plan.
 
     Notice that this method only adds parallel workers to the assignment if explicitly told to, since this is generally
@@ -1855,13 +1707,18 @@ def operators_from_plan(
 
     workers = query_plan.parallel_workers if include_workers else math.nan
     match query_plan.operator:
-        case ScanOperator():
+        case ScanOperator() if query_plan.base_table:
             operator = ScanOperatorAssignment(
                 query_plan.operator,
                 query_plan.base_table,
                 workers,
             )
             assignment.add(operator)
+        case ScanOperator():
+            # scan operator without base table
+            warnings.warn(f"Ignoring scan operator without base table: {query_plan}")
+            pass
+
         case JoinOperator():
             operator = JoinOperatorAssignment(
                 query_plan.operator,
@@ -1869,8 +1726,14 @@ def operators_from_plan(
                 parallel_workers=workers,
             )
             assignment.add(operator)
-        case _:
+
+        case IntermediateOperator():
             assignment.add(query_plan.operator, query_plan.tables())
+
+        case None:
+            pass
+        case _:
+            assert_never()
 
     for child in query_plan.children:
         child_assignment = operators_from_plan(child)

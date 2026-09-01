@@ -15,7 +15,7 @@ from .._hints import JoinTree, LogicalJoinTree
 from .._qep import QueryPlan
 from ..db import Database, DatabasePool
 from ..opt._joingraph import JoinGraph
-from ..qal import SqlQuery
+from ..qal import SelectStatement
 from . import trees
 
 
@@ -53,7 +53,7 @@ def _fallback_default_join_edge(
 
 def _render_pk_fk_join_edge(
     graph: gv.Digraph,
-    query: SqlQuery,
+    query: SelectStatement,
     join_table: TableReference,
     partner_table: TableReference,
 ) -> None:
@@ -80,7 +80,7 @@ def _render_pk_fk_join_edge(
 
 
 def _plot_join_graph_from_query(
-    query: SqlQuery,
+    query: SelectStatement,
     table_annotations: Optional[Callable[[TableReference], str]] = None,
     include_pk_fk_joins: bool = False,
 ) -> gv.Graph:
@@ -129,7 +129,7 @@ def _plot_join_graph_directly(
 
 
 def plot_join_graph(
-    query_or_join_graph: SqlQuery | JoinGraph,
+    query_or_join_graph: SelectStatement | JoinGraph,
     table_annotations: Optional[Callable[[TableReference], str]] = None,
     *,
     include_pk_fk_joins: bool = False,
@@ -156,7 +156,7 @@ def plot_join_graph(
     annotate_cards
     merged_annotation
     """
-    if isinstance(query_or_join_graph, SqlQuery):
+    if isinstance(query_or_join_graph, SelectStatement):
         graph = _plot_join_graph_from_query(
             query_or_join_graph, table_annotations, include_pk_fk_joins
         )
@@ -174,7 +174,7 @@ def plot_join_graph(
 
 
 def estimated_cards(
-    table: TableReference, *, query: SqlQuery, database: Optional[Database] = None
+    table: TableReference, *, query: SelectStatement, database: Optional[Database] = None
 ) -> str:
     """Annotates the nodes of a join graph with estimated cardinalities.
 
@@ -207,7 +207,7 @@ def estimated_cards(
 
 
 def annotate_filter_cards(
-    table: TableReference, *, query: SqlQuery, database: Optional[Database] = None
+    table: TableReference, *, query: SelectStatement, database: Optional[Database] = None
 ) -> str:
     """Annotates the nodes of a join graph with true cardinalities *after* filters.
 
@@ -239,7 +239,7 @@ def annotate_filter_cards(
 
 
 def annotate_cards(
-    table: TableReference, *, query: SqlQuery, database: Optional[Database] = None
+    table: TableReference, *, query: SelectStatement, database: Optional[Database] = None
 ) -> str:
     """Annotates the nodes of a join graph with true cardinalities before and after filters.
 
@@ -302,7 +302,7 @@ def merged_annotation(
 
 def setup_annotations(
     *annotations: Literal["estimated-cards", "filter-cards", "true-cards"],
-    query: SqlQuery,
+    query: SelectStatement,
     database: Optional[Database] = None,
 ) -> Callable[[TableReference], str]:
     """Annotates the nodes of a join graph with different cardinality estimates."""

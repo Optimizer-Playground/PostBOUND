@@ -49,7 +49,6 @@ from .db import (
     UnsupportedDatabaseFeatureError,
     simplify_result_set,
 )
-from .postgres import PostgresLimitClause
 from .qal import SqlQuery
 from .util import Version, dicts, jsondict, stats
 
@@ -170,7 +169,9 @@ class DuckDBInterface(Database):
         raw_ver = raw_ver.split("-")[0]  # remove the build information
         return Version(raw_ver)
 
-    def cursor(self) -> quacklab.DuckDBPyConnection:
+    def cursor(self) -> quacklab.DuckDBPyConnection:  # type: ignore - see below
+        # The official DuckDB Python client is not DB API 2.0 compatible because the official API requires execute()
+        # to accept an "operation" argument for the query. However, DuckDB folks named theirs a "query"
         return self._cur.cursor()
 
     def close(self) -> None:
@@ -716,8 +717,6 @@ class DuckDBHintService(HintService):
         plan_parameters: Optional[PlanParameterization] = None,
     ) -> SqlQuery:
         adapted_query = query
-        if adapted_query.limit_clause and not isinstance(adapted_query.limit_clause, PostgresLimitClause):
-            adapted_query = transform.replace_clause(adapted_query, PostgresLimitClause(adapted_query.limit_clause))
 
         has_partial_hints = any(param is not None for param in (join_order, physical_operators, plan_parameters))
         if plan is not None and has_partial_hints:

@@ -57,9 +57,7 @@ def enlist(obj: list[T]) -> list[T]: ...
 
 
 @overload
-def enlist(
-    obj: tuple[T, ...], *, enlist_tuples: Literal[True]
-) -> list[tuple[T, ...]]: ...
+def enlist(obj: tuple[T, ...], *, enlist_tuples: Literal[True]) -> list[tuple[T, ...]]: ...
 
 
 @overload
@@ -104,6 +102,10 @@ def enlist(obj: Iterable[T]) -> Iterable[T]: ...
 
 @overload
 def enlist(obj: Iterable[T] | T) -> Iterable[T]: ...
+
+
+@overload
+def enlist(obj: T | Iterable[T]) -> Iterable[T]: ...
 
 
 @overload
@@ -170,7 +172,11 @@ def simplify[T](obj: Iterable[T]) -> T: ...
 
 
 @overload
-def simplify(obj: T) -> T: ...
+def simplify[T](obj: T | Iterable[T]) -> T: ...
+
+
+@overload
+def simplify[T](obj: T) -> T: ...
 
 
 def simplify(obj):
@@ -244,14 +250,10 @@ def powerset(lst: Collection[T]) -> Iterable[tuple[T, ...]]:
         The powerset of *S*. Each tuple correponds to a specific subset. The order of the elements within the tuple is not
         significant.
     """
-    return itertools.chain.from_iterable(
-        itertools.combinations(lst, size) for size in range(len(lst) + 1)
-    )
+    return itertools.chain.from_iterable(itertools.combinations(lst, size) for size in range(len(lst) + 1))
 
 
-def sliding_window(
-    lst: Sequence[T], size: int, step: int = 1
-) -> Generator[Sequence[T], None, None]:
+def sliding_window(lst: Sequence[T], size: int, step: int = 1) -> Generator[Sequence[T], None, None]:
     """Iterates over the given sequence using a sliding window.
 
     The window will contain exactly `size` many entries, starting at the beginning of the sequence. After yielding a

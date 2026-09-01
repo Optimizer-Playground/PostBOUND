@@ -19,7 +19,7 @@ class EmptyJoinOrderOptimizer(JoinOrderOptimization):
     def __init__(self) -> None:
         super().__init__()
 
-    def optimize_join_order(self, query: qal.SqlQuery) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: qal.SelectStatement) -> Optional[JoinTree]:
         return None
 
     def describe(self) -> dict:
@@ -30,7 +30,7 @@ class EmptyPhysicalOperatorSelection(PhysicalOperatorSelection):
     """Dummy implementation of operator optimization that does not actually optimize anything."""
 
     def select_physical_operators(
-        self, query: qal.SqlQuery, join_order: Optional[JoinTree]
+        self, query: qal.SelectStatement, join_order: Optional[JoinTree]
     ) -> PhysicalOperatorAssignment:
         return PhysicalOperatorAssignment()
 
@@ -43,11 +43,11 @@ class EmptyParameterization(ParameterGeneration):
 
     def generate_plan_parameters(
         self,
-        query: qal.SqlQuery,
+        query: qal.SelectStatement,
         join_order: Optional[JoinTree],
         operator_assignment: Optional[PhysicalOperatorAssignment],
-    ) -> Optional[PlanParameterization]:
-        return None
+    ) -> PlanParameterization:
+        return PlanParameterization()
 
     def describe(self) -> dict:
         return {"name": "no_parameterization"}

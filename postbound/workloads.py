@@ -40,7 +40,7 @@ import tqdm
 from . import parser, util
 from ._base import pbdir
 from .db import DatabasePool
-from .qal import SqlQuery
+from .qal import SelectStatement
 
 _WorkloadSources = {
     "job": "https://zenodo.org/records/19205561/files/job.zip?download=1",
@@ -89,7 +89,7 @@ NewLabelType = typing.TypeVar("NewLabelType", bound=Hashable)
 """In case of mutations of the workload labels, this denotes the new type of the labels after the mutation."""
 
 
-class Workload(UserDict[LabelType, SqlQuery]):
+class Workload(UserDict[LabelType, SelectStatement]):
     """A workload collects a number of queries (read: benchmark) and provides utilities to operate on them conveniently.
 
     In addition to the actual queries, each query is annotated by a label that can be used to retrieve the query more
@@ -183,7 +183,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         Path.glob
         parser.parse_query
         """
-        queries: dict[str, SqlQuery] = {}
+        queries: dict[str, SelectStatement] = {}
         root = Path(root_dir)
 
         if verbose:
@@ -206,13 +206,9 @@ class Workload(UserDict[LabelType, SqlQuery]):
             except Exception as e:
                 match on_error:
                     case "raise":
-                        raise ValueError(
-                            f"Could not parse query from {query_file_path}", e
-                        )
+                        raise ValueError(f"Could not parse query from {query_file_path}", e)
                     case "warn":
-                        warnings.warn(
-                            f"Could not parse query {query_file_path}: {e} ({type(e)})"
-                        )
+                        warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})")
                     case "ignore":
                         pass
 
@@ -223,7 +219,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
 
     def __init__(
         self,
-        queries: dict[LabelType, SqlQuery],
+        queries: dict[LabelType, SelectStatement],
         name: str = "",
         root: Optional[Path] = None,
     ) -> None:
@@ -232,7 +228,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         self._root = root
 
         self._sorted_labels = natsort.natsorted(list(self.keys()))
-        self._sorted_queries: list[SqlQuery] = []
+        self._sorted_queries: list[SelectStatement] = []
         self._update_query_order()
 
         self._label_mapping = util.dicts.invert(self.data)
@@ -248,7 +244,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         """
         return self._name
 
-    def queries(self) -> Sequence[SqlQuery]:
+    def queries(self) -> Sequence[SelectStatement]:
         """Provides all queries in the workload in natural order (according to their labels).
 
         If the natural order was manually destroyed, e.g. by shuffling, the shuffled order is used.
@@ -272,7 +268,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         """
         return list(self._sorted_labels)
 
-    def entries(self) -> Sequence[tuple[LabelType, SqlQuery]]:
+    def entries(self) -> Sequence[tuple[LabelType, SelectStatement]]:
         """Provides all (label, query) pairs in the workload, in natural order of the query labels.
 
         If the natural order was manually destroyed, e.g. by shuffling, the shuffled order is used.
@@ -284,7 +280,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         """
         return list(zip(self._sorted_labels, self._sorted_queries))
 
-    def head(self) -> Optional[tuple[LabelType, SqlQuery]]:
+    def head(self) -> Optional[tuple[LabelType, SelectStatement]]:
         """Provides the first query in the workload.
 
         The first query is determined according to the natural order of the query labels by default. If that order was manually
@@ -301,7 +297,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
             return None
         return self._sorted_labels[0], self._sorted_queries[0]
 
-    def label_of(self, query: SqlQuery) -> LabelType:
+    def label_of(self, query: SelectStatement) -> LabelType:
         """Provides the label of the given query.
 
         Parameters
@@ -335,9 +331,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
             A workload that contains only the queries with the specified labels
         """
         labels = set(labels)
-        selected_queries = {
-            label: query for label, query in self.data.items() if label in labels
-        }
+        selected_queries = {label: query for label, query in self.data.items() if label in labels}
         return Workload(selected_queries, name=self._name, root=self._root)
 
     def first(self, n: int) -> Workload[LabelType]:
@@ -435,13 +429,11 @@ class Workload(UserDict[LabelType, SqlQuery]):
         prefix_queries = {
             label: query
             for label, query in self.data.items()
-            if label.startswith(label_prefix)
+            if label.startswith(label_prefix)  # type: ignore - this is guarded by the check above
         }
         return Workload(prefix_queries, name=self._name, root=self._root)
 
-    def filter_by(
-        self, predicate: Callable[[LabelType, SqlQuery], bool]
-    ) -> Workload[LabelType]:
+    def filter_by(self, predicate: Callable[[LabelType, SelectStatement], bool]) -> Workload[LabelType]:
         """Provides all queries from the workload that match a specific predicate.
 
         Parameters
@@ -456,16 +448,10 @@ class Workload(UserDict[LabelType, SqlQuery]):
             All queries that passed the filter condition check. Queries will be sorted according to the natural order of their
             labels again.
         """
-        matching_queries = {
-            label: query
-            for label, query in self.data.items()
-            if predicate(label, query)
-        }
+        matching_queries = {label: query for label, query in self.data.items() if predicate(label, query)}
         return Workload(matching_queries, name=self._name, root=self._root)
 
-    def relabel(
-        self, label_provider: Callable[[LabelType, SqlQuery], NewLabelType]
-    ) -> Workload[NewLabelType]:
+    def relabel(self, label_provider: Callable[[LabelType, SelectStatement], NewLabelType]) -> Workload[NewLabelType]:
         """Constructs a new workload, leaving the queries intact but replacing the labels.
 
         The new workload will ordered according to the natural order of the new labels.
@@ -482,10 +468,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         Workload[NewLabelType]
             All queries of the current workload, but with new labels
         """
-        relabeled_queries = {
-            label_provider(current_label, query): query
-            for current_label, query in self.data.items()
-        }
+        relabeled_queries = {label_provider(current_label, query): query for current_label, query in self.data.items()}
         return Workload(relabeled_queries, self._name, self._root)
 
     def map(self, transformation: Callable, *args, **kwargs) -> Workload[LabelType]:
@@ -514,10 +497,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         --------
         transform : if the transformation also needs access to the query labels, or if labels should be updated as well
         """
-        transformed_queries = {
-            label: transformation(query, *args, **kwargs)
-            for label, query in self.data.items()
-        }
+        transformed_queries = {label: transformation(query, *args, **kwargs) for label, query in self.data.items()}
         return Workload(transformed_queries, self._name, self._root)
 
     def transform(
@@ -551,10 +531,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
         --------
         map : if the transformation is purely query-based and does not need access to the labels
         """
-        transformed_queries = [
-            transformation(label, query, *args, **kwargs)
-            for label, query in self.data.items()
-        ]
+        transformed_queries = [transformation(label, query, *args, **kwargs) for label, query in self.data.items()]
         return Workload(dict(transformed_queries), self._name, self._root)
 
     def shuffle(self) -> Workload[LabelType]:
@@ -566,9 +543,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
             All queries of the current workload, but with the queries in a different order
         """
         shuffled_workload = Workload(self.data, self._name, self._root)
-        shuffled_workload._sorted_labels = random.sample(
-            self._sorted_labels, k=len(self)
-        )
+        shuffled_workload._sorted_labels = random.sample(self._sorted_labels, k=len(self))
         shuffled_workload._update_query_order()
         return shuffled_workload
 
@@ -596,11 +571,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
     def __sub__(self, other: Workload[LabelType]) -> Workload[LabelType]:
         if not isinstance(other, Workload) and isinstance(other, Iterable):
             labels_to_remove = set(other)
-            reduced_workload = {
-                label: query
-                for label, query in self.data.items()
-                if label not in labels_to_remove
-            }
+            reduced_workload = {label: query for label, query in self.data.items() if label not in labels_to_remove}
             return Workload(reduced_workload, name=self._name, root=self._root)
         elif not isinstance(other, Workload):
             raise TypeError("Expected workload or labels to subtract")
@@ -613,11 +584,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
     def __and__(self, other: Workload[LabelType]) -> Workload[LabelType]:
         if not isinstance(other, Workload) and isinstance(other, Iterable):
             labels_to_include = set(other)
-            reduced_workload = {
-                label: query
-                for label, query in self.data.items()
-                if label in labels_to_include
-            }
+            reduced_workload = {label: query for label, query in self.data.items() if label in labels_to_include}
             return Workload(reduced_workload, name=self._name, root=self._root)
         elif not isinstance(other, Workload):
             raise TypeError("Expected workload or labels to compute union")
@@ -627,9 +594,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
             root=self._root,
         )
 
-    def __or__(
-        self, other: dict[LabelType, SqlQuery] | UserDict[LabelType, SqlQuery]
-    ) -> Workload[LabelType]:
+    def __or__(self, other: dict[LabelType, SelectStatement] | UserDict[LabelType, SelectStatement]) -> Workload[LabelType]:
         other_data = other.data if isinstance(other, UserDict) else other
         return Workload(
             other_data | self.data, name=self._name, root=self._root
@@ -647,9 +612,7 @@ class Workload(UserDict[LabelType, SqlQuery]):
             return f"Workload: {len(self)} queries"
 
 
-def wrap_workload(
-    queries: Iterable[SqlQuery], name: str = "", root: Path | str | None = None
-) -> Workload[int]:
+def wrap_workload(queries: Iterable[SelectStatement], name: str = "", root: Path | str | None = None) -> Workload[int]:
     """Wraps a number of queries in a workload with numerical labels."""
     return generate_workload(queries, name=name, workload_root=root)
 
@@ -704,7 +667,7 @@ def read_workload(
         The workload
     """
     root = Path(path)
-    queries: dict[str, SqlQuery] = {}
+    queries: dict[str, SelectStatement] = {}
 
     if verbose:
         matching_files = list(root.glob(query_file_pattern))
@@ -728,9 +691,7 @@ def read_workload(
                 case "raise":
                     raise ValueError(f"Could not parse query from {query_file_path}", e)
                 case "warn":
-                    warnings.warn(
-                        f"Could not parse query {query_file_path}: {e} ({type(e)})"
-                    )
+                    warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})")
                 case "ignore":
                     pass
 
@@ -764,9 +725,7 @@ def read_workload(
     return Workload(queries, name, root)
 
 
-def read_batch_workload(
-    filename: str, name: str = "", *, file_encoding: str = "utf-8"
-) -> Workload[int]:
+def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "utf-8") -> Workload[int]:
     """Loads a workload consisting of multiple queries from a single file.
 
     The input file has to contain one valid SQL query per line. While empty lines are skipped, any non-SQL line will
@@ -861,7 +820,7 @@ def read_csv_workload(
         converters={query_column: parser.parse_query},
         encoding=file_encoding,
         **pd_args,
-    )
+    )  # type: ignore
 
     queries = workload_df[query_column].tolist()
     if label_column:
@@ -870,16 +829,14 @@ def read_csv_workload(
     else:
         label_provider = None
 
-    return generate_workload(
-        queries, name=name, labels=label_provider, workload_root=filepath
-    )
+    return generate_workload(queries, name=name, labels=label_provider, workload_root=filepath)
 
 
 def generate_workload(
-    queries: Iterable[SqlQuery],
+    queries: Iterable[SelectStatement],
     *,
     name: str = "",
-    labels: Optional[dict[SqlQuery, LabelType]] = None,
+    labels: Optional[dict[SelectStatement, LabelType]] = None,
     workload_root: Optional[Path | str] = None,
 ) -> Workload[LabelType]:
     """Wraps a number of queries in a workload object.
@@ -909,14 +866,10 @@ def generate_workload(
     Workload[LabelType]
         The workload
     """
-    workload_root = (
-        Path(workload_root) if isinstance(workload_root, str) else workload_root
-    )
+    workload_root = Path(workload_root) if isinstance(workload_root, str) else workload_root
     name = name if name else (workload_root.stem if workload_root else "")
     if not labels:
-        labels: dict[SqlQuery, int] = {
-            query: idx + 1 for idx, query in enumerate(queries)
-        }
+        labels: dict[SelectStatement, int] = {query: idx + 1 for idx, query in enumerate(queries)}
     workload_contents = util.dicts.invert(labels)
     return Workload(workload_contents, name, workload_root)
 
@@ -971,9 +924,7 @@ def job(
 
     workload_dir = _fetch_workload("JOB")
     # JOB only uses aliases column references, so no need for explicit binding
-    job_workload = Workload.read(
-        workload_dir, name="JOB", file_encoding=file_encoding, bind_columns=False
-    )
+    job_workload = Workload.read(workload_dir, name="JOB", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(job_workload, workload_dir)
     return job_workload
 
@@ -998,9 +949,7 @@ def job_light(*, file_encoding: str = "utf-8") -> Workload[str]:
     """
     workload_dir = _fetch_workload("job-light")
     # JOB-light only uses aliases column references, so no need for explicit binding
-    job_light_workload = Workload.read(
-        workload_dir, name="JOB-light", file_encoding=file_encoding, bind_columns=False
-    )
+    job_light_workload = Workload.read(workload_dir, name="JOB-light", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(job_light_workload, workload_dir)
     return job_light_workload
 
@@ -1036,9 +985,7 @@ def job_complex(*, file_encoding: str = "utf-8") -> Workload[str]:
     return job_complex_workload
 
 
-def ssb(
-    *, file_encoding: str = "utf-8", bind_columns: Optional[bool] = None
-) -> Workload[str]:
+def ssb(*, file_encoding: str = "utf-8", bind_columns: Optional[bool] = None) -> Workload[str]:
     """Reads the Star Schema Benchmark, with labels according to the original data (e.g. *q1-1*, *q3-2*, etc.).
 
     Parameters
@@ -1060,15 +1007,9 @@ def ssb(
 
     .. Patrick E. O'Neil et al.: "The Star Schema Benchmark and Augmented Fact Table Indexing." (TPCTC'2009)
     """
-    bind_columns = (
-        bind_columns
-        if bind_columns is not None
-        else not DatabasePool.get_instance().empty()
-    )
+    bind_columns = bind_columns if bind_columns is not None else not DatabasePool.get_instance().empty()
     workload_dir = _fetch_workload("ssb")
-    ssb_workload = Workload.read(
-        workload_dir, name="SSB", file_encoding=file_encoding, bind_columns=bind_columns
-    )
+    ssb_workload = Workload.read(workload_dir, name="SSB", file_encoding=file_encoding, bind_columns=bind_columns)
     _assert_workload_loaded(ssb_workload, workload_dir)
     return ssb_workload
 
@@ -1103,11 +1044,7 @@ def stack(
 
     .. Ryan Marcus et al.: "Bao: Making Learned Query Optimization Practical." (SIGMOD'2021)
     """
-    bind_columns = (
-        bind_columns
-        if bind_columns is not None
-        else not DatabasePool.get_instance().empty()
-    )
+    bind_columns = bind_columns if bind_columns is not None else not DatabasePool.get_instance().empty()
     workload_dir = _fetch_workload("stack")
 
     stack_workload = read_workload(
@@ -1140,9 +1077,7 @@ def stats(*, file_encoding: str = "utf-8") -> Workload[str]:
     .. Yuxing Han et al.: Cardinality Estimation in DBMS: A Comprehensive Benchmark Evaluation (Proc. VLDB Endow. 15, 4 (2022))
     """
     workload_dir = _fetch_workload("stats")
-    stats_workload = Workload.read(
-        workload_dir, name="Stats", file_encoding=file_encoding, bind_columns=False
-    )
+    stats_workload = Workload.read(workload_dir, name="Stats", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(stats_workload, workload_dir)
     return stats_workload
 

@@ -77,7 +77,7 @@ from .qal import (
     Explain,
     Hint,
     SqlExpression,
-    SqlQuery,
+    SelectStatement,
     StaticValueExpression,
 )
 from .util import Version
@@ -165,7 +165,7 @@ class MysqlInterface(Database):
 
     def execute_query(
         self,
-        query: SqlQuery | str,
+        query: SelectStatement | str,
         *,
         cache_enabled: Optional[bool] = None,
         raw: bool = False,
@@ -251,7 +251,7 @@ class MysqlInterface(Database):
         self._cnx.close()
 
     def _prepare_query_execution(
-        self, query: SqlQuery | str, *, drop_explain: bool = False
+        self, query: SelectStatement | str, *, drop_explain: bool = False
     ) -> str:
         """Provides the query in a unified format, taking care of preparatory statements as necessary.
 
@@ -259,7 +259,7 @@ class MysqlInterface(Database):
         the "semantics" of the query to be known (e.g. EXPLAIN modifications or query hints) and are therefore only
         executed for instances of the qal queries.
         """
-        if not isinstance(query, SqlQuery):
+        if not isinstance(query, SelectStatement):
             return query
 
         if drop_explain:
@@ -590,13 +590,13 @@ class MysqlHintService(HintService):
 
     def generate_hints(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         plan: Optional[QueryPlan] = None,
         *,
         join_order: Optional[JoinTree] = None,
         physical_operators: Optional[PhysicalOperatorAssignment] = None,
         plan_parameters: Optional[PlanParameterization] = None,
-    ) -> SqlQuery:
+    ) -> SelectStatement:
         if join_order and not join_order.is_linear():
             raise UnsupportedDatabaseFeatureError(
                 self._mysql_instance,
@@ -623,7 +623,7 @@ class MysqlHintService(HintService):
         hint_clause = Hint(prep_statements, final_hint_block)
         return transform.add_clause(query, hint_clause)
 
-    def format_query(self, query: SqlQuery) -> str:
+    def format_query(self, query: SelectStatement) -> str:
         updated_query = query
 
         if updated_query.is_explain():
@@ -645,8 +645,8 @@ class MysqlOptimizer(OptimizerInterface):
     def __init__(self, mysql_instance: MysqlInterface) -> None:
         self._mysql_instance = mysql_instance
 
-    def query_plan(self, query: SqlQuery | str) -> QueryPlan:
-        if isinstance(query, SqlQuery):
+    def query_plan(self, query: SelectStatement | str) -> QueryPlan:
+        if isinstance(query, SelectStatement):
             prepared_query = self._mysql_instance._prepare_query_execution(
                 query, drop_explain=True
             )
@@ -658,17 +658,17 @@ class MysqlOptimizer(OptimizerInterface):
         query_plan = parse_mysql_explain_plan(query_for_plan, raw_query_plan)
         return query_plan.as_qep()
 
-    def analyze_plan(self, query: SqlQuery) -> QueryPlan:
+    def analyze_plan(self, query: SelectStatement) -> QueryPlan:
         raise NotImplementedError("MySQL interface does not support ANALYZE plans yet")
 
-    def parse_plan(self, plan: Any, *, query: Optional[SqlQuery] = None) -> QueryPlan:
+    def parse_plan(self, plan: Any, *, query: Optional[SelectStatement] = None) -> QueryPlan:
         mysql_plan = MysqlExplainPlan(plan)
         return mysql_plan.as_qep()
 
-    def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:
+    def cardinality_estimate(self, query: SelectStatement | str) -> Cardinality:
         return self.query_plan(query).estimated_cardinality
 
-    def cost_estimate(self, query: SqlQuery | str) -> float:
+    def cost_estimate(self, query: SelectStatement | str) -> float:
         return self.query_plan(query).estimated_cost
 
 
@@ -921,7 +921,7 @@ def _determine_join_type(explain_data: dict) -> str:
 
 
 def _parse_mysql_join_node(
-    query: Optional[SqlQuery], node_name: str, explain_data: list
+    query: Optional[SelectStatement], node_name: str, explain_data: list
 ) -> Optional[MysqlExplainNode]:
     first_table, *remaining_tables = explain_data
     first_node = _parse_next_mysql_explain_node(query, first_table)
@@ -934,7 +934,7 @@ def _parse_mysql_join_node(
 
 
 def _parse_mysql_table_node(
-    query: Optional[SqlQuery], node_name: str, explain_data: dict
+    query: Optional[SelectStatement], node_name: str, explain_data: dict
 ) -> Optional[MysqlExplainNode]:
     scanned_table = (
         _lookup_table(explain_data["table_name"], query.tables())
@@ -969,7 +969,7 @@ def _parse_mysql_table_node(
 
 
 def _parse_mysql_wrapper_node(
-    query: Optional[SqlQuery], node_name: str, explain_data: dict
+    query: Optional[SelectStatement], node_name: str, explain_data: dict
 ) -> Optional[MysqlExplainNode]:
     scan_cost, join_cost = _parse_cost_info(explain_data)
     scan_card, join_card = _parse_cardinality_info(explain_data)
@@ -988,7 +988,7 @@ def _parse_mysql_wrapper_node(
 
 
 def _parse_mysql_explain_node(
-    query: Optional[SqlQuery], node_name: str, explain_data: dict | list
+    query: Optional[SelectStatement], node_name: str, explain_data: dict | list
 ) -> Optional[MysqlExplainNode]:
     if not explain_data:
         return None
@@ -1009,7 +1009,7 @@ def _parse_mysql_explain_node(
 
 
 def _parse_next_mysql_explain_node(
-    query: Optional[SqlQuery], explain_data: dict
+    query: Optional[SelectStatement], explain_data: dict
 ) -> Optional[MysqlExplainNode]:
     for info_key, node_data in explain_data.items():
         if info_key in _MysqlExplainNodeTypes:
@@ -1018,7 +1018,7 @@ def _parse_next_mysql_explain_node(
 
 
 def parse_mysql_explain_plan(
-    query: Optional[SqlQuery], explain_data: dict
+    query: Optional[SelectStatement], explain_data: dict
 ) -> MysqlExplainPlan:
     explain_data = explain_data["query_block"]
     query_cost = explain_data.get("cost_info", {}).get("query_cost", math.nan)

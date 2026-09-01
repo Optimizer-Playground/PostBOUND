@@ -4,7 +4,6 @@ from . import (
     bench,
     db,
     duckdb,
-    experiments,
     mysql,
     opt,
     parser,
@@ -38,7 +37,6 @@ from ._hints import (
     HintType,
     JoinOperatorAssignment,
     JoinTree,
-    JoinTreeAnnotation,
     LogicalJoinTree,
     PhysicalOperatorAssignment,
     PlanParameterization,
@@ -77,14 +75,12 @@ from ._stages import (
 )
 from .db import Database
 from .parser import parse_query
-from .qal import SqlQuery
 from .workloads import Workload
 
 __all__ = [
     "bench",
     "db",
     "duckdb",
-    "experiments",
     "mysql",
     "opt",
     "parser",
@@ -135,7 +131,6 @@ __all__ = [
     "QueryPlan",
     "SortKey",
     "Subplan",
-    "JoinTreeAnnotation",
     "JoinTree",
     "LogicalJoinTree",
     "PhysicalOperatorAssignment",

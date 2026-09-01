@@ -13,7 +13,7 @@ from .._stages import (
     CardinalityEstimator,
 )
 from ..db import Database, DatabasePool
-from ..qal import SqlQuery
+from ..qal import SelectStatement
 from ..workloads import Workload
 
 
@@ -55,13 +55,13 @@ class PreciseCardinalities(CardinalityEstimator):
             else DatabasePool.get_instance().current_database()
         )
         self.cache_enabled = enable_cache
-        self._cardinality_cache: dict[SqlQuery, Cardinality] = {}
+        self._cardinality_cache: dict[SelectStatement, Cardinality] = {}
 
     def describe(self) -> dict:
         return {"name": "true-cards", "database": self.database.describe()}
 
     def calculate_estimate(
-        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
+        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         intermediate = util.enlist(intermediate)
         subquery = transform.extract_subquery(query, intermediate)
@@ -188,7 +188,7 @@ class PreComputedCardinalities(CardinalityEstimator):
             self._cards[(label, frozenset(tables))] = Cardinality(card)
 
     def calculate_estimate(
-        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
+        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         intermediate = frozenset(util.enlist(intermediate))
         label = self._workload.label_of(query)
@@ -205,7 +205,7 @@ class PreComputedCardinalities(CardinalityEstimator):
         }
 
     def _use_default(
-        self, query: SqlQuery, intermediate: frozenset[TableReference]
+        self, query: SelectStatement, intermediate: frozenset[TableReference]
     ) -> Cardinality:
         if self._live_db is not None:
             return self._use_live_fallback(query, intermediate)
@@ -220,7 +220,7 @@ class PreComputedCardinalities(CardinalityEstimator):
         return Cardinality.unknown()
 
     def _use_live_fallback(
-        self, query: SqlQuery, intermediate: frozenset[TableReference]
+        self, query: SelectStatement, intermediate: frozenset[TableReference]
     ) -> Cardinality:
         assert self._live_db is not None
         query_fragment = transform.extract_subquery(query, intermediate)
@@ -240,7 +240,7 @@ class PreComputedCardinalities(CardinalityEstimator):
 
     def _dump_fallback_estimate(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         tables: frozenset[TableReference],
         cardinality: Cardinality,
     ) -> None:
@@ -316,7 +316,7 @@ class CardinalityDistortion(CardinalityEstimator):
         }
 
     def calculate_estimate(
-        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
+        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         card_est = self.estimator.calculate_estimate(query, intermediate)
         if not card_est.is_valid():

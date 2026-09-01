@@ -11,8 +11,6 @@ import abc
 from collections.abc import Collection, Mapping
 from typing import Optional, Protocol, Self
 
-from postbound import Workload
-
 from ._core import TimeMs
 from ._hints import PhysicalOperatorAssignment, PlanParameterization
 from ._qep import QueryPlan
@@ -29,7 +27,7 @@ from ._stages import (
 )
 from .db import Database, DatabasePool, ResultSet
 from .postgres import PostgresInterface
-from .qal import SqlQuery
+from .qal import SelectStatement
 from .train import TrainingData, TrainingDataRepository, TrainingMetrics
 from .util._errors import StateError
 from .util.jsonize import jsondict
@@ -40,6 +38,7 @@ from .validation import (
     UnsupportedSystemError,
     merge_checks,
 )
+from .workloads import Workload
 
 
 class OptimizationPipeline(abc.ABC):
@@ -81,7 +80,7 @@ class OptimizationPipeline(abc.ABC):
     """
 
     @abc.abstractmethod
-    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
+    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
         """Applies the current pipeline configuration to obtain an optimized plan for the input query.
 
         Parameters
@@ -107,7 +106,7 @@ class OptimizationPipeline(abc.ABC):
         """
         raise NotImplementedError
 
-    def optimize_query(self, query: SqlQuery) -> SqlQuery:
+    def optimize_query(self, query: SelectStatement) -> SelectStatement:
         """Applies the current pipeline configuration to optimize the input query.
 
         This process also involves the generation of appropriate optimization information that enforces the selected
@@ -202,9 +201,7 @@ class OptimizationPipeline(abc.ABC):
         """Checks, whether any of the selected optimization stages requires training on the workload."""
         return any(stage.requires_workload_training() for stage in self.stages())
 
-    def train_on_workload(
-        self, workload: Workload, database: Database
-    ) -> Mapping[str, TrainingMetrics]:
+    def train_on_workload(self, workload: Workload, database: Database) -> Mapping[str, TrainingMetrics]:
         """Trains all optimization stages that require training on the workload.
 
         Returns
@@ -226,9 +223,7 @@ class OptimizationPipeline(abc.ABC):
         """Checks, whether any of the selected optimization stages requires training on sample queries."""
         return any(stage.requires_sample_training() for stage in self.stages())
 
-    def train_on_samples(
-        self, samples: TrainingData | TrainingDataRepository
-    ) -> Mapping[str, TrainingMetrics]:
+    def train_on_samples(self, samples: TrainingData | TrainingDataRepository) -> Mapping[str, TrainingMetrics]:
         """Trains all optimization stages that require training on sample queries.
 
         Returns
@@ -250,9 +245,7 @@ class OptimizationPipeline(abc.ABC):
                 current_sample = samples
 
             if current_sample is None:
-                raise ValueError(
-                    f"No training data available for optimization stage {stage.name}"
-                )
+                raise ValueError(f"No training data available for optimization stage {stage.name}")
 
             current_metrics = stage.fit_samples(current_sample)
             metrics[stage.name] = current_metrics
@@ -261,17 +254,14 @@ class OptimizationPipeline(abc.ABC):
 
     def sample_fit_completed(self) -> bool:
         """Checks, whether all optimization stages that require training on sample queries have completed their training."""
-        return all(
-            not stage.requires_sample_training() or stage.sample_fit_completed()
-            for stage in self.stages()
-        )
+        return all(not stage.requires_sample_training() or stage.sample_fit_completed() for stage in self.stages())
 
     def requires_online_training(self) -> bool:
         """Checks, whether any of the selected optimization stages requires training on actual query executions."""
         return any(stage.uses_online_feedback() for stage in self.stages())
 
     def learn_from_feedback(
-        self, query: SqlQuery, result_set: ResultSet, *, exec_time: TimeMs
+        self, query: SelectStatement, result_set: ResultSet, *, exec_time: TimeMs
     ) -> Mapping[str, TrainingMetrics]:
         """Trains all optimization stages that require training on actual query executions.
 
@@ -295,9 +285,7 @@ class OptimizationPipeline(abc.ABC):
         for stage in self.stages():
             if not stage.uses_online_feedback():
                 continue
-            current_metrics = stage.learn_from_feedback(
-                query, result_set, exec_time=exec_time
-            )
+            current_metrics = stage.learn_from_feedback(query, result_set, exec_time=exec_time)
             metrics[stage.name] = current_metrics
         return metrics
 
@@ -334,11 +322,7 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
     """
 
     def __init__(self, target_db: Optional[Database] = None) -> None:
-        self._target_db = (
-            target_db
-            if target_db is not None
-            else DatabasePool.get_instance().current_database()
-        )
+        self._target_db = target_db if target_db is not None else DatabasePool.get_instance().current_database()
         self._optimization_algorithm: Optional[CompleteOptimizationAlgorithm] = None
         self._build = False
         super().__init__()
@@ -376,9 +360,7 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
         """
         return self._optimization_algorithm
 
-    def setup_optimization_algorithm(
-        self, algorithm: CompleteOptimizationAlgorithm
-    ) -> Self:
+    def setup_optimization_algorithm(self, algorithm: CompleteOptimizationAlgorithm) -> Self:
         """Configures the pipeline to use the given optimization algorithm.
 
         Parameters
@@ -428,13 +410,11 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
 
         pre_check = self._optimization_algorithm.pre_check()
         if pre_check is not None:
-            pre_check.check_supported_database_system(
-                self._target_db
-            ).ensure_all_passed()
+            pre_check.check_supported_database_system(self._target_db).ensure_all_passed()
         self._build = True
         return self
 
-    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
+    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
         if not self._build:
             raise StateError(
                 "No algorithm has been selected. Don't forget to call `build()` after setting the algorithm."
@@ -458,9 +438,7 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
 
     def describe(self) -> jsondict:
         algorithm_description = (
-            self._optimization_algorithm.describe()
-            if self._optimization_algorithm is not None
-            else "no_algorithm"
+            self._optimization_algorithm.describe() if self._optimization_algorithm is not None else "no_algorithm"
         )
         return {
             "name": "integrated_pipeline",
@@ -615,14 +593,12 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
                 self._plan_enumerator.pre_check(),
             ]
         )
-        self._support_check.check_supported_database_system(
-            self._target_db
-        ).ensure_all_passed(self._target_db)
+        self._support_check.check_supported_database_system(self._target_db).ensure_all_passed(self._target_db)
 
         self._build = True
         return self
 
-    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
+    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
         if not self._build:
             raise StateError("Pipeline has not been build")
         self._support_check.check_supported_query(query).ensure_all_passed(query)
@@ -642,17 +618,9 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         return s
 
     def describe(self) -> jsondict:
-        enumerator = (
-            self._plan_enumerator.describe()
-            if self._plan_enumerator is not None
-            else None
-        )
-        cost_model = (
-            self._cost_model.describe() if self._cost_model is not None else None
-        )
-        cardinality_estimator = (
-            self._card_est.describe() if self._card_est is not None else None
-        )
+        enumerator = self._plan_enumerator.describe() if self._plan_enumerator is not None else None
+        cost_model = self._cost_model.describe() if self._cost_model is not None else None
+        cardinality_estimator = self._card_est.describe() if self._card_est is not None else None
 
         return {
             "name": "textbook_pipeline",
@@ -837,9 +805,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         self._build = False
         return self
 
-    def setup_physical_operator_selection(
-        self, selector: PhysicalOperatorSelection
-    ) -> Self:
+    def setup_physical_operator_selection(self, selector: PhysicalOperatorSelection) -> Self:
         """Configures the algorithm to assign physical operators to the query.
 
         This algorithm receives the input query as well as the join order (if there is one) as input. In a special
@@ -886,9 +852,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
 
     def use(
         self,
-        component: JoinOrderOptimization
-        | PhysicalOperatorSelection
-        | ParameterGeneration,
+        component: JoinOrderOptimization | PhysicalOperatorSelection | ParameterGeneration,
     ) -> Self:
         """Shortcut method to setup the pipeline. Delegates to the appropriate setup_XXX method."""
         match component:
@@ -961,9 +925,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
 
         self._pre_check = merge_checks(all_checks)
 
-        db_check_result = self._pre_check.check_supported_database_system(
-            self._target_db
-        )
+        db_check_result = self._pre_check.check_supported_database_system(self._target_db)
         if not db_check_result.passed:
             failures = (
                 " and ".join(db_check_result.failure_reason)
@@ -978,11 +940,11 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
     def target_database(self) -> Database:
         return self.target_db
 
-    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
+    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
         optimized_query = self.optimize_query(query)
         return self.target_db.optimizer().query_plan(optimized_query)
 
-    def optimize_query(self, query: SqlQuery) -> SqlQuery:
+    def optimize_query(self, query: SelectStatement) -> SelectStatement:
         self._assert_is_build()
         assert self._pre_check is not None
         supported_query_check = self._pre_check.check_supported_query(query)
@@ -990,16 +952,12 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
             raise UnsupportedQueryError(query, supported_query_check.failure_reason)
 
         join_order = (
-            None
-            if self.join_order_enumerator is None
-            else self.join_order_enumerator.optimize_join_order(query)
+            None if self.join_order_enumerator is None else self.join_order_enumerator.optimize_join_order(query)
         )
         physical_operators = (
             PhysicalOperatorAssignment()
             if self.physical_operator_selection is None
-            else self.physical_operator_selection.select_physical_operators(
-                query, join_order
-            )
+            else self.physical_operator_selection.select_physical_operators(query, join_order)
         )
 
         if self._plan_parameterization is None:
@@ -1038,17 +996,11 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
             "name": "multi_stage_pipeline",
             "database_system": self._target_db.describe(),
             "query_pre_check": self._pre_check.describe() if self._pre_check else None,
-            "join_ordering": self._join_order_enumerator.describe()
-            if self._join_order_enumerator
-            else None,
+            "join_ordering": self._join_order_enumerator.describe() if self._join_order_enumerator else None,
             "operator_selection": (
-                self._physical_operator_selection.describe()
-                if self._physical_operator_selection
-                else None
+                self._physical_operator_selection.describe() if self._physical_operator_selection else None
             ),
-            "plan_parameterization": self._plan_parameterization.describe()
-            if self._plan_parameterization
-            else None,
+            "plan_parameterization": self._plan_parameterization.describe() if self._plan_parameterization else None,
         }
 
     def _assert_is_build(self) -> None:
@@ -1131,9 +1083,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         return self._initial_plan_generator
 
     @initial_plan_generator.setter
-    def initial_plan_generator(
-        self, plan_generator: Optional[CompleteOptimizationAlgorithm]
-    ) -> None:
+    def initial_plan_generator(self, plan_generator: Optional[CompleteOptimizationAlgorithm]) -> None:
         self._ensure_pipeline_integrity(initial_plan_generator=plan_generator)
         self._initial_plan_generator = plan_generator
 
@@ -1158,9 +1108,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         self._optimization_steps.append(next_step)
         return self
 
-    def use(
-        self, step: CompleteOptimizationAlgorithm | IncrementalOptimizationStep
-    ) -> Self:
+    def use(self, step: CompleteOptimizationAlgorithm | IncrementalOptimizationStep) -> Self:
         """Shortcut method to setup the pipeline."""
         match step:
             case CompleteOptimizationAlgorithm():
@@ -1174,7 +1122,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
     def target_database(self) -> Database:
         return self.target_db
 
-    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
+    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
         self._ensure_supported_query(query)
         current_plan = (
             self.initial_plan_generator.optimize_query(query)
@@ -1197,9 +1145,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
             "name": "incremental_pipeline",
             "database_system": self._target_db.describe(),
             "initial_plan": (
-                self._initial_plan_generator.describe()
-                if self._initial_plan_generator is not None
-                else "native"
+                self._initial_plan_generator.describe() if self._initial_plan_generator is not None else "native"
             ),
             "steps": [step.describe() for step in self._optimization_steps],
         }
@@ -1232,23 +1178,13 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         """
         database = self.target_db if database is None else database
         initial_plan_generator = (
-            self._initial_plan_generator
-            if initial_plan_generator is None
-            else initial_plan_generator
+            self._initial_plan_generator if initial_plan_generator is None else initial_plan_generator
         )
 
-        if (
-            initial_plan_generator is not None
-            and initial_plan_generator.pre_check() is not None
-        ):
-            initial_plan_generator.pre_check().check_supported_database_system(
-                database
-            ).ensure_all_passed(database)
+        if initial_plan_generator is not None and initial_plan_generator.pre_check() is not None:
+            initial_plan_generator.pre_check().check_supported_database_system(database).ensure_all_passed(database)
 
-        if (
-            additional_optimization_step is not None
-            and additional_optimization_step.pre_check() is not None
-        ):
+        if additional_optimization_step is not None and additional_optimization_step.pre_check() is not None:
             (
                 additional_optimization_step.pre_check()
                 .check_supported_database_system(database)
@@ -1258,11 +1194,9 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         for incremental_step in self._optimization_steps:
             if incremental_step.pre_check() is None:
                 continue
-            incremental_step.pre_check().check_supported_database_system(
-                database
-            ).ensure_all_passed(database)
+            incremental_step.pre_check().check_supported_database_system(database).ensure_all_passed(database)
 
-    def _ensure_supported_query(self, query: SqlQuery) -> None:
+    def _ensure_supported_query(self, query: SelectStatement) -> None:
         """Applies all relevant pre-checks to the input query.
 
         Parameters
@@ -1275,19 +1209,12 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         UnsupportedQueryError
             If one of the optimization algorithms is not compatible with the input query
         """
-        if (
-            self._initial_plan_generator is not None
-            and self._initial_plan_generator.pre_check() is not None
-        ):
-            self._initial_plan_generator.pre_check().check_supported_query(
-                query
-            ).ensure_all_passed(query)
+        if self._initial_plan_generator is not None and self._initial_plan_generator.pre_check() is not None:
+            self._initial_plan_generator.pre_check().check_supported_query(query).ensure_all_passed(query)
         for incremental_step in self._optimization_steps:
             if incremental_step.pre_check() is None:
                 continue
-            incremental_step.pre_check().check_supported_query(query).ensure_all_passed(
-                query
-            )
+            incremental_step.pre_check().check_supported_query(query).ensure_all_passed(query)
 
     def __repr__(self) -> str:
         return str(self)

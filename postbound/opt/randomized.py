@@ -23,14 +23,14 @@ from .._stages import (
     PhysicalOperatorSelection,
 )
 from ..db import Database, DatabasePool
-from ..qal import SqlQuery
+from ..qal import SelectStatement
 from ..util import nx as nx_utils
 from ..validation import CompoundCheck, CrossProductPreCheck, SupportedHintCheck
 from ._helpers import to_query_plan
 
 
 def _merge_nodes(
-    query: SqlQuery,
+    query: SelectStatement,
     start: JoinTree | TableReference,
     end: JoinTree | TableReference,
 ) -> JoinTree:
@@ -55,13 +55,13 @@ def _merge_nodes(
         A join tree combining the input trees. The `start` node will be the left node of the tree and the `end` node will be
         the right node.
     """
-    start = JoinTree.scan(start) if isinstance(start, TableReference) else start
-    end = JoinTree.scan(end) if isinstance(end, TableReference) else end
+    start = JoinTree.create_scan(start) if isinstance(start, TableReference) else start
+    end = JoinTree.create_scan(end) if isinstance(end, TableReference) else end
     return start.join_with(end)
 
 
 def _sample_join_graph(
-    query: SqlQuery,
+    query: SelectStatement,
     join_graph: nx.Graph,
     *,
     base_table: Optional[TableReference] = None,
@@ -98,30 +98,20 @@ def _sample_join_graph(
         candidate_edges: list[TableReference] = list(join_graph.adj[base_table])
         initial_join_partner = random.choice(candidate_edges)
         right, left = (
-            (base_table, initial_join_partner)
-            if random.random() < 0.5
-            else (initial_join_partner, base_table)
+            (base_table, initial_join_partner) if random.random() < 0.5 else (initial_join_partner, base_table)
         )
         join_tree = _merge_nodes(query, right, left)
-        join_graph = nx.contracted_nodes(
-            join_graph, base_table, initial_join_partner, self_loops=False
-        )
+        join_graph = nx.contracted_nodes(join_graph, base_table, initial_join_partner, self_loops=False)
         join_graph = nx.relabel_nodes(join_graph, {base_table: join_tree})
 
     while len(join_graph.nodes) > 1:
         join_predicates = list(join_graph.edges)
         next_edge = random.choice(join_predicates)
         start_node, target_node = next_edge
-        right, left = (
-            (start_node, target_node)
-            if random.random() < 0.5
-            else (target_node, start_node)
-        )
+        right, left = (start_node, target_node) if random.random() < 0.5 else (target_node, start_node)
         join_tree = _merge_nodes(query, right, left)
 
-        join_graph = nx.contracted_nodes(
-            join_graph, start_node, target_node, self_loops=False
-        )
+        join_graph = nx.contracted_nodes(join_graph, start_node, target_node, self_loops=False)
         join_graph = nx.relabel_nodes(join_graph, {start_node: join_tree})
 
     final_node: JoinTree = list(join_graph.nodes)[0]
@@ -160,7 +150,7 @@ class RandomJoinOrderGenerator:
         self._tree_structure = tree_structure
 
     def random_join_orders_for(
-        self, query: SqlQuery, *, base_table: Optional[TableReference] = None
+        self, query: SelectStatement, *, base_table: Optional[TableReference] = None
     ) -> Generator[JoinTree, None, None]:
         """Provides a generator that successively provides join orders at random.
 
@@ -192,13 +182,11 @@ class RandomJoinOrderGenerator:
             return
         elif len(join_graph.nodes) == 1:
             base_table = list(join_graph.nodes)[0]
-            join_tree = JoinTree.scan(base_table)
+            join_tree = JoinTree.create_scan(base_table)
             while True:
                 yield join_tree
         elif not nx.is_connected(join_graph):
-            raise ValueError(
-                "Cross products are not yet supported for random join order generation!"
-            )
+            raise ValueError("Cross products are not yet supported for random join order generation!")
 
         join_order_generator = (
             self._bushy_join_orders(query, join_graph, base_table=base_table)
@@ -219,7 +207,7 @@ class RandomJoinOrderGenerator:
 
     def _linear_join_orders(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         join_graph: nx.Graph,
         *,
         base_table: Optional[TableReference] = None,
@@ -244,12 +232,7 @@ class RandomJoinOrderGenerator:
         """
         direction = "inner" if self._tree_structure == "left-deep" else "outer"
         while True:
-            join_path = [
-                node
-                for node in nx_utils.nx_random_walk(
-                    join_graph, starting_node=base_table
-                )
-            ]
+            join_path = [node for node in nx_utils.nx_random_walk(join_graph, starting_node=base_table)]
             join_tree = JoinTree()
             for table in join_path:
                 join_tree = join_tree.join_with(table, partner_direction=direction)
@@ -257,7 +240,7 @@ class RandomJoinOrderGenerator:
 
     def _bushy_join_orders(
         self,
-        query: SqlQuery,
+        query: SelectStatement,
         join_graph: nx.Graph,
         *,
         base_table: Optional[TableReference] = None,
@@ -306,7 +289,7 @@ class RandomJoinOrderOptimizer(JoinOrderOptimization):
         generator_args = generator_args if generator_args is not None else {}
         self._generator = RandomJoinOrderGenerator(**generator_args)
 
-    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SelectStatement) -> Optional[JoinTree]:
         return next(self._generator.random_join_orders_for(query))
 
     def describe(self) -> dict:
@@ -370,29 +353,21 @@ class RandomOperatorGenerator:
     ) -> None:
         if not include_joins and not include_scans:
             raise ValueError("Cannot exclude both join hints and scan hints")
-        self._db = (
-            database
-            if database is not None
-            else DatabasePool.get_instance().current_database()
-        )
+        self._db = database if database is not None else DatabasePool.get_instance().current_database()
         self._eliminate_duplicates = eliminate_duplicates
         self._include_scans = include_scans
         self._include_joins = include_joins
         allowed_scan_ops = scan_operators if scan_operators else ScanOperator
         allowed_join_ops = join_operators if join_operators else JoinOperator
         self.allowed_scan_ops = frozenset(
-            scan_op
-            for scan_op in allowed_scan_ops
-            if self._db.hinting().supports_hint(scan_op)
+            scan_op for scan_op in allowed_scan_ops if self._db.hinting().supports_hint(scan_op)
         )
         self.allowed_join_ops = frozenset(
-            join_op
-            for join_op in allowed_join_ops
-            if self._db.hinting().supports_hint(join_op)
+            join_op for join_op in allowed_join_ops if self._db.hinting().supports_hint(join_op)
         )
 
     def random_operator_assignments_for(
-        self, query: SqlQuery, join_order: JoinTree
+        self, query: SelectStatement, join_order: JoinTree
     ) -> Generator[PhysicalOperatorAssignment, None, None]:
         """Produces a generator for random operator assignments of the allowed operators.
 
@@ -422,16 +397,12 @@ class RandomOperatorGenerator:
             if self._include_joins:
                 for join in join_order.iterjoins():
                     selected_operator = random.choice(allowed_joins)
-                    current_assignment.set_join_operator(
-                        JoinOperatorAssignment(selected_operator, join.tables())
-                    )
+                    current_assignment.set_join_operator(JoinOperatorAssignment(selected_operator, join.tables()))
 
             if self._include_scans:
                 for table in join_order.tables():
                     selected_operator = random.choice(allowed_scans)
-                    current_assignment.set_scan_operator(
-                        ScanOperatorAssignment(selected_operator, table)
-                    )
+                    current_assignment.set_scan_operator(ScanOperatorAssignment(selected_operator, table))
 
             if self._eliminate_duplicates:
                 current_hash = hash(current_assignment)
@@ -474,18 +445,14 @@ class RandomOperatorOptimizer(PhysicalOperatorSelection):
         generator_args = generator_args if generator_args is not None else {}
         self._generator = RandomOperatorGenerator(**generator_args)
 
-    def select_physical_operators(
-        self, query: SqlQuery, join_order: Optional[JoinTree]
-    ) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SelectStatement, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
+        if join_order is None:
+            raise ValueError("Join order is required for operator selection.")
         return next(self._generator.random_operator_assignments_for(query, join_order))
 
     def describe(self) -> dict:
-        allowed_scans = (
-            self._generator.allowed_scan_ops if self._generator._include_scans else []
-        )
-        allowed_joins = (
-            self._generator.allowed_join_ops if self._generator._include_joins else []
-        )
+        allowed_scans = self._generator.allowed_scan_ops if self._generator._include_scans else []
+        allowed_joins = self._generator.allowed_join_ops if self._generator._include_joins else []
         return {
             "name": "random",
             "allowed_operators": {"scans": allowed_scans, "joins": allowed_joins},
@@ -541,7 +508,7 @@ class RandomPlanGenerator:
         self._join_order_generator = RandomJoinOrderGenerator(**join_order_args)
         self._operator_generator = RandomOperatorGenerator(**operator_args)
 
-    def random_plans_for(self, query: SqlQuery) -> Generator[QueryPlan, None, None]:
+    def random_plans_for(self, query: SelectStatement) -> Generator[QueryPlan, None, None]:
         """Produces a generator for random query plans of an input query.
 
         The structure of the provided plans can be restricted by configuring the underlying services. Consult the class-level
@@ -561,14 +528,10 @@ class RandomPlanGenerator:
         plan_hashes = set()
         while True:
             join_order = next(join_order_generator)
-            operator_generator = (
-                self._operator_generator.random_operator_assignments_for(
-                    query, join_order
-                )
-            )
+            operator_generator = self._operator_generator.random_operator_assignments_for(query, join_order)
             physical_operators = next(operator_generator)
 
-            query_plan = to_query_plan(join_order, physical_operators)
+            query_plan = to_query_plan(join_order, physical_ops=physical_operators)
             if self._eliminate_duplicates:
                 current_plan_hash = hash(query_plan)
                 if current_plan_hash in plan_hashes:
@@ -622,7 +585,7 @@ class RandomPlanOptimizer(CompleteOptimizationAlgorithm):
             database=database,
         )
 
-    def optimize_query(self, query: SqlQuery) -> QueryPlan:
+    def optimize_query(self, query: SelectStatement) -> QueryPlan:
         return next(self._generator.random_plans_for(query))
 
     def describe(self) -> dict:
@@ -638,14 +601,11 @@ class RandomPlanOptimizer(CompleteOptimizationAlgorithm):
         )
         return {
             "name": "random",
-            "join_order": {
-                "tree_structure": self._generator._join_order_generator._tree_structure
-            },
+            "join_order": {"tree_structure": self._generator._join_order_generator._tree_structure},
             "physical_operators": {"scans": scan_ops, "joins": join_ops},
         }
 
     def pre_check(self) -> OptimizationPreCheck:
         return CompoundCheck(
-            CrossProductPreCheck(),
-            SupportedHintCheck(self._generator._operator_generator.necessary_hints()),
+            [CrossProductPreCheck(), SupportedHintCheck(self._generator._operator_generator.necessary_hints())]
         )

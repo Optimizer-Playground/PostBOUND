@@ -60,10 +60,12 @@ class Cardinality(Number):
     """
 
     @staticmethod
-    def of(value: int | float | Cardinality) -> Cardinality:
+    def of(value: int | float | Cardinality | None) -> Cardinality:
         """Creates a new cardinality with a specific value. This is just a shorthand for `Cardinality(value)`."""
         if isinstance(value, Cardinality):
             return value
+        elif value is None:
+            return Cardinality.unknown()
         return Cardinality(value)
 
     @staticmethod
@@ -75,6 +77,11 @@ class Cardinality(Number):
     def infinite() -> Cardinality:
         """Creates a new cardinality with an infinite value."""
         return Cardinality(math.inf)
+
+    @staticmethod
+    def zero() -> Cardinality:
+        """Creates a new cardinality with a value of zero."""
+        return Cardinality(0)
 
     def __init__(self, value: int | float) -> None:
         self._nan = math.isnan(value)

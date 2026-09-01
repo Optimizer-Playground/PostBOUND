@@ -1,3 +1,4 @@
+import os
 import unittest
 
 import postbound as pb
@@ -38,9 +39,7 @@ class QueryExecutionTests(unittest.TestCase):
 
     def test_execute_raw_query(self) -> None:
         query = self.stats["q-1"]
-        result_set = self.pg_instance.execute_query(
-            query, cache_enabled=False, raw=True
-        )
+        result_set = self.pg_instance.execute_query(query, cache_enabled=False, raw=True)
         self.assertEqual(len(result_set), 1)
 
         result = result_set[0][0]
@@ -52,14 +51,13 @@ class QueryExecutionTests(unittest.TestCase):
         vanilla_runtime = self.pg_instance.last_query_runtime()
 
         timeout = 0.5 * vanilla_runtime
-        result_set = self.pg_instance.execute_with_timeout(
-            query, timeout=timeout
-        )
+        result_set = self.pg_instance.execute_with_timeout(query, timeout=timeout)
         self.assertIs(result_set, None)
 
-        result_set = self.pg_instance.execute_with_timeout(
-            query, timeout=2 * vanilla_runtime
-        )
+        result_set = self.pg_instance.execute_with_timeout(query, timeout=2 * vanilla_runtime)
+        self.assertIsNot(result_set, None)
+        assert result_set is not None
+
         self.assertEqual(len(result_set), 1)
         result = result_set[0][0]
         self.assertEqual(result, 79851)
@@ -89,33 +87,33 @@ class JobHintingTests(regression_suite.PlanTestCase):
         if self.pg_instance.hinting().backend != "pg_lab":
             self.skipTest("pg_lab is not available")
 
+        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
+        if skip:
+            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
+
         for label, query in self.job.entries():
             with self.subTest("Query", label=label):
                 self.pg_instance.reset_connection()
                 native_plan = self.pg_instance.optimizer().query_plan(query)
-                hinted_query = self.pg_instance.hinting().generate_hints(
-                    query, native_plan
-                )
-                explicit_plan = self.pg_instance.optimizer().query_plan(
-                    hinted_query
-                )
+                hinted_query = self.pg_instance.hinting().generate_hints(query, native_plan)
+                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
                 self.assertEqual(native_plan, explicit_plan)
 
     def test_pg_hint_plan_backend(self) -> None:
         if self.pg_instance.hinting().backend != "pg_hint_plan":
             self.skipTest("pg_hint_plan is not available")
 
+        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
+        if skip:
+            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
+
         for label, query in self.job.entries():
             with self.subTest("Query", label=label):
                 self.pg_instance.reset_connection()
                 self.pg_instance.apply_configuration(PGHintPlanRestrictions)
                 native_plan = self.pg_instance.optimizer().query_plan(query)
-                hinted_query = self.pg_instance.hinting().generate_hints(
-                    query, native_plan
-                )
-                explicit_plan = self.pg_instance.optimizer().query_plan(
-                    hinted_query
-                )
+                hinted_query = self.pg_instance.hinting().generate_hints(query, native_plan)
+                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
                 self.assertEqual(native_plan, explicit_plan)
 
 
@@ -132,33 +130,33 @@ class StatsHintingTests(regression_suite.PlanTestCase):
         if self.pg_instance.hinting().backend != "pg_lab":
             self.skipTest("pg_lab is not available")
 
+        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
+        if skip:
+            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
+
         for label, query in self.stats.entries():
             with self.subTest("Query", label=label):
                 self.pg_instance.reset_connection()
                 native_plan = self.pg_instance.optimizer().query_plan(query)
-                hinted_query = self.pg_instance.hinting().generate_hints(
-                    query, native_plan
-                )
-                explicit_plan = self.pg_instance.optimizer().query_plan(
-                    hinted_query
-                )
+                hinted_query = self.pg_instance.hinting().generate_hints(query, native_plan)
+                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
                 self.assertEqual(native_plan, explicit_plan)
 
     def test_pg_hint_plan_backend(self) -> None:
         if self.pg_instance.hinting().backend != "pg_hint_plan":
             self.skipTest("pg_hint_plan is not available")
 
+        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
+        if skip:
+            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
+
         for label, query in self.stats.entries():
             with self.subTest("Query", label=label):
                 self.pg_instance.reset_connection()
                 self.pg_instance.apply_configuration(PGHintPlanRestrictions)
                 native_plan = self.pg_instance.optimizer().query_plan(query)
-                hinted_query = self.pg_instance.hinting().generate_hints(
-                    query, native_plan
-                )
-                explicit_plan = self.pg_instance.optimizer().query_plan(
-                    hinted_query
-                )
+                hinted_query = self.pg_instance.hinting().generate_hints(query, native_plan)
+                explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
                 self.assertEqual(native_plan, explicit_plan)
 
     def test_pglab_parallel(self) -> None:
@@ -167,9 +165,7 @@ class StatsHintingTests(regression_suite.PlanTestCase):
 
         posts = pb.TableReference("posts", "p")
         users = pb.TableReference("users", "u")
-        query = pb.parse_query(
-            "SELECT * FROM posts p JOIN users u ON u.id = p.owneruserid"
-        )
+        query = pb.parse_query("SELECT * FROM posts p JOIN users u ON u.id = p.owneruserid")
         plan = pb.QueryPlan(
             "Nested Loop",
             operator=pb.JoinOperator.NestedLoopJoin,
@@ -206,6 +202,4 @@ class RegressionTests(unittest.TestCase):
 
     def test_execute_no_result_set(self) -> None:
         res = self.pg_instance.execute_query("SET geqo TO off")
-        self.assertIsNone(
-            res, "Queries that do not provide a result set should return None"
-        )
+        self.assertIsNone(res, "Queries that do not provide a result set should return None")

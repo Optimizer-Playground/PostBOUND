@@ -21,13 +21,13 @@ from .._hints import (
 )
 from .._qep import QueryPlan
 from ..db import Database, DatabasePool
-from ..qal import SqlQuery
+from ..qal import SelectStatement
 from ..util import nx as nx_utils
 from ._helpers import to_query_plan
 
 
 def _merge_nodes(
-    query: SqlQuery,
+    query: SelectStatement,
     start: JoinTree | TableReference,
     end: JoinTree | TableReference,
 ) -> JoinTree:
@@ -49,14 +49,12 @@ def _merge_nodes(
         A join tree combining the input trees. The `start` node will be the outer node of the tree and the `end` node will be
         the inner node.
     """
-    start = JoinTree.scan(start) if isinstance(start, TableReference) else start
-    end = JoinTree.scan(end) if isinstance(end, TableReference) else end
-    return JoinTree.join(start, end)
+    start = JoinTree.create_scan(start) if isinstance(start, TableReference) else start
+    end = JoinTree.create_scan(end) if isinstance(end, TableReference) else end
+    return JoinTree.create_join(start, end)
 
 
-def _enumerate_join_graph(
-    query: SqlQuery, join_graph: nx.Graph
-) -> Generator[JoinTree, None, None]:
+def _enumerate_join_graph(query: SelectStatement, join_graph: nx.Graph) -> Generator[JoinTree, None, None]:
     """Provides all possible join trees based on a join graph.
 
     Parameters
@@ -89,20 +87,14 @@ def _enumerate_join_graph(
 
     for edge in join_graph.edges:
         start_node, target_node = edge
-        merged_graph = nx.contracted_nodes(
-            join_graph, start_node, target_node, self_loops=False, copy=True
-        )
+        merged_graph = nx.contracted_nodes(join_graph, start_node, target_node, self_loops=False, copy=True)
 
         start_end_tree = _merge_nodes(query, start_node, target_node)
-        start_end_graph = nx.relabel_nodes(
-            merged_graph, {start_node: start_end_tree}, copy=True
-        )
+        start_end_graph = nx.relabel_nodes(merged_graph, {start_node: start_end_tree}, copy=True)
         yield from _enumerate_join_graph(query, start_end_graph)
 
         end_start_tree = _merge_nodes(query, target_node, start_node)
-        end_start_graph = nx.relabel_nodes(
-            merged_graph, {start_node: end_start_tree}, copy=True
-        )
+        end_start_graph = nx.relabel_nodes(merged_graph, {start_node: end_start_tree}, copy=True)
         yield from _enumerate_join_graph(query, end_start_graph)
 
 
@@ -125,12 +117,10 @@ class ExhaustiveJoinOrderEnumerator:
     For now, the underlying algorithm is limited to queries without cross-products.
     """
 
-    def __init__(
-        self, tree_structure: Literal["bushy", "left-deep", "right-deep"] = "bushy"
-    ) -> None:
+    def __init__(self, tree_structure: Literal["bushy", "left-deep", "right-deep"] = "bushy") -> None:
         self._tree_structure = tree_structure
 
-    def all_join_orders_for(self, query: SqlQuery) -> Generator[JoinTree, None, None]:
+    def all_join_orders_for(self, query: SelectStatement) -> Generator[JoinTree, None, None]:
         """Produces a generator for all possible join trees of a query.
 
         Parameters
@@ -162,13 +152,11 @@ class ExhaustiveJoinOrderEnumerator:
             return
         elif len(join_graph.nodes) == 1:
             base_table = list(join_graph.nodes)[0]
-            join_tree = JoinTree.scan(base_table)
+            join_tree = JoinTree.create_scan(base_table)
             yield join_tree
             return
         elif not nx.is_connected(join_graph):
-            raise ValueError(
-                "Cross products are not yet supported for random join order generation!"
-            )
+            raise ValueError("Cross products are not yet supported for random join order generation!")
 
         join_order_hashes = set()
         join_order_generator = _enumerate_join_graph(query, join_graph)
@@ -180,7 +168,7 @@ class ExhaustiveJoinOrderEnumerator:
             join_order_hashes.add(current_hash)
             yield join_order
 
-    def _linear_join_orders(self, query: SqlQuery) -> Generator[JoinTree, None, None]:
+    def _linear_join_orders(self, query: SelectStatement) -> Generator[JoinTree, None, None]:
         """Handler method to generate left-deep or right-deep join orders.
 
         The specific kind of join order is inferred based on the `_tree_structure` attribute.
@@ -252,28 +240,20 @@ class ExhaustiveOperatorEnumerator:
     ) -> None:
         if not include_joins and not include_scans:
             raise ValueError("Cannot exclude both join hints and scan hints")
-        self._db = (
-            database
-            if database is not None
-            else DatabasePool.get_instance().current_database()
-        )
+        self._db = database if database is not None else DatabasePool.get_instance().current_database()
         self._include_scans = include_scans
         self._include_joins = include_joins
         allowed_scan_ops = scan_operators if scan_operators else ScanOperator
         allowed_join_ops = join_operators if join_operators else JoinOperator
         self.allowed_scan_ops = frozenset(
-            scan_op
-            for scan_op in allowed_scan_ops
-            if self._db.hinting().supports_hint(scan_op)
+            scan_op for scan_op in allowed_scan_ops if self._db.hinting().supports_hint(scan_op)
         )
         self.allowed_join_ops = frozenset(
-            join_op
-            for join_op in allowed_join_ops
-            if self._db.hinting().supports_hint(join_op)
+            join_op for join_op in allowed_join_ops if self._db.hinting().supports_hint(join_op)
         )
 
     def all_operator_assignments_for(
-        self, query: SqlQuery, join_order: JoinTree
+        self, query: SelectStatement, join_order: JoinTree
     ) -> Generator[PhysicalOperatorAssignment, None, None]:
         """Produces a generator for all possible operator assignments of the allowed operators.
 
@@ -294,9 +274,9 @@ class ExhaustiveOperatorEnumerator:
             will they specify join directions or parallization data.
         """
         if not self._include_scans:
-            return self._all_join_assignments_for(query, join_order)
+            yield from self._all_join_assignments_for(query, join_order)
         elif not self._include_joins:
-            return self._all_scan_assignments_for(query)
+            yield from self._all_scan_assignments_for(query, join_order)
 
         tables = list(query.tables())
         scan_ops = [list(self.allowed_scan_ops)] * len(tables)
@@ -307,22 +287,18 @@ class ExhaustiveOperatorEnumerator:
             current_scan_pairs = zip(tables, scan_selection)
             current_scan_assignment = PhysicalOperatorAssignment()
             for table, operator in current_scan_pairs:
-                current_scan_assignment.set_scan_operator(
-                    ScanOperatorAssignment(operator, table)
-                )
+                current_scan_assignment.set_scan_operator(ScanOperatorAssignment(operator, table))
 
             for join_selection in itertools.product(*join_ops):
                 current_join_pairs = zip(joins, join_selection)
                 current_total_assignment = current_scan_assignment.clone()
                 for join, operator in current_join_pairs:
-                    current_total_assignment.set_join_operator(
-                        JoinOperatorAssignment(operator, join)
-                    )
+                    current_total_assignment.set_join_operator(JoinOperatorAssignment(operator, join))
 
                 yield current_total_assignment
 
     def _all_join_assignments_for(
-        self, query: SqlQuery, join_order: JoinTree
+        self, query: SelectStatement, join_order: JoinTree
     ) -> Generator[PhysicalOperatorAssignment, None, None]:
         """Specialized handler for assignments that only contain join operators.
 
@@ -349,7 +325,7 @@ class ExhaustiveOperatorEnumerator:
             yield assignment
 
     def _all_scan_assignments_for(
-        self, query: SqlQuery, join_order: JoinTree
+        self, query: SelectStatement, join_order: JoinTree
     ) -> Generator[PhysicalOperatorAssignment, None, None]:
         """Specialized handler for assignments that only contain scan operators.
 
@@ -408,7 +384,7 @@ class ExhaustivePlanEnumerator:
         self._join_order_generator = ExhaustiveJoinOrderEnumerator(**join_order_args)
         self._operator_generator = ExhaustiveOperatorEnumerator(**operator_args)
 
-    def all_plans_for(self, query: SqlQuery) -> Generator[QueryPlan, None, None]:
+    def all_plans_for(self, query: SelectStatement) -> Generator[QueryPlan, None, None]:
         """Produces a generator for all possible query plans of an input query.
 
         The structure of the provided plans can be restricted by configuring the underlying services. Consult the class-level
@@ -425,9 +401,5 @@ class ExhaustivePlanEnumerator:
             A generator producing all possible query plans
         """
         for join_order in self._join_order_generator.all_join_orders_for(query):
-            for (
-                operator_assignment
-            ) in self._operator_generator.all_operator_assignments_for(
-                query, join_order
-            ):
-                yield to_query_plan(join_order, operator_assignment)
+            for operator_assignment in self._operator_generator.all_operator_assignments_for(query, join_order):
+                yield to_query_plan(join_order, physical_ops=operator_assignment)
