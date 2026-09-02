@@ -27,7 +27,7 @@ from ._stages import (
 )
 from .db import Database, DatabasePool, ResultSet
 from .postgres import PostgresInterface
-from .qal import SelectStatement
+from .qal import SqlQuery
 from .train import TrainingData, TrainingDataRepository, TrainingMetrics
 from .util._errors import StateError
 from .util.jsonize import jsondict
@@ -80,7 +80,7 @@ class OptimizationPipeline(abc.ABC):
     """
 
     @abc.abstractmethod
-    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
+    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         """Applies the current pipeline configuration to obtain an optimized plan for the input query.
 
         Parameters
@@ -106,7 +106,7 @@ class OptimizationPipeline(abc.ABC):
         """
         raise NotImplementedError
 
-    def optimize_query(self, query: SelectStatement) -> SelectStatement:
+    def optimize_query(self, query: SqlQuery) -> SqlQuery:
         """Applies the current pipeline configuration to optimize the input query.
 
         This process also involves the generation of appropriate optimization information that enforces the selected
@@ -261,7 +261,7 @@ class OptimizationPipeline(abc.ABC):
         return any(stage.uses_online_feedback() for stage in self.stages())
 
     def learn_from_feedback(
-        self, query: SelectStatement, result_set: ResultSet, *, exec_time: TimeMs
+        self, query: SqlQuery, result_set: ResultSet, *, exec_time: TimeMs
     ) -> Mapping[str, TrainingMetrics]:
         """Trains all optimization stages that require training on actual query executions.
 
@@ -414,7 +414,7 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
         self._build = True
         return self
 
-    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
+    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         if not self._build:
             raise StateError(
                 "No algorithm has been selected. Don't forget to call `build()` after setting the algorithm."
@@ -598,7 +598,7 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         self._build = True
         return self
 
-    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
+    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         if not self._build:
             raise StateError("Pipeline has not been build")
         self._support_check.check_supported_query(query).ensure_all_passed(query)
@@ -940,11 +940,11 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
     def target_database(self) -> Database:
         return self.target_db
 
-    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
+    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         optimized_query = self.optimize_query(query)
         return self.target_db.optimizer().query_plan(optimized_query)
 
-    def optimize_query(self, query: SelectStatement) -> SelectStatement:
+    def optimize_query(self, query: SqlQuery) -> SqlQuery:
         self._assert_is_build()
         assert self._pre_check is not None
         supported_query_check = self._pre_check.check_supported_query(query)
@@ -1122,7 +1122,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
     def target_database(self) -> Database:
         return self.target_db
 
-    def query_execution_plan(self, query: SelectStatement) -> QueryPlan:
+    def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         self._ensure_supported_query(query)
         current_plan = (
             self.initial_plan_generator.optimize_query(query)
@@ -1196,7 +1196,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
                 continue
             incremental_step.pre_check().check_supported_database_system(database).ensure_all_passed(database)
 
-    def _ensure_supported_query(self, query: SelectStatement) -> None:
+    def _ensure_supported_query(self, query: SqlQuery) -> None:
         """Applies all relevant pre-checks to the input query.
 
         Parameters

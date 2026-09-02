@@ -30,7 +30,7 @@ from .qal import (
     DirectTableSource,
     FunctionTableSource,
     JoinTableSource,
-    SelectStatement,
+    SqlQuery,
     SubqueryTableSource,
     TableSource,
     ValuesTableSource,
@@ -117,7 +117,7 @@ class PreCheckResult:
         """
         return PreCheckResult(False, failure)
 
-    def ensure_all_passed(self, context: SelectStatement | Database | None = None) -> None:
+    def ensure_all_passed(self, context: SqlQuery | Database | None = None) -> None:
         """Raises an error if the check contains any failures.
 
         Depending on the context, a more specific error can be raised. The context is used to infer whether an optimization
@@ -142,7 +142,7 @@ class PreCheckResult:
             return
         if context is None:
             raise util.StateError(f"Pre check failed {self._generate_failure_str()}")
-        elif isinstance(context, SelectStatement):
+        elif isinstance(context, SqlQuery):
             raise UnsupportedQueryError(context, self.failure_reason)
         elif isinstance(context, Database):
             raise UnsupportedSystemError(context, self.failure_reason)
@@ -177,7 +177,7 @@ class UnsupportedQueryError(RuntimeError):
         The features of the query that are unsupported. Defaults to an empty string
     """
 
-    def __init__(self, query: SelectStatement, features: str | list[str] = "") -> None:
+    def __init__(self, query: SqlQuery, features: str | list[str] = "") -> None:
         if isinstance(features, list):
             features = ", ".join(features)
         features_str = f" [{features}]" if features else ""
@@ -228,7 +228,7 @@ class OptimizationPreCheck(abc.ABC):
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         """Validates that a specific query does not contain any features that cannot be handled by an optimization strategy.
 
         Examples of such features can be non-equi join predicates, dependent subqueries or aggregations.
@@ -299,7 +299,7 @@ class EmptyPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("empty")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         return PreCheckResult.with_all_passed()
 
     def describe(self) -> dict:
@@ -328,7 +328,7 @@ class CompoundCheck(OptimizationPreCheck):
         )
         self.checks = [check for check in checks if not isinstance(check, EmptyPreCheck)]
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         check_results = [check.check_supported_query(query) for check in self.checks]
         aggregated_passed = all(check_result.passed for check_result in check_results)
         aggregated_failures = (
@@ -393,7 +393,7 @@ class ImplicitQueryPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("implicit-query")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         passed = query.has_simple_from()
         failure_reason = "" if passed else ImplicitFromClauseFailure
         return PreCheckResult(passed, failure_reason)
@@ -408,7 +408,7 @@ class CrossProductPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-cross-products")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         no_cross_products = nx.is_connected(query.predicates().join_graph())
         failure_reason = "" if no_cross_products else CrossProductFailure
         return PreCheckResult(no_cross_products, failure_reason)
@@ -423,7 +423,7 @@ class VirtualTablesPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-virtual-tables")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         no_virtual_tables = all(not table.virtual for table in query.tables())
         failure_reason = "" if no_virtual_tables else VirtualTablesFailure
         return PreCheckResult(no_virtual_tables, failure_reason)
@@ -443,7 +443,7 @@ class EquiJoinPreCheck(OptimizationPreCheck):
         self._allow_conjunctions = allow_conjunctions
         self._allow_nesting = allow_nesting
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         join_predicates = query.predicates().joins()
         all_passed = all(self._perform_predicate_check(join_pred) for join_pred in join_predicates)
         failure_reason = "" if all_passed else EquiJoinFailure
@@ -536,7 +536,7 @@ class InnerJoinPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("inner-joins-only")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if not query.from_clause:
             return PreCheckResult.with_all_passed()
 
@@ -567,7 +567,7 @@ class SubqueryPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-subqueries")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         return (
             PreCheckResult.with_all_passed() if not query.subqueries() else PreCheckResult.with_failure(SubqueryFailure)
         )
@@ -582,7 +582,7 @@ class DependentSubqueryPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-dependent-subquery")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         passed = not any(subquery.is_dependent() for subquery in query.subqueries())
         failure_reason = "" if passed else DependentSubqueryFailure
         return PreCheckResult(passed, failure_reason)
@@ -597,7 +597,7 @@ class SetOperationsPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-set-operations")
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         passed = not query.is_set_query()
         failure_reason = "" if passed else "SET_OPERATION"
         return PreCheckResult(passed, failure_reason)
@@ -654,14 +654,14 @@ class CustomCheck(OptimizationPreCheck):
         self,
         name: str = "custom-check",
         *,
-        query_check: Optional[Callable[[SelectStatement], PreCheckResult]] = None,
+        query_check: Optional[Callable[[SqlQuery], PreCheckResult]] = None,
         db_check: Optional[Callable[[Database], PreCheckResult]] = None,
     ) -> None:
         super().__init__(name)
         self._query_check = query_check
         self._db_check = db_check
 
-    def check_supported_query(self, query: SelectStatement) -> PreCheckResult:
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if self._query_check is None:
             return PreCheckResult.with_all_passed()
         return self._query_check(query)

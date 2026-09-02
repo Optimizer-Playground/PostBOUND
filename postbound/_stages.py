@@ -10,16 +10,14 @@ from ._core import Cardinality, Cost, TableReference, TimeMs
 from ._hints import JoinTree, PhysicalOperatorAssignment, PlanParameterization
 from ._qep import QueryPlan
 from .db import Database, DatabasePool, ResultSet
-from .qal import SelectStatement
+from .qal import SqlQuery
 from .train import TrainingData, TrainingMetrics, TrainingSpec
 from .util.jsonize import jsondict
 from .validation import EmptyPreCheck, OptimizationPreCheck
 from .workloads import Workload
 
 
-def _missing_method_impls(
-    child_cls: Type, base_cls: Type, *, methods: list[str]
-) -> list[str]:
+def _missing_method_impls(child_cls: Type, base_cls: Type, *, methods: list[str]) -> list[str]:
     """Scan the `child_cls` for methods that are implemented in the `base_cls` but not overridden in the `child_cls`.
 
     This check fails gracefully if none of the methods are implemented. This behavior is used to simulate our "poor man's
@@ -121,18 +119,14 @@ class OptimizationStage:
     """
 
     def __new__(cls, *args, **kwargs) -> Self:
-        missing = _missing_method_impls(
-            cls, OptimizationStage, methods=["fit_database", "database_fit_completed"]
-        )
+        missing = _missing_method_impls(cls, OptimizationStage, methods=["fit_database", "database_fit_completed"])
         if missing:
             raise NotImplementedError(
                 f"Optimization stage '{cls.__name__}' needs to implement all methods for "
                 f"data-based training, but is currently lacking an implementation for {missing}"
             )
 
-        missing = _missing_method_impls(
-            cls, OptimizationStage, methods=["fit_workload", "workload_fit_completed"]
-        )
+        missing = _missing_method_impls(cls, OptimizationStage, methods=["fit_workload", "workload_fit_completed"])
         if missing:
             raise NotImplementedError(
                 f"Optimization stage '{cls.__name__}' needs to implement all methods for "
@@ -167,9 +161,7 @@ class OptimizationStage:
         If this method is implemented, `database_fit_completed` method has to be implemented as well. Otherwise, PostBOUND will
         raise an error when an instance of this stage is created.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not learn from the database"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not learn from the database")
 
     def database_fit_completed(self) -> bool:
         """Checks, if a data-driven optimization stage has already been trained on the target database.
@@ -179,9 +171,7 @@ class OptimizationStage:
         If this method is implemented, `fit_database` method has to be implemented as well. Otherwise, PostBOUND will raise an
         error when an instance of this stage is created.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not learn from the database"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not learn from the database")
 
     @classmethod
     def requires_data_training(cls) -> bool:
@@ -210,9 +200,7 @@ class OptimizationStage:
         If this method is implemented, `workload_fit_completed` method has to be implemented as well. Otherwise, PostBOUND will
         raise an error when an instance of this stage is created.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not learn from workloads"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not learn from workloads")
 
     def workload_fit_completed(self) -> bool:
         """Checks, if a workload-driven optimization stage has already been trained on the target workload.
@@ -222,9 +210,7 @@ class OptimizationStage:
         If this method is implemented, `fit_workload` method has to be implemented as well. Otherwise, PostBOUND will raise an
         error when an instance of this stage is created.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not learn from workloads"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not learn from workloads")
 
     @classmethod
     def requires_workload_training(cls) -> bool:
@@ -253,9 +239,7 @@ class OptimizationStage:
         If this method is implemented, `sample_spec` and `sample_fit_completed` methods have to be implemented as well.
         Otherwise, PostBOUND will raise an error when an instance of this stage is created.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not require training samples"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not require training samples")
 
     def sample_spec(self) -> TrainingSpec:
         """Describes the structure of the training samples that are required to train this optimization stage.
@@ -270,9 +254,7 @@ class OptimizationStage:
         If this method is implemented, `fit_samples` and `sample_fit_completed` methods have to be implemented as well.
         Otherwise, PostBOUND will raise an error when an instance of this stage is created.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not require training samples"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not require training samples")
 
     def sample_fit_completed(self) -> bool:
         """Checks, if a sample-driven optimization stage has already been trained.
@@ -282,9 +264,7 @@ class OptimizationStage:
         If this method is implemented, `fit_samples` and `sample_spec` methods have to be implemented as well.
         Otherwise, PostBOUND will raise an error when an instance of this stage is created.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not require training samples"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not require training samples")
 
     @classmethod
     def requires_sample_training(cls) -> bool:
@@ -299,9 +279,7 @@ class OptimizationStage:
         """
         return getattr(cls, "fit_samples", None) != OptimizationStage.fit_samples
 
-    def learn_from_feedback(
-        self, query: SelectStatement, result_set: ResultSet, *, exec_time: TimeMs
-    ) -> TrainingMetrics:
+    def learn_from_feedback(self, query: SqlQuery, result_set: ResultSet, *, exec_time: TimeMs) -> TrainingMetrics:
         """Performs online learning based on the execution of a past query.
 
         This method is automatically called by the benchmarking tools after each query is executed. Only valid runs are
@@ -323,9 +301,7 @@ class OptimizationStage:
         -----
         This method stands on its own and does not require any other methods to be implemented.
         """
-        raise NotImplementedError(
-            f"OptimizationStage {self.name} does not learn online"
-        )
+        raise NotImplementedError(f"OptimizationStage {self.name} does not learn online")
 
     @classmethod
     def uses_online_feedback(cls) -> bool:
@@ -338,10 +314,7 @@ class OptimizationStage:
         -----
         This method uses reflection on the optimization stage and does not need to be implemented/overridden by the client.
         """
-        return (
-            getattr(cls, "learn_from_feedback", None)
-            != OptimizationStage.learn_from_feedback
-        )
+        return getattr(cls, "learn_from_feedback", None) != OptimizationStage.learn_from_feedback
 
     def pre_check(self) -> OptimizationPreCheck:
         """Provides requirements that input query or database system have to satisfy for the optimizer to work properly.
@@ -395,7 +368,7 @@ class CompleteOptimizationAlgorithm(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def optimize_query(self, query: SelectStatement) -> QueryPlan:
+    def optimize_query(self, query: SqlQuery) -> QueryPlan:
         """Constructs the optimized execution plan for an input query.
 
         Parameters
@@ -434,7 +407,7 @@ class JoinOrderOptimization(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def optimize_join_order(self, query: SelectStatement) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
         """Performs the actual join ordering process.
 
         The join tree can be further annotated with an initial operator assignment, if that is an inherent part of
@@ -471,12 +444,8 @@ class JoinOrderOptimizationError(RuntimeError):
         A message containing more details about the specific error. Defaults to an empty string.
     """
 
-    def __init__(self, query: SelectStatement, message: str = "") -> None:
-        super().__init__(
-            f"Join order optimization failed for query {query}"
-            if not message
-            else message
-        )
+    def __init__(self, query: SqlQuery, message: str = "") -> None:
+        super().__init__(f"Join order optimization failed for query {query}" if not message else message)
         self.query = query
 
 
@@ -504,9 +473,7 @@ class PhysicalOperatorSelection(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def select_physical_operators(
-        self, query: SelectStatement, join_order: Optional[JoinTree]
-    ) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SqlQuery, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
         """Performs the operator assignment.
 
         Parameters
@@ -558,7 +525,7 @@ class ParameterGeneration(OptimizationStage, abc.ABC):
     @abc.abstractmethod
     def generate_plan_parameters(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         join_order: Optional[JoinTree],
         operator_assignment: Optional[PhysicalOperatorAssignment],
     ) -> PlanParameterization:
@@ -638,11 +605,11 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         super().__init__()
         self.allow_cross_products = allow_cross_products
         self.target_db: Database = None  # type: ignore
-        self.query: SelectStatement = None  # type: ignore
+        self.query: SqlQuery = None  # type: ignore
 
     @abc.abstractmethod
     def calculate_estimate(
-        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         """Determines the cardinality of a specific intermediate.
 
@@ -661,7 +628,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         """
         raise NotImplementedError
 
-    def initialize(self, target_db: Database, query: SelectStatement) -> None:
+    def initialize(self, target_db: Database, query: SqlQuery) -> None:
         """Hook method that is called before the actual optimization process starts.
 
         This method can be overwritten to set up any necessary data structures, etc. and will be called before each query.
@@ -688,9 +655,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         self.target_db = None  # type: ignore
         self.query = None  # type: ignore
 
-    def generate_intermediates(
-        self, query: SelectStatement
-    ) -> Generator[frozenset[TableReference], None, None]:
+    def generate_intermediates(self, query: SqlQuery) -> Generator[frozenset[TableReference], None, None]:
         """Provides all intermediate results of a query.
 
         The inclusion of cross-products between arbitrary tables can be configured via the `allow_cross_products` attribute.
@@ -719,7 +684,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
                 continue
             yield frozenset(candidate_join)
 
-    def estimate_cardinalities(self, query: SelectStatement) -> PlanParameterization:
+    def estimate_cardinalities(self, query: SqlQuery) -> PlanParameterization:
         """Produces all cardinality estimates for a specific query.
 
         The default implementation of this method delegates the actual estimation to the `calculate_estimate` method. It is
@@ -745,7 +710,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
 
     def generate_plan_parameters(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         join_order: Optional[JoinTree],
         operator_assignment: Optional[PhysicalOperatorAssignment],
     ) -> PlanParameterization:
@@ -785,7 +750,7 @@ class CostModel(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def estimate_cost(self, query: SelectStatement, plan: QueryPlan) -> Cost:
+    def estimate_cost(self, query: SqlQuery, plan: QueryPlan) -> Cost:
         """Computes the cost estimate for a specific plan.
 
         The following conventions are used for the estimation: the root node of the plan will not have any cost set. However,
@@ -814,7 +779,7 @@ class CostModel(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
-    def initialize(self, target_db: Database, query: SelectStatement) -> None:
+    def initialize(self, target_db: Database, query: SqlQuery) -> None:
         """Hook method that is called before the actual optimization process starts.
 
         This method can be overwritten to set up any necessary data structures, etc. and will be called before each query.
@@ -871,7 +836,7 @@ class PlanEnumerator(OptimizationStage, abc.ABC):
     @abc.abstractmethod
     def generate_execution_plan(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         *,
         cost_model: CostModel,
         cardinality_estimator: CardinalityEstimator,
@@ -924,7 +889,7 @@ class IncrementalOptimizationStep(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def optimize_query(self, query: SelectStatement, current_plan: QueryPlan) -> QueryPlan:
+    def optimize_query(self, query: SqlQuery, current_plan: QueryPlan) -> QueryPlan:
         """Determines the next query plan.
 
         If no further optimization steps are configured in the pipeline, this is also the final query plan.
@@ -980,11 +945,7 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
         plan_parameterization: Optional[ParameterGeneration] = None,
     ) -> None:
         super().__init__()
-        self.database = (
-            database
-            if database is not None
-            else DatabasePool.get_instance().current_database()
-        )
+        self.database = database if database is not None else DatabasePool.get_instance().current_database()
         if all(
             stage is None
             for stage in (
@@ -1017,11 +978,9 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
         assert self._plan_parameterization is not None
         return self._plan_parameterization
 
-    def optimize_query(self, query: SelectStatement) -> QueryPlan:
+    def optimize_query(self, query: SqlQuery) -> QueryPlan:
         join_order = (
-            self._join_order_optimizer.optimize_join_order(query)
-            if self._join_order_optimizer is not None
-            else None
+            self._join_order_optimizer.optimize_join_order(query) if self._join_order_optimizer is not None else None
         )
         physical_operators = (
             self._operator_selection.select_physical_operators(query, None)
