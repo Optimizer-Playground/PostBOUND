@@ -2071,12 +2071,34 @@ def _apply_extra_clauses(
 
 
 @overload
+def parse_query(query: str) -> SqlQuery: ...
+
+
+@overload
+def parse_query(query: str, *, accept_set_query: Literal[True]) -> SqlQuery: ...
+
+
+@overload
+def parse_query(query: str, *, accept_set_query: Literal[False]) -> SelectStatement: ...
+
+
+@overload
+def parse_query(query: str, *, accept_set_query: Literal[True], include_hints: bool) -> SqlQuery: ...
+
+
+@overload
+def parse_query(query: str, *, accept_set_query: Literal[False], include_hints: bool) -> SelectStatement: ...
+
+
+@overload
 def parse_query(
-    query: str,
-    *,
-    include_hints: bool = True,
-    bind_columns: bool | None = None,
-    db_schema: Optional[DatabaseSchema] = None,
+    query: str, *, accept_set_query: Literal[True], include_hints: bool, bind_columns: Optional[bool]
+) -> SqlQuery: ...
+
+
+@overload
+def parse_query(
+    query: str, *, accept_set_query: Literal[False], include_hints: bool, bind_columns: Optional[bool]
 ) -> SelectStatement: ...
 
 
@@ -2085,9 +2107,9 @@ def parse_query(
     query: str,
     *,
     accept_set_query: Literal[True],
-    include_hints: bool = True,
-    bind_columns: Optional[bool] = None,
-    db_schema: Optional[DatabaseSchema] = None,
+    include_hints: bool,
+    bind_columns: Optional[bool],
+    db_schema: Optional[DatabaseSchema],
 ) -> SqlQuery: ...
 
 
@@ -2096,10 +2118,62 @@ def parse_query(
     query: str,
     *,
     accept_set_query: Literal[False],
-    include_hints: bool = True,
-    bind_columns: Optional[bool] = None,
-    db_schema: Optional[DatabaseSchema] = None,
+    include_hints: bool,
+    bind_columns: Optional[bool],
+    db_schema: Optional[DatabaseSchema],
 ) -> SelectStatement: ...
+
+
+@overload
+def parse_query(
+    query: str,
+    *,
+    include_hints: bool,
+) -> SqlQuery: ...
+
+
+@overload
+def parse_query(
+    query: str,
+    *,
+    include_hints: bool,
+    bind_columns: Optional[bool],
+) -> SqlQuery: ...
+
+
+@overload
+def parse_query(
+    query: str,
+    *,
+    include_hints: bool,
+    bind_columns: Optional[bool],
+    db_schema: Optional[DatabaseSchema],
+) -> SqlQuery: ...
+
+
+@overload
+def parse_query(
+    query: str,
+    *,
+    bind_columns: Optional[bool],
+) -> SqlQuery: ...
+
+
+@overload
+def parse_query(
+    query: str,
+    *,
+    bind_columns: Optional[bool],
+    db_schema: Optional[DatabaseSchema],
+) -> SqlQuery: ...
+
+
+@overload
+def parse_query(
+    query: str,
+    *,
+    db_schema: Optional[DatabaseSchema],
+) -> SqlQuery: ...
 
 
 def parse_query(
@@ -2127,9 +2201,9 @@ def parse_query(
     query : str
         The query to parse
     accept_set_query : bool, optional
-        Whether set queries are a valid result of the parsing process. If this is *False* (the default), an error will be
-        raised if the input query is a set query. This implies that the result of the parsing process is always a `SqlQuery`
-        instance. Otherwise, the result can also be a `SetQuery` instance.
+        Whether set queries are a valid result of the parsing process. If this is *False*, an error will be raised if
+        the input query is a set query. This implies that the result of the parsing process is always a
+        `SelectStatement` instance. Otherwise, the result can also be a `SetQuery` instance.
     include_hints : bool, optional
         Whether to include hints in the parsed query. If this is *True* (the default), any preceding comments in the query
         text will be parsed as a hint block. Otherwise, these comments are simply ignored.

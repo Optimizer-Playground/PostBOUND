@@ -7543,7 +7543,7 @@ class UnionClause(SetOpClause):
         matter.
     union_all : bool, optional
         Whether the *UNION* operation should eliminate duplicates or not. Defaults to *False* which indicates that
-        duplicates should be eliminated.
+        duplicates should be kept.
     """
 
     def __init__(
@@ -7599,7 +7599,7 @@ class UnionClause(SetOpClause):
         Returns
         -------
         bool
-            *True* if duplicates are eliminated, *False* otherwise.
+            *True* if duplicates are kept, *False* otherwise.
         """
         return self._union_all
 
@@ -7609,7 +7609,7 @@ class UnionClause(SetOpClause):
         Returns
         -------
         bool
-            *True* if duplicates are eliminated, *False* otherwise.
+            *True* if duplicates are kept, *False* otherwise.
         """
         return self._union_all
 
@@ -8001,15 +8001,10 @@ class SqlQuery(ABC):
         return self.orderby_clause is not None
 
     def is_dependent(self) -> bool:
-        """Checks, whether all columns that are referenced in this query are provided by the tables from this query.
+        """Checks, whether a column referenced in this query is not provided by any of the tables from this query.
 
-        In order for this check to work, all columns have to be bound to actual tables, i.e. the `tables` attribute of all
-        column references have to be set to a valid object.
-
-        Returns
-        -------
-        bool
-            Whether all columns belong to tables that are bound by this query
+        In order for this check to work, all columns have to be bound to actual tables, i.e. the `tables` attribute of
+        all column references have to be set to a valid object.
         """
         return not (self.tables() <= self.bound_tables())
 
@@ -9211,22 +9206,6 @@ class SetQuery(SqlQuery):
         """Placeholder method to ensure compatibility with the `SqlQuery` interface. Raises a `QueryTypeError`."""
         raise QueryTypeError(
             "You are trying to access the HAVING clause on a set query. "
-            "Make sure to check the actual query type before accessing specific clauses."
-        )
-
-    def is_implicit(self) -> bool:
-        """Placeholder method to ensure compatibility with the `SqlQuery` interface. Raises a `QueryTypeError`."""
-        raise QueryTypeError(
-            "You are accessing a set query. "
-            "Set queries are neither explicit nor implicit. "
-            "Make sure to check the actual query type before accessing specific clauses."
-        )
-
-    def is_explicit(self) -> bool:
-        """Placeholder method to ensure compatibility with the `SqlQuery` interface. Raises a `QueryTypeError`."""
-        raise QueryTypeError(
-            "You are accessing a set query. "
-            "Set queries are neither explicit nor implicit. "
             "Make sure to check the actual query type before accessing specific clauses."
         )
 
