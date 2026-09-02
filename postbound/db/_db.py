@@ -16,17 +16,13 @@ interface.
 
 from __future__ import annotations
 
-import abc
-import atexit
 import bisect
 import collections
-import json
-import os
 import textwrap
-import warnings
+from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime
 from typing import Any, Literal, Optional, Protocol, Type, overload, runtime_checkable
 
 import networkx as nx
@@ -72,19 +68,19 @@ class Cursor(Protocol):
     See PEP 249 for details (https://peps.python.org/pep-0249/)
     """
 
-    @abc.abstractmethod
+    @abstractmethod
     def close(self) -> None:
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def execute(self, operation: str, parameters: Optional[dict | Sequence] = None) -> Optional[Cursor]:
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def fetchone(self) -> Optional[ResultRow]:
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def fetchall(self) -> Optional[ResultSet]:
         raise NotImplementedError
 
@@ -102,11 +98,11 @@ class Connection(Protocol):
     See PEP 249 for details (https://peps.python.org/pep-0249/)
     """
 
-    @abc.abstractmethod
+    @abstractmethod
     def close(self) -> None:
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def cursor(self) -> Cursor:
         raise NotImplementedError
 
@@ -118,7 +114,7 @@ class PrewarmingSupport(Protocol):
     If so, they should implement this protocol to allow other parts of the framework to exploit this feature.
     """
 
-    @abc.abstractmethod
+    @abstractmethod
     def prewarm_tables(
         self,
         tables: Optional[TableReference | Iterable[TableReference]] = None,
@@ -276,40 +272,7 @@ def simplify_result_set(result_set: ResultSet | None) -> Any:
     return result_set
 
 
-class _DBCacheJsonEncoder(json.JSONEncoder):
-    def default(self, o: Any) -> Any:
-        if isinstance(o, datetime):
-            return {"$datetime": o.isoformat()}
-        elif isinstance(o, date):
-            return {"$date": o.isoformat()}
-        elif isinstance(o, time):
-            return {"$time": o.isoformat()}
-        elif isinstance(o, timedelta):
-            return {"$timedelta": o.total_seconds()}
-        return super().default(o)
-
-
-class _DBCacheJsonDecoder(json.JSONDecoder):
-    def __init__(self, *args, **kwargs):
-        self._second_hook = kwargs.get("object_hook")
-        super().__init__(object_hook=self.object_hook, *args, **kwargs)
-
-    def object_hook(self, obj: Any) -> Any:
-        if self._second_hook:
-            return self._second_hook(obj)
-
-        if "$datetime" in obj:
-            return datetime.fromisoformat(obj["$datetime"])
-        elif "$date" in obj:
-            return date.fromisoformat(obj["$date"])
-        elif "$time" in obj:
-            return time.fromisoformat(obj["$time"])
-        elif "$timedelta" in obj:
-            return timedelta(seconds=obj["$timedelta"])
-        return obj
-
-
-class Database(abc.ABC):
+class Database(ABC):
     """A `Database` is PostBOUND's logical abstraction of physical database management systems.
 
     It provides high-level access to internal functionality provided by such systems. More specifically, each
@@ -351,16 +314,10 @@ class Database(abc.ABC):
     cache file, which in turn depends on the system name, system version and database name of the connection.
     """
 
-    def __init__(self, system_name: str, *, cache_enabled: bool = True) -> None:
+    def __init__(self, system_name: str) -> None:
         self.system_name = system_name
 
-        self._cache_enabled = cache_enabled
-        self._query_cache: dict[str, ResultSet] = {}
-        if self._cache_enabled:
-            self._inflate_query_cache()
-        atexit.register(self.close)
-
-    @abc.abstractmethod
+    @abstractmethod
     def schema(self) -> DatabaseSchema:
         """Provides access to the underlying schema information of the database.
 
@@ -372,7 +329,7 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def statistics(self) -> DatabaseStatistics:
         """Provides access to the current statistics of the database.
 
@@ -391,7 +348,7 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def hinting(self) -> HintService:
         """Provides access to the hint generation facilities for the current database system.
 
@@ -402,7 +359,7 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def optimizer(self) -> OptimizerInterface:
         """Provides access to optimizer-related functionality of the database system.
 
@@ -418,12 +375,20 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @overload
+    def execute_query(self, query: SqlQuery | str) -> Any: ...
+
+    @overload
+    def execute_query(self, query: SqlQuery | str, *, raw: Literal[True]) -> ResultSet: ...
+
+    @overload
+    def execute_query(self, query: SqlQuery | str, *, raw: Literal[False]) -> Any: ...
+
+    @abstractmethod
     def execute_query(
         self,
         query: SqlQuery | str,
         *,
-        cache_enabled: Optional[bool] = None,
         raw: bool = False,
     ) -> Any:
         """Executes the given query and returns the associated result set.
@@ -499,7 +464,7 @@ class Database(abc.ABC):
             )
         return self.optimizer().query_plan(query)
 
-    @abc.abstractmethod
+    @abstractmethod
     def database_name(self) -> str:
         """Provides the name of the (physical) database that the database interface is connected to.
 
@@ -510,7 +475,7 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    def database_system_name(self) -> str:
+    def dbms_name(self) -> str:
         """Provides the name of the database management system that this interface is connected to.
 
         Returns
@@ -520,8 +485,8 @@ class Database(abc.ABC):
         """
         return self.system_name
 
-    @abc.abstractmethod
-    def database_system_version(self) -> util.Version:
+    @abstractmethod
+    def dbms_version(self) -> util.Version:
         """Returns the release version of the database management system that this interface is connected to.
 
         Returns
@@ -531,7 +496,7 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def describe(self) -> jsondict:
         """Provides a representation of the current database connection as well as its system settings.
 
@@ -541,7 +506,7 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def reset_connection(self) -> Any:
         """Obtains a new network connection for the database. Useful for debugging purposes or in case of crashes.
 
@@ -564,7 +529,7 @@ class Database(abc.ABC):
         """Removes all results from the query cache. Useful for debugging purposes."""
         self._query_cache = {}
 
-    @abc.abstractmethod
+    @abstractmethod
     def cursor(self) -> Cursor:
         """Provides a cursor to execute queries and iterate over result sets manually.
 
@@ -581,7 +546,7 @@ class Database(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def close(self) -> None:
         """Shuts down all currently open connections to the database."""
         raise NotImplementedError
@@ -590,107 +555,22 @@ class Database(abc.ABC):
         """Checks, whether the database interface supports a specific protocol."""
         return isinstance(self, support)
 
-    def _get_cache_enabled(self) -> bool:
-        """Getter for the `cache_enabled` property.
-
-        Returns
-        -------
-        bool
-            Whether caching is currently enabled
-        """
-        return self._cache_enabled
-
-    def _set_cache_enabled(self, enabled: bool) -> None:
-        """Setter for the `cache_enabled` property. Inflates the query cache if necessary.
-
-        If the cache should be enabled now, but no cached data exists, the cache will be inflated from disk.
-
-        Parameters
-        ----------
-        enabled : bool
-            Whether caching should be enabled
-        """
-        if enabled and not self._query_cache:
-            self._inflate_query_cache()
-        self._cache_enabled = enabled
-
-    cache_enabled = property(_get_cache_enabled, _set_cache_enabled)
-    """Controls, whether the results of executed queries should be cached to prevent future re-execution.
-
-    If caching should be enabled later on and no cached data exists, the cache will be inflated from disk.
-    """
-
-    def _inflate_query_cache(self) -> None:
-        """Tries to read the query cache for this database.
-
-        This reads a JSON file that contains all cached queries and their result sets. It should not be edited
-        manually.
-        """
-        if self._query_cache:
-            return
-        query_cache_name = self._query_cache_name()
-        if os.path.isfile(query_cache_name):
-            with open(query_cache_name, "r") as cache_file:
-                try:
-                    self._query_cache = json.load(cache_file, cls=_DBCacheJsonDecoder)
-                except json.JSONDecodeError as e:
-                    warnings.warn(
-                        f"Could not read query cache: {e}",
-                        category=QueryCacheWarning,
-                        stacklevel=4,
-                    )
-                    self._query_cache = {}
-        else:
-            warnings.warn(
-                f"Could not read query cache: File {query_cache_name} does not exist",
-                category=QueryCacheWarning,
-                stacklevel=4,
-            )
-            self._query_cache = {}
-        atexit.register(self._store_query_cache, query_cache_name)
-
-    def _store_query_cache(self, query_cache_name: str) -> None:
-        """Stores the query cache into a JSON file.
-
-        Parameters
-        ----------
-        query_cache_name : str
-            The path where to write the file to. If it exists, it will be overwritten.
-        """
-        with open(query_cache_name, "w") as cache_file:
-            json.dump(self._query_cache, cache_file, cls=_DBCacheJsonEncoder)
-
-    def _query_cache_name(self) -> str:
-        """Provides a normalized file name for the query cache.
-
-        Returns
-        -------
-        str
-            The cache file name. It consists of the database system name, system version and the name of the database
-        """
-        identifier = "_".join(
-            [
-                self.database_system_name(),
-                self.database_system_version().formatted(prefix="v", separator="_"),
-                self.database_name(),
-            ]
-        )
-        return f".query_cache_{identifier}.json"
-
     def __json__(self) -> jsondict:
         return self.describe()
 
+    @abstractmethod
     def __hash__(self) -> int:
-        return hash(self._query_cache_name())
+        raise NotImplementedError
 
+    @abstractmethod
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, type(self)) and self._query_cache_name() == other._query_cache_name()
+        raise NotImplementedError
 
     def __repr__(self) -> str:
         return str(self)
 
     def __str__(self) -> str:
-        return f"{self.database_name()} @ {self.database_system_name()} ({self.database_system_version()})"
+        return f"{self.database_name()} @ {self.dbms_name()} ({self.dbms_version()})"
 
 
 ForeignKeyRef = collections.namedtuple("ForeignKeyRef", ["fk_col", "referenced_col"])
@@ -735,7 +615,7 @@ class TableInfo(Mapping[BoundColumnReference, ColumnInfo]):
         return iter(column_info.column for column_info in self.columns)
 
 
-class DatabaseSchema(abc.ABC, Mapping[TableReference, TableInfo]):
+class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
     """This interface provides access to different information about the logical structure of a database.
 
     In contrast to database statistics, schema information is much more standardized. PostBOUND therefore only takes on
@@ -1649,6 +1529,10 @@ class MostCommonValues[T]:
         The value, frequency pairs in the list.
     """
 
+    @staticmethod
+    def empty() -> MostCommonValues:
+        return MostCommonValues([])
+
     def __init__(self, mcvs: Iterable[tuple[T, int]]) -> None:
         self.mcvs: Sequence[tuple[T, int]] = list(mcvs)
         self.mcvs.sort(key=lambda pair: (-pair[1], (pair[0] is not None), pair[0]))
@@ -1997,7 +1881,10 @@ class Histogram[T: _HistElem]:
         return f"Histogram(buckets=[{buckets}], lower={self._lower})"
 
 
-class DatabaseStatistics(abc.ABC):
+enable_statistics_fallback: bool = True
+
+
+class DatabaseStatistics(ABC):
     """The statistics interface provides unified access to table-level and column-level statistics.
 
     There are two main challenges when implementing a generalized statistics interface for different database systems.
@@ -2045,91 +1932,16 @@ class DatabaseStatistics(abc.ABC):
     cache_enabled : Optional[bool], optional
         Whether emulated statistics queries should be subject to caching, by default True. Set to *None* to use the
         caching behavior of the `db`
-
-    See Also
-    --------
-    postbound.postbound.OptimizationPipeline : The basic optimization process applied by PostBOUND
     """
 
-    def __init__(
-        self,
-        db: Database,
-        *,
-        emulated: bool = True,
-        enable_emulation_fallback: bool = True,
-        cache_enabled: Optional[bool] = True,
-    ) -> None:
-        self.emulated = emulated
-        self.enable_emulation_fallback = enable_emulation_fallback
-        self.cache_enabled = cache_enabled
-        self._db = db
-
-    @overload
-    def total_rows(self, table: TableReference) -> Optional[int]: ...
-
-    @overload
-    def total_rows(
-        self,
-        table: TableReference,
-        *,
-        emulated: Literal[True],
-    ) -> int: ...
-
-    @overload
-    def total_rows(self, table: TableReference, *, emulated: Literal[False, None]) -> Optional[int]: ...
-
-    @overload
-    def total_rows(self, table: TableReference, *, emulated: Optional[bool]) -> Optional[bool]: ...
-
-    @overload
-    def total_rows(self, table: TableReference, *, cache_enabled: Optional[bool]) -> Optional[int]: ...
-
-    @overload
-    def total_rows(
-        self,
-        table: TableReference,
-        *,
-        emulated: Literal[True],
-        cache_enabled: Optional[bool],
-    ) -> Optional[int]: ...
-
-    @overload
-    def total_rows(
-        self,
-        table: TableReference,
-        *,
-        emulated: Literal[False, None],
-        cache_enabled: Optional[bool],
-    ) -> Optional[int]: ...
-
-    @overload
-    def total_rows(
-        self,
-        table: TableReference,
-        *,
-        emulated: Optional[bool],
-        cache_enabled: Optional[bool],
-    ) -> Optional[int]: ...
-
-    def total_rows(
-        self,
-        table: TableReference,
-        *,
-        emulated: Optional[bool] = None,
-        cache_enabled: Optional[bool] = None,
-    ) -> Optional[int]:
+    @abstractmethod
+    def total_rows(self, table: TableReference) -> Optional[Cardinality]:
         """Provides (an estimate of) the total number of rows in a table.
 
         Parameters
         ----------
         table : TableReference
             The table to check
-        emulated : Optional[bool], optional
-            Whether to force emulation mode for this single call. Defaults to *None* which indicates that the
-            emulation setting of the statistics interface should be used.
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
 
         Returns
         -------
@@ -2144,104 +1956,16 @@ class DatabaseStatistics(abc.ABC):
         VirtualTableError
             If the given table is virtual (e.g. subquery or CTE)
         """
-        if table.virtual:
-            raise VirtualTableError(table)
-        if emulated or (emulated is None and self.emulated):
-            return self._calculate_total_rows(table, cache_enabled=self._determine_caching_behavior(cache_enabled))
-        else:
-            return self._retrieve_total_rows_from_stats(table)
+        raise NotImplementedError
 
-    def distinct_values(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Optional[bool] = None,
-        cache_enabled: Optional[bool] = None,
-    ) -> Optional[int]:
-        """Legacy alias for `num_distinct`.
-
-        .. deprecated:: v0.20.2
-            distinct_values() is deprecated due to the confusing name. Use the more aptly-named num_distinct(),
-            which provides exactly the same interface and functionality.
-        """
-        return self.num_distinct(column, emulated=emulated, cache_enabled=cache_enabled)
-
-    @overload
-    def num_distinct(self, column: ColumnReference) -> Optional[int]: ...
-
-    @overload
-    def num_distinct(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[True],
-    ) -> int: ...
-
-    @overload
-    def num_distinct(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[False, None],
-    ) -> Optional[int]: ...
-
-    @overload
-    def num_distinct(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Optional[bool],
-    ) -> Optional[int]: ...
-
-    @overload
-    def num_distinct(self, column: ColumnReference, *, cache_enabled: Optional[bool]) -> Optional[int]: ...
-
-    @overload
-    def num_distinct(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[True],
-        cache_enabled: Optional[bool],
-    ) -> int: ...
-
-    @overload
-    def num_distinct(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[False, None],
-        cache_enabled: Optional[bool],
-    ) -> Optional[int]: ...
-
-    @overload
-    def num_distinct(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Optional[bool],
-        cache_enabled: Optional[bool],
-    ) -> Optional[int]: ...
-
-    def num_distinct(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Optional[bool] = None,
-        cache_enabled: Optional[bool] = None,
-    ) -> Optional[int]:
+    @abstractmethod
+    def num_distinct(self, column: ColumnReference) -> Optional[int]:
         """Provides (an estimate of) the total number of different column values of a specific column.
 
         Parameters
         ----------
         column : ColumnReference
             The column to check
-        emulated : Optional[bool], optional
-            Whether to force emulation mode for this single call. Defaults to *None* which indicates that the
-            emulation setting of the statistics interface should be used.
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
 
         Returns
         -------
@@ -2253,83 +1977,46 @@ class DatabaseStatistics(abc.ABC):
 
         Raises
         ------
-        postbound.qal.UnboundColumnError
+        UnboundColumnError
             If the column is not associated with any table
-        postbound.qal.VirtualTableError
+        VirtualTableError
             If the table associated with the column is a virtual table (e.g. subquery or CTE)
         """
-        if not ColumnReference.assert_bound(column):
-            raise UnboundColumnError(column)
-        elif column.table.virtual:
-            raise VirtualTableError(column.table)
-        if emulated or (emulated is None and self.emulated):
-            return self._calculate_distinct_values(
-                column, cache_enabled=self._determine_caching_behavior(cache_enabled)
-            )
-        else:
-            return self._retrieve_distinct_values_from_stats(column)
+        raise NotImplementedError
 
-    @overload
-    def min_max(self, column: ColumnReference) -> Optional[tuple[Any, Any]]: ...
+    @abstractmethod
+    def null_frac(self, column: ColumnReference) -> Optional[float]:
+        """Provides (an estimate of) the fraction of NULL values in a column.
 
-    @overload
-    def min_max(self, column: ColumnReference, *, emulated: Literal[True]) -> tuple[Any, Any]: ...
+        Parameters
+        ----------
+        column : ColumnReference
+            The column to check
 
-    @overload
-    def min_max(self, column: ColumnReference, *, emulated: Literal[False, None]) -> Optional[tuple[Any, Any]]: ...
+        Returns
+        -------
+        Optional[float]
+            The fraction of NULL values in the column. If no such statistic exists, but the database
+            system in principle maintains the statistic, *None* is returned. For example, this situation can occur if
+            the database system only maintains the fraction of NULL values if there are sufficiently many.
 
-    @overload
-    def min_max(self, column: ColumnReference, *, emulated: Optional[bool]) -> Optional[tuple[Any, Any]]: ...
+        Raises
+        ------
+        UnboundColumnError
+            If the column is not associated with any table
+        VirtualTableError
+            If the table associated with the column is a virtual table (e.g. subquery or CTE)
+        """
+        raise NotImplementedError
 
-    @overload
-    def min_max(self, column: ColumnReference, *, cache_enabled: Optional[bool]) -> Optional[tuple[Any, Any]]: ...
-
-    @overload
-    def min_max(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[True],
-        cache_enabled: Optional[bool],
-    ) -> tuple[Any, Any]: ...
-
-    @overload
-    def min_max(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[False, None],
-        cache_enabled: Optional[bool],
-    ) -> Optional[tuple[Any, Any]]: ...
-
-    @overload
-    def min_max(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Optional[bool],
-        cache_enabled: Optional[bool],
-    ) -> Optional[tuple[Any, Any]]: ...
-
-    def min_max(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Optional[bool] = None,
-        cache_enabled: Optional[bool] = None,
-    ) -> Optional[tuple[Any, Any]]:
+    @abstractmethod
+    def min_max(self, column: ColumnReference) -> Optional[tuple[Any, Any]]:
         """Provides (an estimate of) the minimum and maximum values in a column.
 
         Parameters
         ----------
         column : ColumnReference
             The column to check
-        emulated : Optional[bool], optional
-            Whether to force emulation mode for this single call. Defaults to *None* which indicates that the
-            emulation setting of the statistics interface should be used.
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
 
         Returns
         -------
@@ -2340,636 +2027,77 @@ class DatabaseStatistics(abc.ABC):
 
         Raises
         ------
-        postbound.qal.UnboundColumnError
+        UnboundColumnError
             If the column is not associated with any table
-        postbound.qal.VirtualTableError
+        VirtualTableError
             If the table associated with the column is a virtual table (e.g. subquery or CTE)
         """
-        if not ColumnReference.assert_bound(column):
-            raise UnboundColumnError(column)
-        elif column.table.virtual:
-            raise VirtualTableError(column.table)
-        if emulated or (emulated is None and self.emulated):
-            return self._calculate_min_max_values(column, cache_enabled=self._determine_caching_behavior(cache_enabled))
-        else:
-            return self._retrieve_min_max_values_from_stats(column)
+        raise NotImplementedError
 
-    def most_common_values(
-        self,
-        column: ColumnReference,
-        *,
-        k: Optional[int] = 10,
-        emulated: Optional[bool] = None,
-        cache_enabled: Optional[bool] = None,
-    ) -> MostCommonValues:
+    @abstractmethod
+    def most_common_values(self, column: ColumnReference) -> Optional[MostCommonValues]:
         """Provides (an estimate of) the total number of occurrences of the `k` most frequent values of a column.
 
         Parameters
         ----------
         column : ColumnReference
             The column to check
-        k : Optional[int], optional
-            The maximum number of most common values to return. Defaults to 10. If there are less values available, all
-            of the available values will be returned. Setting this to *None* or a negative value will return the frequency of all distinct values.
-        emulated : Optional[bool], optional
-            Whether to force emulation mode for this single call. Defaults to *None* which indicates that the
-            emulation setting of the statistics interface should be used.
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
 
         Returns
         -------
-        MostCommonValues
+        Optional[MostCommonValues]
             The most common values in pairs of (value, frequency), starting with the highest frequency. Notice that
-            this sequence can be empty if no values are available. This can happen if the database system in principle
-            maintains this statistic but does considers the value distribution to uniform to make the maintenance
-            worthwhile. Likewise, if less common values exist than the requested `k` value, only the available values
-            will be returned (and the sequence will be shorter than `k` in that case).
+            this sequence can be empty if no values are available. If no most common values lists exists, but the
+            database system in principle maintains the statistic, *None* is returned. This can happen if the database
+            system in principle maintains this statistic but does considers the value distribution to uniform to make
+            the maintenance worthwhile.
 
         Raises
         ------
-        postbound.qal.UnboundColumnError
+        UnboundColumnError
             If the column is not associated with any table
-        postbound.qal.VirtualTableError
+        VirtualTableError
             If the table associated with the column is a virtual table (e.g. subquery or CTE)
         """
-        if not ColumnReference.assert_bound(column):
-            raise UnboundColumnError(column)
-        elif column.table.virtual:
-            raise VirtualTableError(column.table)
+        raise NotImplementedError
 
-        if emulated or (emulated is None and self.emulated):
-            mcv_list = self._calculate_most_common_values(
-                column, k, cache_enabled=self._determine_caching_behavior(cache_enabled)
-            )
-        else:
-            mcv_list = self._retrieve_most_common_values_from_stats(column, k)
-        return MostCommonValues(mcv_list)
-
-    @overload
-    def histogram(self, column: ColumnReference) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(self, column: ColumnReference, *, n_bins: Optional[int]) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(self, column: ColumnReference, *, interpolation: HistogramApproximation) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(self, column: ColumnReference, *, emulated: Literal[True]) -> Histogram: ...
-
-    @overload
-    def histogram(self, column: ColumnReference, *, emulated: Literal[False, None]) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(self, column: ColumnReference, *, emulated: Optional[bool]) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(self, column: ColumnReference, *, cache_enabled: Optional[bool]) -> Optional[Histogram]: ...
-
-    @overload
+    @abstractmethod
     def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(self, column: ColumnReference, *, n_bins: Optional[int], emulated: Literal[True]) -> Histogram: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        emulated: Literal[False, None],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        emulated: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        interpolation: HistogramApproximation,
-        emulated: Literal[True],
-    ) -> Histogram: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        interpolation: HistogramApproximation,
-        emulated: Literal[False, None],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        interpolation: HistogramApproximation,
-        emulated: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        interpolation: HistogramApproximation,
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[True],
-        cache_enabled: Optional[bool],
-    ) -> Histogram: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Literal[False, None],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        emulated: Optional[bool],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-        emulated: Literal[True],
-    ) -> Histogram: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-        emulated: Literal[False, None],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-        emulated: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        emulated: Literal[True],
-        cache_enabled: Optional[bool],
-    ) -> Histogram: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        emulated: Literal[False, None],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        emulated: Optional[bool],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        interpolation: HistogramApproximation,
-        emulated: Literal[True],
-        cache_enabled: Optional[bool],
-    ) -> Histogram: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        interpolation: HistogramApproximation,
-        emulated: Literal[False, None],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        interpolation: HistogramApproximation,
-        emulated: Optional[bool],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-        emulated: Literal[True],
-        cache_enabled: Optional[bool],
-    ) -> Histogram: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-        emulated: Literal[False, None],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    @overload
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int],
-        interpolation: HistogramApproximation,
-        emulated: Optional[bool],
-        cache_enabled: Optional[bool],
-    ) -> Optional[Histogram]: ...
-
-    def histogram(
-        self,
-        column: ColumnReference,
-        *,
-        n_bins: Optional[int] = None,
-        interpolation: HistogramApproximation = "approx-uni",
-        emulated: Optional[bool] = None,
-        cache_enabled: Optional[bool] = None,
+        self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni"
     ) -> Optional[Histogram]:
-        if not ColumnReference.assert_bound(column):
-            raise UnboundColumnError(column)
-        elif column.table.virtual:
-            raise VirtualTableError(column.table)
+        """Provides (an estimate of) the value distribution of a column.
 
-        use_emulation = emulated or (emulated is None and self.emulated)
-        if use_emulation and not n_bins:
-            raise ValueError("n_bins must be set for emulated histograms.")
-        if not use_emulation and n_bins:
-            warnings.warn("n_bins is ignored if the histogram is loaded from stats", stacklevel=2)
-
-        if use_emulation:
-            assert n_bins is not None
-            return self._calculate_histogram(column, n_bins, interpolation=interpolation, cache_enabled=cache_enabled)
-        else:
-            return self._retrieve_histogram_from_stats(column, interpolation=interpolation)
-
-    def _calculate_total_rows(self, table: TableReference, *, cache_enabled: Optional[bool] = None) -> int:
-        """Retrieves the total number of rows of a table by issuing a *COUNT(\\*)* query against the live database.
-
-        The table is assumed to be non-virtual.
-
-        Parameters
-        ----------
-        table : TableReference
-            The table to check
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
-
-        Returns
-        -------
-        int
-            The total number of rows in the table.
-        """
-        query_template = "SELECT COUNT(*) FROM {tab}".format(tab=table.full_name)
-        return self._db.execute_query(
-            query_template,
-            cache_enabled=self._determine_caching_behavior(cache_enabled),
-        )
-
-    def _calculate_distinct_values(self, column: BoundColumnReference, *, cache_enabled: Optional[bool] = None) -> int:
-        """Retrieves the number of distinct column values by issuing a *COUNT(\\*)* / *GROUP BY* query over that
-        column against the live database.
-
-        The column is assumed to be bound to a (non-virtual) table.
+        This method does not restrict the kind of histogram (e.g., equi-width vs. equi-depth vs. v-optimal) that will
+        be provided. This decision is entirely up to the database system. If a specific kind of histogram is required,
+        it must be constructed explicitly. The `Histogram` class works on histograms with arbitrary bucketization
+        strategies, with all the impact on accuracy that come with them.
 
         Parameters
         ----------
         column : ColumnReference
             The column to check
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
+        interpolation : HistogramApproximation, optional
+            The strategy to estimate the frequency of values that are not exactly on the bucket bounds. Defaults to
+            "approx-uni". See `Histogram` for details.
 
         Returns
         -------
-        int
-            The number of distinct values in the column
-        """
-        query_template = "SELECT COUNT(DISTINCT {col}) FROM {tab}".format(col=column.name, tab=column.table.full_name)
-        return self._db.execute_query(
-            query_template,
-            cache_enabled=self._determine_caching_behavior(cache_enabled),
-        )
+        Histogram
+            The histogram. If no such statistic exists, but the database system in principle maintains the statistic,
+            *None* is returned. For example, this situation can occur if thec database system only maintains histograms
+            for (sufficiently) non-uniform data.
 
-    def _calculate_min_max_values(
-        self, column: BoundColumnReference, *, cache_enabled: Optional[bool] = None
-    ) -> tuple[Any, Any]:
-        """Retrieves the minimum/maximum values in a column by issuing an aggregation query for that column against the
-        live database.
-
-        The column is assumed to be bound to a (non-virtual) table.
-
-        Parameters
-        ----------
-        column : ColumnReference
-            The column to check
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
-
-        Returns
-        -------
-        tuple[Any, Any]
-            A tuple of *(min, max)*
-        """
-        query_template = "SELECT MIN({col}), MAX({col}) FROM {tab}".format(col=column.name, tab=column.table.full_name)
-        return self._db.execute_query(
-            query_template,
-            cache_enabled=self._determine_caching_behavior(cache_enabled),
-        )
-
-    def _calculate_most_common_values(
-        self,
-        column: BoundColumnReference,
-        k: int | None,
-        *,
-        cache_enabled: Optional[bool] = None,
-    ) -> Sequence[tuple[Any, int]]:
-        """Retrieves the `k` most frequent values of a column along with their frequencies by issuing a query over that
-        column against the live database.
-
-        The actual query combines a *COUNT(\\*)* aggregation, with a grouping over the column values, followed by a
-        count-based ordering and limit.
-
-        The column is assumed to be bound to a (non-virtual) table.
-
-        Parameters
-        ----------
-        column : ColumnReference
-            The column to check
-        k : Optional[int]
-            The number of most frequent values to retrieve. If less values are available (because there are not as much
-            distinct values in the column), the frequencies of all values is returned. If *None*, all values are returned.
-        cache_enabled : Optional[bool], optional
-            Whether to enable result caching in emulation mode. Defaults to *None* which indicates that the caching
-            setting of the statistics interface should be used.
-
-        Returns
-        -------
-        Sequence[tuple[Any, int]]
-            The most common values in *(value, frequency)* pairs, ordered by largest frequency first. Can be smaller
-            than the requested `k` value if the column contains less distinct values.
-        """
-        if k is None or k <= 0:
-            query_template = """
-                SELECT {col}, COUNT(*) AS n
-                FROM {tab}
-                GROUP BY {col}
-                ORDER BY n DESC, {col}""".format(col=column.name, tab=column.table.full_name)
-        else:
-            query_template = textwrap.dedent(
-                """
-                SELECT {col}, COUNT(*) AS n
-                FROM {tab}
-                GROUP BY {col}
-                ORDER BY n DESC, {col}
-                LIMIT {k}""".format(col=column.name, tab=column.table.full_name, k=k)
-            )
-
-        return self._db.execute_query(
-            query_template,
-            cache_enabled=self._determine_caching_behavior(cache_enabled),
-            raw=True,
-        )
-
-    def _calculate_histogram(
-        self,
-        column: BoundColumnReference,
-        n_bins: int,
-        *,
-        interpolation: HistogramApproximation,
-        cache_enabled: Optional[bool] = None,
-    ) -> Optional[Histogram]:
-        n_rows = self._calculate_total_rows(column.table)
-        if n_rows == 0:
-            return None
-
-        query_template = """
-            SELECT {col}, COUNT(*) AS n
-            FROM {tab}
-            GROUP BY {col}
-            ORDER BY {col}
-            """.format(col=column.name, tab=column.table.full_name)
-        result_set = self._db.execute_query(
-            query_template,
-            cache_enabled=self._determine_caching_behavior(cache_enabled),
-            raw=True,
-        )
-        assert result_set
-
-        lo, bounds, buckets = _infer_histogram_bounds(result_set, n_bins=n_bins, n_rows=n_rows)
-        return Histogram(
-            bounds,
-            buckets,
-            lower=lo,
-            bucket_interpolation=interpolation,
-        )
-
-    @abc.abstractmethod
-    def _retrieve_total_rows_from_stats(self, table: TableReference) -> Optional[int]:
-        """Queries the DBMS-internal metadata for the number of rows in a table.
-
-        The table is assumed to be non-virtual.
-
-        Parameters
-        ----------
-        table : TableReference
-            The table to check
-
-        Returns
-        -------
-        Optional[int]
-            The total number of rows in the table. If no such statistic exists, but the database system in principle
-            maintains the statistic, *None* is returned. For example, this situation can occur if the database system
-            only maintains a row count if the table has at least a certain size and the table in question did not reach
-            that size yet.
+        Raises
+        ------
+        UnboundColumnError
+            If the column is not associated with any table
+        VirtualTableError
+            If the table associated with the column is a virtual table (e.g. subquery or CTE)
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
-    def _retrieve_distinct_values_from_stats(self, column: BoundColumnReference) -> Optional[int]:
-        """Queries the DBMS-internal metadata for the number of distinct values of the column.
-
-        The column is assumed to be bound to a (non-virtual) table.
-
-        Parameters
-        ----------
-        column : ColumnReference
-            The column to check
-
-        Returns
-        -------
-        Optional[int]
-            The number of distinct values in the column. If no such statistic exists, but the database system in
-            principle maintains the statistic, *None* is returned. For example, this situation can occur if the
-            database system only maintains a distinct value count if the column values are distributed in a
-            sufficiently diverse way.
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def _retrieve_min_max_values_from_stats(self, column: BoundColumnReference) -> Optional[tuple[Any, Any]]:
-        """Queries the DBMS-internal metadata for the minimum / maximum value in a column.
-
-        The column is assumed to be bound to a (non-virtual) table.
-
-        Parameters
-        ----------
-        column : ColumnReference
-            The column to check
-
-        Returns
-        -------
-        Optional[tuple[Any, Any]]
-            A tuple of minimum and maximum value. If no such statistic exists, but the database system in principle
-            maintains the statistic, *None* is returned. For example, this situation can occur if thec database
-            system only maintains the min/max value if they are sufficiently far apart.
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def _retrieve_most_common_values_from_stats(
-        self, column: BoundColumnReference, k: int | None
-    ) -> Sequence[tuple[Any, int]]:
-        """Queries the DBMS-internal metadata for the `k` most common values of the `column`.
-
-        The column is assumed to be bound to a (non-virtual) table.
-
-        Parameters
-        ----------
-        column : ColumnReference
-            The column to check
-        k : int, optional
-            The maximum number of most common values to return. If there are less values available, all
-            of the available values will be returned. If `None`, all available values will be returned.
-
-        Returns
-        -------
-        Sequence[tuple[Any, int]]
-            The most common values in pairs of (value, frequency), starting with the highest frequency. Notice that
-            this sequence can be empty if no values are available. This can happen if the database system in principle
-            maintains this statistic but does considers the value distribution to uniform to make the maintenance
-            worthwhile. Likewise, if less common values exist than the requested `k` value, only the available values
-            will be returned (and the sequence will be shorter than `k` in that case).
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def _retrieve_histogram_from_stats(
-        self, column: BoundColumnReference, *, interpolation: HistogramApproximation
-    ) -> Optional[Histogram]:
-        raise NotImplementedError
-
-    def _determine_caching_behavior(self, local_cache_enabled: Optional[bool]) -> Optional[bool]:
-        """Utility to quickly figure out which caching behavior to use.
-
-        This method is intended to be called by the top-level methods that provide statistics and enable a selective
-        caching which overwrites the caching behavior of the statistics interface.
-
-        Parameters
-        ----------
-        local_cache_enabled : Optional[bool]
-            The caching setting selected by the callee / user.
-
-        Returns
-        -------
-        Optional[bool]
-            Whether caching should be enabled or the determined by the actual database interface.
-        """
-        return self.cache_enabled if local_cache_enabled is None else local_cache_enabled
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __str__(self) -> str:
-        return f"Database statistics of {self._db}"
+    def describe(self) -> jsondict:
+        return {"kind": "native"}
 
 
 class HintWarning(UserWarning):
@@ -2979,7 +2107,7 @@ class HintWarning(UserWarning):
         super().__init__(msg)
 
 
-class HintService(abc.ABC):
+class HintService(ABC):
     """Provides the necessary tools to generate system-specific query instances based on optimizer decisions.
 
     Hints are PostBOUNDs way to enforce that decisions made in the optimization pipeline are respected by the native
@@ -2993,7 +2121,7 @@ class HintService(abc.ABC):
     OptimizationPipeline.optimize_query : For a general introduction into the query optimization process
     """
 
-    @abc.abstractmethod
+    @abstractmethod
     def generate_hints(
         self,
         query: SqlQuery,
@@ -3053,7 +2181,7 @@ class HintService(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def format_query(self, query: SqlQuery) -> str:
         """Transforms the query into a database-specific string, mostly to incorporate deviations from standard SQL.
 
@@ -3082,7 +2210,7 @@ class HintService(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def supports_hint(self, hint: PhysicalOperator | HintType) -> bool:
         """Checks, whether the database system is capable of using the specified hint or operator
 
@@ -3099,14 +2227,14 @@ class HintService(abc.ABC):
         raise NotImplementedError
 
 
-class OptimizerInterface(abc.ABC):
+class OptimizerInterface(ABC):
     """Provides high-level access to internal optimizer-related data for the database system.
 
     Each funtionality is available through a dedicated method. Notice that not all database systems necessarily
     support all of this functions.
     """
 
-    @abc.abstractmethod
+    @abstractmethod
     def query_plan(self, query: SqlQuery | str) -> QueryPlan:
         """Obtains the query execution plan for a specific query.
 
@@ -3130,7 +2258,7 @@ class OptimizerInterface(abc.ABC):
         """Alias for `query_plan`."""
         return self.query_plan(query)
 
-    @abc.abstractmethod
+    @abstractmethod
     def analyze_plan(self, query: SqlQuery) -> QueryPlan:
         """Executes a specific query and provides the query execution plan supplemented with runtime information.
 
@@ -3154,7 +2282,7 @@ class OptimizerInterface(abc.ABC):
         """Alias for `analyze_plan`."""
         return self.analyze_plan(query)
 
-    @abc.abstractmethod
+    @abstractmethod
     def parse_plan(self, plan: Any, *, query: Optional[SqlQuery] = None) -> QueryPlan:
         """Transforms the system-specific EXPLAIN output into a standardized `QueryPlan`.
 
@@ -3167,7 +2295,7 @@ class OptimizerInterface(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:
         """Queries the DBMS query optimizer for its cardinality estimate, instead of executing the query.
 
@@ -3186,7 +2314,7 @@ class OptimizerInterface(abc.ABC):
         """
         raise NotImplementedError
 
-    @abc.abstractmethod
+    @abstractmethod
     def cost_estimate(self, query: SqlQuery | str) -> Cost:
         """Queries the DBMS query optimizer for the estimated cost of executing the query.
 
@@ -3239,6 +2367,23 @@ class DatabasePool:
         if _DB_POOL is None:
             _DB_POOL = DatabasePool()
         return _DB_POOL
+
+    @staticmethod
+    def get_current() -> Database:
+        """Provides the current database from the singleton database pool.
+
+        This is just a convenience method that is equivalent to ``DatabasePool.get_instance().current_database()``.
+
+        Returns
+        -------
+        Database
+            The current database instance. If there is not exactly one database in the pool, a `ValueError` is raised.
+
+        See Also
+        --------
+        DatabasePool.current_database
+        """
+        return DatabasePool.get_instance().current_database()
 
     def __init__(self):
         self._pool: dict[str, Database] = {}

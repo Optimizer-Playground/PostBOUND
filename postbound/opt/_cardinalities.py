@@ -13,7 +13,7 @@ from .._stages import (
     CardinalityEstimator,
 )
 from ..db import Database, DatabasePool
-from ..qal import SelectStatement
+from ..qal import SqlQuery
 from ..workloads import Workload
 
 
@@ -49,19 +49,15 @@ class PreciseCardinalities(CardinalityEstimator):
         allow_cross_products: bool = False,
     ) -> None:
         super().__init__(allow_cross_products=allow_cross_products)
-        self.database = (
-            database
-            if database is not None
-            else DatabasePool.get_instance().current_database()
-        )
+        self.database = database if database is not None else DatabasePool.get_instance().current_database()
         self.cache_enabled = enable_cache
-        self._cardinality_cache: dict[SelectStatement, Cardinality] = {}
+        self._cardinality_cache: dict[SqlQuery, Cardinality] = {}
 
     def describe(self) -> dict:
         return {"name": "true-cards", "database": self.database.describe()}
 
     def calculate_estimate(
-        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         intermediate = util.enlist(intermediate)
         subquery = transform.extract_subquery(query, intermediate)
@@ -166,19 +162,13 @@ class PreComputedCardinalities(CardinalityEstimator):
         self._error_on_missing_card = error_on_missing_card
         self._live_db: Optional[Database] = None
         if live_fallback:
-            self._live_db = (
-                DatabasePool.get_instance().current_database()
-                if live_db is None
-                else live_db
-            )
+            self._live_db = DatabasePool.get_instance().current_database() if live_db is None else live_db
         else:
             self._live_db = None
         self._live_fallback_style = live_fallback_style
         self._save_life_fallback = save_live_fallback_results
 
-        true_card_df = pd.read_csv(
-            lookup_table_path, converters={tables_col: _parse_tables}
-        )
+        true_card_df = pd.read_csv(lookup_table_path, converters={tables_col: _parse_tables})
         self._df_cols = set(true_card_df.columns)
         self._cards: dict[tuple[str, frozenset[TableReference]], Cardinality] = {}
         for _, row in true_card_df.iterrows():
@@ -188,7 +178,7 @@ class PreComputedCardinalities(CardinalityEstimator):
             self._cards[(label, frozenset(tables))] = Cardinality(card)
 
     def calculate_estimate(
-        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         intermediate = frozenset(util.enlist(intermediate))
         label = self._workload.label_of(query)
@@ -204,9 +194,7 @@ class PreComputedCardinalities(CardinalityEstimator):
             "workload": self._workload.name,
         }
 
-    def _use_default(
-        self, query: SelectStatement, intermediate: frozenset[TableReference]
-    ) -> Cardinality:
+    def _use_default(self, query: SqlQuery, intermediate: frozenset[TableReference]) -> Cardinality:
         if self._live_db is not None:
             return self._use_live_fallback(query, intermediate)
 
@@ -219,9 +207,7 @@ class PreComputedCardinalities(CardinalityEstimator):
             )
         return Cardinality.unknown()
 
-    def _use_live_fallback(
-        self, query: SelectStatement, intermediate: frozenset[TableReference]
-    ) -> Cardinality:
+    def _use_live_fallback(self, query: SqlQuery, intermediate: frozenset[TableReference]) -> Cardinality:
         assert self._live_db is not None
         query_fragment = transform.extract_subquery(query, intermediate)
 
@@ -230,9 +216,7 @@ class PreComputedCardinalities(CardinalityEstimator):
                 true_card_query = transform.as_count_star_query(query_fragment)
                 cardinality = Cardinality(self._live_db.execute_query(true_card_query))
             case "estimated":
-                cardinality = self._live_db.optimizer().cardinality_estimate(
-                    query_fragment
-                )
+                cardinality = self._live_db.optimizer().cardinality_estimate(query_fragment)
 
         if self._save_life_fallback:
             self._dump_fallback_estimate(query, intermediate, cardinality)
@@ -240,7 +224,7 @@ class PreComputedCardinalities(CardinalityEstimator):
 
     def _dump_fallback_estimate(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         tables: frozenset[TableReference],
         cardinality: Cardinality,
     ) -> None:
@@ -262,9 +246,7 @@ class PreComputedCardinalities(CardinalityEstimator):
         if "query" in self._df_cols:
             result_row["query"] = [str(query)]
         if "query_fragment" in self._df_cols:
-            result_row["query_fragment"] = [
-                str(transform.extract_query_fragment(query, tables))
-            ]
+            result_row["query_fragment"] = [str(transform.extract_query_fragment(query, tables))]
 
         result_row[self._card_col] = [cardinality]
         result_df = pd.DataFrame(result_row)
@@ -316,7 +298,7 @@ class CardinalityDistortion(CardinalityEstimator):
         }
 
     def calculate_estimate(
-        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         card_est = self.estimator.calculate_estimate(query, intermediate)
         if not card_est.is_valid():
@@ -324,11 +306,7 @@ class CardinalityDistortion(CardinalityEstimator):
         if self.distortion_strategy == "fixed":
             distortion_factor = self.distortion_factor
         elif self.distortion_strategy == "random":
-            distortion_factor = random.uniform(
-                min(self.distortion_factor, 1.0), max(self.distortion_factor, 1.0)
-            )
+            distortion_factor = random.uniform(min(self.distortion_factor, 1.0), max(self.distortion_factor, 1.0))
         else:
-            raise ValueError(
-                f"Unknown distortion strategy: '{self.distortion_strategy}'"
-            )
+            raise ValueError(f"Unknown distortion strategy: '{self.distortion_strategy}'")
         return round(card_est * distortion_factor)

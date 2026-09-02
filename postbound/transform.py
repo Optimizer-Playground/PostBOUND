@@ -89,9 +89,11 @@ from .qal import (
     WindowExpression,
     WithQuery,
     as_predicate,
+    as_query,
     build_query,
     determine_join_equivalence_classes,
     generate_predicates_for_equivalence_classes,
+    is_set_query,
 )
 
 # TODO: at a later point in time, the entire query traversal/modification logic could be refactored to use unified
@@ -460,6 +462,10 @@ def extract_subquery(
 ) -> SelectStatement | SetQuery: ...
 
 
+@overload
+def extract_subquery(query: SqlQuery, intermediate: TableReference | Iterable[TableReference]) -> SqlQuery: ...
+
+
 def extract_subquery(query, intermediate: TableReference | Iterable[TableReference]):
     """Extracts a subquery from a given query based on a subset of its tables.
 
@@ -756,7 +762,19 @@ def infer_between_predicates[T: SelectStatement](query: T) -> T:
     return cast(T, rewritten_query)
 
 
-def as_star_query(query: SelectStatement) -> SelectStatement:
+@overload
+def as_star_query(query: SelectStatement) -> SelectStatement: ...
+
+
+@overload
+def as_star_query(query: SetQuery) -> SetQuery: ...
+
+
+@overload
+def as_star_query(query: SqlQuery) -> SqlQuery: ...
+
+
+def as_star_query(query):
     """Transforms a specific query to use a ``SELECT *`` projection instead.
 
     Notice that this can break certain queries where a renamed column from the ``SELECT`` clause is used in other parts of
@@ -773,11 +791,26 @@ def as_star_query(query: SelectStatement) -> SelectStatement:
     QueryType
         A variant of the input query that uses a ``SELECT *`` projection.
     """
+    if is_set_query(query):
+        return query
+
     select = Select.star()
     return replace_clause(query, select)
 
 
-def as_count_star_query(query: SelectStatement) -> SelectStatement:
+@overload
+def as_count_star_query(query: SelectStatement) -> SelectStatement: ...
+
+
+@overload
+def as_count_star_query(query: SetQuery) -> SelectStatement: ...
+
+
+@overload
+def as_count_star_query(query: SqlQuery) -> SqlQuery: ...
+
+
+def as_count_star_query(query):
     """Transforms a specific query to use a ``SELECT COUNT(*)`` projection instead.
 
     Notice that this can break certain queries where a renamed column from the ``SELECT`` clause is used in other parts of
@@ -794,6 +827,12 @@ def as_count_star_query(query: SelectStatement) -> SelectStatement:
     QueryType
         A variant of the input query that uses a ``SELECT COUNT(*)`` projection.
     """
+    if is_set_query(query):
+        select_clause = Select.count_star()
+        nested_source = SubqueryTableSource(query)
+        from_clause = From(nested_source)
+        return as_query(select_clause, from_clause)
+
     select = Select.count_star()
     return replace_clause(query, select)
 

@@ -197,8 +197,8 @@ class ColumnReferenceTests(unittest.TestCase):
         normalized = col.drop_table_alias()
 
         self.assertIsNot(normalized.table, None)
-        self.assertEqual(normalized.table.alias, "")  # type: ignore
-        self.assertEqual(normalized.table.full_name, "posts")  # type: ignore
+        self.assertEqual(normalized.table.alias, "")
+        self.assertEqual(normalized.table.full_name, "posts")
 
     def test_drop_table_alias_on_virtual_table_raises(self) -> None:
         virtual_table = pb.TableReference.create_virtual("subq")

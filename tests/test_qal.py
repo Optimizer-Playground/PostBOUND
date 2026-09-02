@@ -579,8 +579,8 @@ class JobWorkloadTests(regression_suite.DatabaseTestCase):
             with self.subTest(query=query_file.stem):
                 raw_query = query_file.read_text()
                 parsed_query = pb.parse_query(raw_query)
-                original_result = self.db.execute_query(parsed_query, cache_enabled=False)
-                parsed_result = self.db.execute_query(parsed_query, cache_enabled=False)
+                original_result = self.db.execute_query(parsed_query)
+                parsed_result = self.db.execute_query(parsed_query)
                 self.assertResultSetsEqual(original_result, parsed_result, ordered=parsed_query.is_ordered())
 
 
@@ -601,6 +601,6 @@ class StatsWorkloadTests(regression_suite.DatabaseTestCase):
             with self.subTest(query=query_file.stem):
                 raw_query = query_file.read_text()
                 parsed_query = pb.parse_query(raw_query)
-                original_result = self.db.execute_query(parsed_query, cache_enabled=False)
-                parsed_result = self.db.execute_query(parsed_query, cache_enabled=False)
+                original_result = self.db.execute_query(parsed_query)
+                parsed_result = self.db.execute_query(parsed_query)
                 self.assertResultSetsEqual(original_result, parsed_result, ordered=parsed_query.is_ordered())

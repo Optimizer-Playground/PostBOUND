@@ -1237,7 +1237,7 @@ class SubqueryExpression(SqlExpression):
 
     """
 
-    def __init__(self, subquery: SelectStatement) -> None:
+    def __init__(self, subquery: SqlQuery) -> None:
         self._query = subquery
         super().__init__(hash(subquery))
 
@@ -1245,7 +1245,7 @@ class SubqueryExpression(SqlExpression):
     __match_args__ = ("query",)
 
     @property
-    def query(self) -> SelectStatement:
+    def query(self) -> SqlQuery:
         """The (sub)query that is wrapped by this expression.
 
         Returns
@@ -2760,7 +2760,7 @@ class InPredicate(BasePredicate):
     """
 
     @staticmethod
-    def create_subquery(column: SqlExpression, subquery: SubqueryExpression | SelectStatement) -> InPredicate:
+    def create_subquery(column: SqlExpression, subquery: SubqueryExpression | SqlQuery) -> InPredicate:
         """Generates an *IN* predicate that is based on a subquery.
 
         Such a predicate is of the form ``R.a IN (SELECT S.b FROM S)``.
@@ -2828,7 +2828,7 @@ class InPredicate(BasePredicate):
         return self._values
 
     @property
-    def subquery(self) -> SelectStatement:
+    def subquery(self) -> SqlQuery:
         """Get the subquery for this subquery IN predicate.
 
         If this predicate is not a subquery-based IN predicate, a `ValueError` is raised.
@@ -2938,7 +2938,7 @@ class UnaryPredicate(BasePredicate):
     """
 
     @staticmethod
-    def create_exists(subquery: SelectStatement | SubqueryExpression) -> UnaryPredicate:
+    def create_exists(subquery: SqlQuery | SubqueryExpression) -> UnaryPredicate:
         """Creates an *EXISTS* predicate for a subquery.
 
         Parameters
@@ -2983,7 +2983,7 @@ class UnaryPredicate(BasePredicate):
         return self._column
 
     @property
-    def subquery(self) -> SelectStatement:
+    def subquery(self) -> SqlQuery:
         """Get the subquery of this EXISTS predicate.
 
         If this predicate is not an EXISTS predicate, a `ValueError` is raised.
@@ -6311,7 +6311,7 @@ class SubqueryTableSource(TableSource):
 
     def __init__(
         self,
-        query: SelectStatement | SubqueryExpression,
+        query: SqlQuery | SubqueryExpression,
         target_name: str | TableReference = "",
         *,
         lateral: bool = False,
@@ -6339,7 +6339,7 @@ class SubqueryTableSource(TableSource):
     __match_args__ = ("query", "target_table", "lateral")
 
     @property
-    def query(self) -> SelectStatement:
+    def query(self) -> SqlQuery:
         """Get the query that is sourced as a virtual table.
 
         Returns
@@ -8372,7 +8372,7 @@ def _stringify_clause(clause: SqlClause) -> str:
 
 def collect_subqueries_in_expression(
     expression: SqlExpression,
-) -> set[SelectStatement]:
+) -> set[SqlQuery]:
     """Handler method to provide all the subqueries that are contained in a specific expression.
 
     Parameters
@@ -8396,7 +8396,7 @@ def collect_subqueries_in_expression(
 
 def _collect_subqueries_in_table_source(
     table_source: TableSource,
-) -> set[SelectStatement]:
+) -> set[SqlQuery]:
     """Handler method to provide all subqueries that are contained in a specific table.
 
     This does not collect the subqueries in a recursive manner: once a subquery has been found, the collection stops.
@@ -8437,7 +8437,7 @@ def _collect_subqueries_in_table_source(
             return set()
 
 
-def _collect_subqueries(clause: SqlClause | SqlQuery) -> set[SelectStatement]:
+def _collect_subqueries(clause: SqlClause | SqlQuery) -> set[SqlQuery]:
     """Handler method to provide all the subqueries that are contained in a specific clause.
 
     Following the definitions of `SqlQuery.subqueries`, this completely ignores CTEs. Therefore, subqueries that are defined
@@ -9358,16 +9358,26 @@ SelectStatement
 """
 
 
-def is_select_query(query: SqlStatement) -> TypeGuard[SelectStatement]:
+def is_select_query(query: SqlQuery) -> TypeGuard[SelectStatement]:
     return isinstance(query, SelectStatement)
 
 
-def is_set_query(query: SqlStatement) -> TypeGuard[SetQuery]:
+def is_set_query(query: SqlQuery) -> TypeGuard[SetQuery]:
     return isinstance(query, SetQuery)
 
 
 class QueryTypeError(RuntimeError):
     """Error to indicate that a different type of query was expected (e.g. an `ExplicitSqlQuery` instead of a `SetQuery`)."""
+
+    @staticmethod
+    def expected_select(query: SqlQuery) -> QueryTypeError:
+        query_type = type(query).__name__
+        return QueryTypeError(f"Expected a SELECT query but got a {query_type} instead: {query}")
+
+    @staticmethod
+    def expected_set(query: SqlQuery) -> QueryTypeError:
+        query_type = type(query).__name__
+        return QueryTypeError(f"Expected a set (UNION/INTERSECT/EXCEPT) query but got a {query_type} instead: {query}")
 
     def __init__(self, *args) -> None:
         super().__init__(*args)

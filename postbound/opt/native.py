@@ -46,7 +46,7 @@ from .._stages import (
 )
 from ..db import Database, DatabaseServerError, DatabaseUserError
 from ..postgres import PostgresInterface
-from ..qal import ColumnExpression, OrderBy, SelectStatement
+from ..qal import ColumnExpression, OrderBy, SqlQuery
 from ..util import jsondict
 
 
@@ -74,7 +74,7 @@ class NativeCostModel(CostModel):
         self._raise_on_error = raise_on_error
         self._verbose = verbose
 
-    def estimate_cost(self, query: SelectStatement, plan: QueryPlan) -> Cost:
+    def estimate_cost(self, query: SqlQuery, plan: QueryPlan) -> Cost:
         assert self.target_db is not None
 
         matching_tables = query.tables() == plan.tables()
@@ -116,10 +116,10 @@ class NativeCostModel(CostModel):
             "database_system": self.target_db.describe() if self.target_db is not None else None,
         }
 
-    def initialize(self, target_db: Database, query: SelectStatement) -> None:
+    def initialize(self, target_db: Database, query: SqlQuery) -> None:
         self.target_db = target_db
 
-    def _cost_index_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
+    def _cost_index_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of an index scan or index-only scan at the root of a specific query plan.
 
         This method purely exists to keep the rather complex logic of index costing out of the main cost estimation method.
@@ -160,7 +160,7 @@ class NativeCostModel(CostModel):
 
         return index_node.estimated_cost
 
-    def _cost_materialize_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
+    def _cost_materialize_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of a materialize node at the root of a specific query plan.
 
         Parameters
@@ -244,7 +244,7 @@ class NativeCostModel(CostModel):
             return math.inf
         return intermediate_node.estimated_cost
 
-    def _cost_memoize_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
+    def _cost_memoize_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of a memoize node at the root of a specific query plan.
 
         Parameters
@@ -347,7 +347,7 @@ class NativeCostModel(CostModel):
             return math.inf
         return intermediate_node.estimated_cost
 
-    def _cost_sort_op(self, query: SelectStatement, plan: QueryPlan) -> Cost:
+    def _cost_sort_op(self, query: SqlQuery, plan: QueryPlan) -> Cost:
         """Try to estimate the cost of a sort node at the root of a specific query plan.
 
         Parameters
@@ -401,7 +401,7 @@ class NativeCardinalityEstimator(CardinalityEstimator):
         self._target_db: Optional[Database] = target_db
 
     def calculate_estimate(
-        self, query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
         assert self._target_db is not None
 
@@ -416,7 +416,7 @@ class NativeCardinalityEstimator(CardinalityEstimator):
             "database_system": self._target_db.describe() if self._target_db is not None else None,
         }
 
-    def initialize(self, target_db: Database, query: SelectStatement) -> None:
+    def initialize(self, target_db: Database, query: SqlQuery) -> None:
         self._target_db = target_db
 
 
@@ -433,7 +433,7 @@ class NativeJoinOrderOptimizer(JoinOrderOptimization):
         super().__init__()
         self.db_instance = db_instance
 
-    def optimize_join_order(self, query: SelectStatement) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
         query_plan = self.db_instance.optimizer().query_plan(query)
         return jointree_from_plan(query_plan)
 
@@ -457,7 +457,7 @@ class NativePhysicalOperatorSelection(PhysicalOperatorSelection):
         super().__init__()
         self.db_instance = db_instance
 
-    def select_physical_operators(self, query: SelectStatement, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SqlQuery, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
         if join_order:
             query = self.db_instance.hinting().generate_hints(query, join_order=join_order)
         query_plan = self.db_instance.optimizer().query_plan(query)
@@ -485,7 +485,7 @@ class NativePlanParameterization(ParameterGeneration):
 
     def generate_plan_parameters(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         join_order: Optional[JoinTree],
         operator_assignment: Optional[PhysicalOperatorAssignment],
     ) -> PlanParameterization:
@@ -513,7 +513,7 @@ class NativeOptimizer(CompleteOptimizationAlgorithm):
         super().__init__()
         self.db_instance = db_instance
 
-    def optimize_query(self, query: SelectStatement) -> QueryPlan:
+    def optimize_query(self, query: SqlQuery) -> QueryPlan:
         return self.db_instance.optimizer().query_plan(query)
 
     def describe(self) -> jsondict:

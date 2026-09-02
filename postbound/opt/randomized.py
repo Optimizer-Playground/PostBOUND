@@ -23,14 +23,14 @@ from .._stages import (
     PhysicalOperatorSelection,
 )
 from ..db import Database, DatabasePool
-from ..qal import SelectStatement
+from ..qal import QueryTypeError, SqlQuery, is_select_query
 from ..util import nx as nx_utils
 from ..validation import CompoundCheck, CrossProductPreCheck, SupportedHintCheck
 from ._helpers import to_query_plan
 
 
 def _merge_nodes(
-    query: SelectStatement,
+    query: SqlQuery,
     start: JoinTree | TableReference,
     end: JoinTree | TableReference,
 ) -> JoinTree:
@@ -61,7 +61,7 @@ def _merge_nodes(
 
 
 def _sample_join_graph(
-    query: SelectStatement,
+    query: SqlQuery,
     join_graph: nx.Graph,
     *,
     base_table: Optional[TableReference] = None,
@@ -150,7 +150,7 @@ class RandomJoinOrderGenerator:
         self._tree_structure = tree_structure
 
     def random_join_orders_for(
-        self, query: SelectStatement, *, base_table: Optional[TableReference] = None
+        self, query: SqlQuery, *, base_table: Optional[TableReference] = None
     ) -> Generator[JoinTree, None, None]:
         """Provides a generator that successively provides join orders at random.
 
@@ -177,6 +177,9 @@ class RandomJoinOrderGenerator:
         --------
         For now, the underlying algorithm is limited to queries without cross-products.
         """
+        if not is_select_query(query):
+            raise QueryTypeError.expected_select(query)
+
         join_graph = query.predicates().join_graph()
         if len(join_graph.nodes) == 0:
             return
@@ -207,7 +210,7 @@ class RandomJoinOrderGenerator:
 
     def _linear_join_orders(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         join_graph: nx.Graph,
         *,
         base_table: Optional[TableReference] = None,
@@ -240,7 +243,7 @@ class RandomJoinOrderGenerator:
 
     def _bushy_join_orders(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         join_graph: nx.Graph,
         *,
         base_table: Optional[TableReference] = None,
@@ -289,7 +292,7 @@ class RandomJoinOrderOptimizer(JoinOrderOptimization):
         generator_args = generator_args if generator_args is not None else {}
         self._generator = RandomJoinOrderGenerator(**generator_args)
 
-    def optimize_join_order(self, query: SelectStatement) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
         return next(self._generator.random_join_orders_for(query))
 
     def describe(self) -> dict:
@@ -367,7 +370,7 @@ class RandomOperatorGenerator:
         )
 
     def random_operator_assignments_for(
-        self, query: SelectStatement, join_order: JoinTree
+        self, query: SqlQuery, join_order: JoinTree
     ) -> Generator[PhysicalOperatorAssignment, None, None]:
         """Produces a generator for random operator assignments of the allowed operators.
 
@@ -445,7 +448,7 @@ class RandomOperatorOptimizer(PhysicalOperatorSelection):
         generator_args = generator_args if generator_args is not None else {}
         self._generator = RandomOperatorGenerator(**generator_args)
 
-    def select_physical_operators(self, query: SelectStatement, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SqlQuery, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
         if join_order is None:
             raise ValueError("Join order is required for operator selection.")
         return next(self._generator.random_operator_assignments_for(query, join_order))
@@ -508,7 +511,7 @@ class RandomPlanGenerator:
         self._join_order_generator = RandomJoinOrderGenerator(**join_order_args)
         self._operator_generator = RandomOperatorGenerator(**operator_args)
 
-    def random_plans_for(self, query: SelectStatement) -> Generator[QueryPlan, None, None]:
+    def random_plans_for(self, query: SqlQuery) -> Generator[QueryPlan, None, None]:
         """Produces a generator for random query plans of an input query.
 
         The structure of the provided plans can be restricted by configuring the underlying services. Consult the class-level
@@ -585,7 +588,7 @@ class RandomPlanOptimizer(CompleteOptimizationAlgorithm):
             database=database,
         )
 
-    def optimize_query(self, query: SelectStatement) -> QueryPlan:
+    def optimize_query(self, query: SqlQuery) -> QueryPlan:
         return next(self._generator.random_plans_for(query))
 
     def describe(self) -> dict:

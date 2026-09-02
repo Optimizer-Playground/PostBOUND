@@ -34,12 +34,12 @@ class QueryExecutionTests(unittest.TestCase):
 
     def test_execute_query(self) -> None:
         query = self.stats["q-1"]
-        result = self.pg_instance.execute_query(query, cache_enabled=False)
+        result = self.pg_instance.execute_query(query)
         self.assertEqual(result, 79851)
 
     def test_execute_raw_query(self) -> None:
         query = self.stats["q-1"]
-        result_set = self.pg_instance.execute_query(query, cache_enabled=False, raw=True)
+        result_set = self.pg_instance.execute_query(query, raw=True)
         self.assertEqual(len(result_set), 1)
 
         result = result_set[0][0]
@@ -47,7 +47,7 @@ class QueryExecutionTests(unittest.TestCase):
 
     def test_execute_timeout(self) -> None:
         query = self.stats["q-1"]
-        self.pg_instance.execute_query(query, cache_enabled=False)
+        self.pg_instance.execute_query(query)
         vanilla_runtime = self.pg_instance.last_query_runtime()
 
         timeout = 0.5 * vanilla_runtime

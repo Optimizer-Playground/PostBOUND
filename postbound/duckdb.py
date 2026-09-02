@@ -7,14 +7,14 @@ import textwrap
 import time
 import warnings
 from collections import UserString
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, overload
 
 import quacklab
 
-from . import qal, transform
+from . import db, qal, transform
 from ._core import (
     BoundColumnReference,
     Cardinality,
@@ -44,7 +44,9 @@ from .db import (
     HintService,
     Histogram,
     HistogramApproximation,
+    MostCommonValues,
     OptimizerInterface,
+    PreciseStatistics,
     ResultSet,
     UnsupportedDatabaseFeatureError,
     simplify_result_set,
@@ -60,9 +62,8 @@ class DuckDBInterface(Database):
         *,
         system_name: str = "DuckDB",
         read_only: bool = False,
-        cache_enabled: bool = False,
     ) -> None:
-        super().__init__(system_name=system_name, cache_enabled=cache_enabled)
+        super().__init__(system_name=system_name)
 
         self._dbfile = db
 
@@ -93,7 +94,6 @@ class DuckDBInterface(Database):
         self,
         query: SqlQuery | str,
         *,
-        cache_enabled: Optional[bool] = None,
         raw: bool = False,
         timeout: Optional[float] = None,
     ) -> Any:
@@ -106,11 +106,6 @@ class DuckDBInterface(Database):
         elif isinstance(query, UserString):
             query = str(query)
 
-        if cache_enabled:
-            cached_res = self._query_cache.get(query)
-            if cached_res is not None:
-                return cached_res if raw else simplify_result_set(cached_res)
-
         if timeout is not None:
             raw_result = self.execute_with_timeout(query, timeout=timeout)
             if raw_result is None:
@@ -122,9 +117,6 @@ class DuckDBInterface(Database):
 
             raw_result = self._cur.fetchall()
             self._last_query_runtime = (end_time - start_time) / 10**9  # convert to seconds
-
-        if cache_enabled:
-            self._query_cache[query] = raw_result
 
         return raw_result if raw else simplify_result_set(raw_result)
 
@@ -150,7 +142,7 @@ class DuckDBInterface(Database):
         return self._last_query_runtime
 
     def time_query(self, query: SqlQuery, *, timeout: Optional[float] = None) -> float:
-        self.execute_query(query, cache_enabled=False, raw=True, timeout=timeout)
+        self.execute_query(query, raw=True, timeout=timeout)
         return self.last_query_runtime()
 
     def database_name(self) -> str:
@@ -190,9 +182,10 @@ class DuckDBInterface(Database):
 
     def describe(self) -> jsondict:
         base_info: dict[str, object] = {
-            "system_name": self.database_system_name(),
+            "system_name": self.dbms_name(),
             "system_version": self.database_system_version(),
             "database": self.database_name(),
+            "statistics": self.statistics().describe(),
         }
 
         schema_info: list[jsondict] = []
@@ -211,7 +204,7 @@ class DuckDBInterface(Database):
             schema_info.append(
                 {
                     "table": str(table),
-                    "n_rows": self.statistics().total_rows(table, emulated=True),
+                    "n_rows": self.statistics().total_rows(table),
                     "columns": column_info,
                     "primary_key": self._schema.primary_key_column(table),
                 }
@@ -392,22 +385,11 @@ class DuckDBSchema(DatabaseSchema):
 
 
 class DuckDBStatistics(DatabaseStatistics):
-    def __init__(
-        self,
-        db: DuckDBInterface,
-        *,
-        emulated: bool = False,
-        enable_emulation_fallback: bool = True,
-        cache_enabled: Optional[bool] = True,
-    ) -> None:
-        super().__init__(
-            db,
-            emulated=emulated,
-            enable_emulation_fallback=enable_emulation_fallback,
-            cache_enabled=cache_enabled,
-        )
+    def __init__(self, db: DuckDBInterface) -> None:
+        super().__init__()
+        self._db = db
 
-    def _retrieve_total_rows_from_stats(self, table: TableReference) -> Optional[int]:
+    def total_rows(self, table: TableReference) -> Optional[Cardinality]:
         catalog_placeholder = "?" if table.catalog else "current_database()"
         schema_placeholder = "?" if table.schema else "current_schema()"
 
@@ -432,31 +414,42 @@ class DuckDBStatistics(DatabaseStatistics):
         if not result_set:
             return None
 
-        return result_set[0] if result_set[0] is not None else None
+        return Cardinality.of(result_set[0]) if result_set[0] is not None else None
 
-    def _retrieve_distinct_values_from_stats(self, column: BoundColumnReference) -> Optional[int]:
-        if self.enable_emulation_fallback:
-            return self._calculate_distinct_values(column)
-        raise UnsupportedDatabaseFeatureError(self._db, "distinct value count statistics.")
+    def num_distinct(self, column: ColumnReference) -> int:
+        if not db.enable_emulation_fallback:
+            raise UnsupportedDatabaseFeatureError(
+                self._db, "distinct value count statistics. Set db.enable_emulation_fallback to activate."
+            )
+        return PreciseStatistics(self._db).num_distinct(column)
 
-    def _retrieve_min_max_values_from_stats(self, column: BoundColumnReference) -> Optional[tuple[Any, Any]]:
-        if self.enable_emulation_fallback:
-            return self._calculate_min_max_values(column)
-        raise UnsupportedDatabaseFeatureError(self._db, "min/max value statistics.")
+    def null_frac(self, column: ColumnReference) -> float:
+        if not db.enable_emulation_fallback:
+            raise UnsupportedDatabaseFeatureError(
+                self._db, "null fraction statistics. Set db.enable_emulation_fallback to activate."
+            )
+        return PreciseStatistics(self._db).null_frac(column)
 
-    def _retrieve_most_common_values_from_stats(
-        self, column: BoundColumnReference, k: int | None
-    ) -> Sequence[tuple[Any, int]]:
-        if self.enable_emulation_fallback:
-            return self._calculate_most_common_values(column, k)
-        raise UnsupportedDatabaseFeatureError(self._db, "most common value statistics.")
+    def min_max(self, column: ColumnReference) -> tuple[Any, Any]:
+        if not db.enable_emulation_fallback:
+            raise UnsupportedDatabaseFeatureError(
+                self._db, "min/max value count statistics. Set db.enable_emulation_fallback to activate."
+            )
+        return PreciseStatistics(self._db).min_max(column)
 
-    def _retrieve_histogram_from_stats(
-        self, column: BoundColumnReference, *, interpolation: HistogramApproximation
-    ) -> Optional[Histogram]:
-        if self.enable_emulation_fallback:
-            return self._calculate_histogram(column, n_bins=100, interpolation=interpolation)
-        raise UnsupportedDatabaseFeatureError(self._db, "histogram statistics.")
+    def most_common_values(self, column: ColumnReference) -> MostCommonValues:
+        if not db.enable_emulation_fallback:
+            raise UnsupportedDatabaseFeatureError(
+                self._db, "distinct value count statistics. Set db.enable_emulation_fallback to activate."
+            )
+        return PreciseStatistics(self._db).most_common_values(column, k=100)
+
+    def histogram(self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni") -> Histogram:
+        if not db.enable_emulation_fallback:
+            raise UnsupportedDatabaseFeatureError(
+                self._db, "distinct value count statistics. Set db.enable_emulation_fallback to activate."
+            )
+        return PreciseStatistics(self._db).histogram(column, n_bins=100, interpolation=interpolation)
 
 
 def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> Optional[TableReference]:
@@ -598,7 +591,7 @@ class DuckDBOptimizer(OptimizerInterface):
         query = transform.as_explain_analyze(query)
 
         try:
-            result_set = self._db.execute_query(query, cache_enabled=False, raw=True, timeout=timeout)[0]
+            result_set = self._db.execute_query(query, raw=True, timeout=timeout)[0]
         except TimeoutError:
             return None
         assert len(result_set) == 2
@@ -886,7 +879,7 @@ def _reconnect(name: str, *, pool: DatabasePool) -> DuckDBInterface:
 
     try:
         # check if the connection is still active
-        current_conn.execute_query("SELECT 1", cache_enabled=False, raw=True)
+        current_conn.execute_query("SELECT 1", raw=True)
     except quacklab.ConnectionException as e:
         # otherwise re-establish the connection
         if "Connection Error: Connection already closed!" in e.args:
@@ -900,7 +893,6 @@ def _reconnect(name: str, *, pool: DatabasePool) -> DuckDBInterface:
 def connect(
     db: str | Path,
     *,
-    name: str = "duckdb",
     read_only: bool = False,
     refresh: bool = False,
     private: bool = False,
@@ -909,9 +901,6 @@ def connect(
 
     Parameters
     ----------
-    name : str, optional
-        A name to identify the current connection if multiple connections to different DuckDB instances should be
-        maintained. This is used to register the instance on the `DatabasePool`. Defaults to *duckdb*.
     read_only : bool, optional
         If true, the database will be opened in read-only mode. By default, the database is opened in read-write mode.
     refresh : bool, optional
@@ -922,13 +911,14 @@ def connect(
         If true, skips registration of the new instance on the `DatabasePool`. Registration is performed by default.
     """
     db_pool = DatabasePool.get_instance()
-    if name in db_pool and not refresh:
-        return _reconnect(name, pool=db_pool)
+    db_key = f"duckdb[{db}]"
+    if db_key in db_pool and not refresh:
+        return _reconnect(db_key, pool=db_pool)
 
     db = Path(db)
     duckdb_instance = DuckDBInterface(db, read_only=read_only)
 
     if not private:
-        db_pool.register_database(name, duckdb_instance)
+        db_pool.register_database(db_key, duckdb_instance)
 
     return duckdb_instance

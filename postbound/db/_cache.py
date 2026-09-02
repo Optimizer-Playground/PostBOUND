@@ -61,7 +61,7 @@ _caches: dict[tuple[Database, Path | None], ResultCache] = {}
 
 class ResultCache(Database):
     @staticmethod
-    def cache(db: Database, *, offline_cache: Optional[Path] = None) -> ResultCache:
+    def create_cache(db: Database, *, offline_cache: Optional[Path] = None) -> ResultCache:
         existing_cache = _caches.get((db, offline_cache))
         if existing_cache is not None:
             return existing_cache
@@ -75,7 +75,7 @@ class ResultCache(Database):
         self.offline_file = offline_cache
 
         self._db = db
-        self._cache: dict[SqlQuery, ResultSet] = {}
+        self._cache: dict[str, ResultSet] = {}
 
         self._init_offline()
 
@@ -91,20 +91,22 @@ class ResultCache(Database):
     def optimizer(self) -> OptimizerInterface:
         return self._db.optimizer()
 
-    def execute_query(self, query: SqlQuery, *, raw: bool = False) -> Any:
-        cached_res = self._cache.get(query)
+    def execute_query(self, query: SqlQuery | str, *, raw: bool = False) -> Any:
+        stringified_query = str(query) if isinstance(query, SqlQuery) else query
+
+        cached_res = self._cache.get(stringified_query)
         if cached_res is not None:
             return cached_res if raw else simplify_result_set(cached_res)
 
         result_set = self._db.execute_query(query, raw=True)
-        self._cache[query] = result_set
+        self._cache[stringified_query] = result_set
         return result_set if raw else simplify_result_set(result_set)
 
     def database_name(self) -> str:
         return self._db.database_name()
 
     def database_system_version(self) -> Version:
-        return self._db.database_system_version()
+        return self._db.dbms_version()
 
     def describe(self) -> jsondict:
         return {"interface-type": "result-cache", "database": self._db.describe()}

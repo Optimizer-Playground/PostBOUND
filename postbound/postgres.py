@@ -9,6 +9,7 @@ a lot of the original Postgres interfaces eventually evolved into the more abstr
 
 from __future__ import annotations
 
+import bisect
 import collections
 import concurrent
 import concurrent.futures
@@ -38,7 +39,7 @@ import psycopg
 import psycopg.rows
 import psycopg.types.datetime as psycopg_datetime
 
-from . import qal, transform, util
+from . import db, qal, transform, util
 from ._core import (
     BoundColumnReference,
     Cardinality,
@@ -72,7 +73,9 @@ from .db import (
     HintWarning,
     Histogram,
     HistogramApproximation,
+    MostCommonValues,
     OptimizerInterface,
+    PreciseStatistics,
     QueryCacheWarning,
     ResultSet,
     UnsupportedDatabaseFeatureError,
@@ -500,7 +503,7 @@ class PostgresConfigInterface:
         self._pg = pg_instance
 
     def __getitem__(self, key: str) -> Any:
-        return self._pg.execute_query(f"SHOW {key};", cache_enabled=False, raw=False)
+        return self._pg.execute_query(f"SHOW {key};")
 
 
 _PGVersionPattern = re.compile(r"^PostgreSQL (?P<pg_ver>[\d]+(\.[\d]+)?).*$")
@@ -655,7 +658,6 @@ class PostgresInterface(Database):
         *,
         application_name: str = "PostBOUND",
         client_encoding: str = "UTF8",
-        cache_enabled: bool = False,
         debug: bool = False,
     ) -> None:
         self.connect_string = connect_string
@@ -672,7 +674,7 @@ class PostgresInterface(Database):
         self._timeout_executor = TimeoutQueryExecutor(self)
         self._last_query_runtime = math.nan
 
-        super().__init__(system_name, cache_enabled=cache_enabled)
+        super().__init__(system_name)
 
     def schema(self) -> PostgresSchemaInterface:
         return self._db_schema
@@ -691,7 +693,6 @@ class PostgresInterface(Database):
         join_order: Optional[JoinTree] = None,
         physical_operators: Optional[PhysicalOperatorAssignment] = None,
         plan_parameters: Optional[PlanParameterization] = None,
-        cache_enabled: Optional[bool] = None,
         raw: bool = False,
         timeout: Optional[float] = None,
     ) -> Any:
@@ -706,9 +707,8 @@ class PostgresInterface(Database):
         )
 
         if timeout is not None and timeout > 0:
-            return self._timeout_executor.execute_query(query, timeout=timeout, cache_enabled=cache_enabled, raw=raw)
+            return self._timeout_executor.execute_query(query, timeout=timeout, raw=raw)
 
-        cache_enabled = cache_enabled or (cache_enabled is None and self._cache_enabled)
         if isinstance(query, UserString):
             query = str(query)
         elif isinstance(query, SqlQuery):
@@ -718,10 +718,6 @@ class PostgresInterface(Database):
             # query to execute.
             query = _apply_preparatory_statements(query, cur=self._cursor)
             query = self._hinting_backend.format_query(query)
-
-        if cache_enabled and query in self._query_cache:
-            query_result = self._query_cache[query]
-            return query_result if raw else simplify_result_set(query_result)
 
         try:
             start_time = time.perf_counter_ns()
@@ -736,9 +732,6 @@ class PostgresInterface(Database):
                 return None
 
             query_result = self._cursor.fetchall()
-            if cache_enabled:
-                self._inflate_query_cache()
-                self._query_cache[query] = query_result
         except (psycopg.InternalError, psycopg.OperationalError) as e:
             msg = "\n".join(
                 [
@@ -766,7 +759,7 @@ class PostgresInterface(Database):
 
     def execute_with_timeout(self, query: SqlQuery | str, timeout: float = 60.0) -> Optional[ResultSet]:
         try:
-            result = self.execute_query(query, timeout=timeout, cache_enabled=False, raw=True)
+            result = self.execute_query(query, timeout=timeout, raw=True)
             return result
         except TimeoutError:
             return None
@@ -775,7 +768,7 @@ class PostgresInterface(Database):
         return self._last_query_runtime
 
     def time_query(self, query: SqlQuery, *, timeout: Optional[float] = None) -> float:
-        self.execute_query(query, cache_enabled=False, raw=True, timeout=timeout)
+        self.execute_query(query, raw=True, timeout=timeout)
         return self.last_query_runtime()
 
     def optimizer(self) -> PostgresOptimizer:
@@ -826,15 +819,11 @@ class PostgresInterface(Database):
 
     def describe(self) -> jsondict:
         base_info: dict[str, Any] = {
-            "system_name": self.database_system_name(),
+            "system_name": self.dbms_name(),
             "system_version": self.database_system_version(),
             "database": self.database_name(),
-            "statistics_settings": {
-                "emulated": self._db_stats.emulated,
-                "cache_enabled": self._db_stats.cache_enabled,
-            },
             "hinting_mode": self._hinting_backend.describe(),
-            "query_cache": self.cache_enabled,
+            "statistics": self.statistics().describe(),
         }
         self._cursor.execute("SELECT name, setting FROM pg_settings")
         system_settings = self._cursor.fetchall()
@@ -862,7 +851,7 @@ class PostgresInterface(Database):
             schema_info.append(
                 {
                     "table": str(table),
-                    "n_rows": self.statistics().total_rows(table, emulated=True),
+                    "n_rows": self.statistics().total_rows(table),
                     "columns": column_info,
                     "primary_key": pk_col.name if pk_col else None,
                 }
@@ -1587,20 +1576,9 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         caching behavior of the `db`
     """
 
-    def __init__(
-        self,
-        postgres_db: PostgresInterface,
-        *,
-        emulated: bool = True,
-        enable_emulation_fallback: bool = True,
-        cache_enabled: Optional[bool] = True,
-    ) -> None:
-        super().__init__(
-            postgres_db,
-            emulated=emulated,
-            enable_emulation_fallback=enable_emulation_fallback,
-            cache_enabled=cache_enabled,
-        )
+    def __init__(self, postgres_db: PostgresInterface) -> None:
+        super().__init__()
+        self._db = postgres_db
 
     def n_pages(self, table: TableReference | str) -> int:
         table = table if isinstance(table, TableReference) else TableReference(table)
@@ -1730,7 +1708,11 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         )
         distinct_values: dict[ColumnReference, int] = {}
 
+        # in the first phase, we update the PG statistics settings to use as many values as possible during ANALYZE
+
         if perfect_mcv or perfect_n_distinct:
+            precise_stats = PreciseStatistics(self._db)
+
             for column in columns:
                 util.logging.print_if(
                     verbose,
@@ -1739,7 +1721,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
                     column,
                     use_stderr=True,
                 )
-                raw = self.num_distinct(column, emulated=True, cache_enabled=True)
+                raw = precise_stats.num_distinct(column)
                 assert raw is not None
                 n_distinct = round(raw)
                 if perfect_n_distinct:
@@ -1756,7 +1738,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
                 # However, Postgres simply uses the maximum value in this case. To permit different maximum values in different
                 # Postgres versions, we accept the warning and do not use a hard-coded maximum value with snapping logic
                 # ourselves.
-                self._db.cursor().execute(stats_target_query)
+                self._db.cursor().execute(stats_target_query)  # type: ignore - weird psycopg stuff
 
         columns_str = {table: ", ".join(col for col in columns) for table, columns in columns_map.items()}
         tables_and_columns = ", ".join(f"{table.full_name}({cols})" for table, cols in columns_str.items())
@@ -1769,7 +1751,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
             use_stderr=True,
         )
         query_template = f"ANALYZE {tables_and_columns}"
-        self._db.cursor().execute(query_template)
+        self._db.cursor().execute(query_template)  # type: ignore - weird psycopg stuff
 
         for column, n_distinct in distinct_values.items():
             assert column.table is not None, "Unbound table"
@@ -1778,9 +1760,9 @@ class PostgresStatisticsInterface(DatabaseStatistics):
                                                     ALTER COLUMN {column.name}
                                                     SET (n_distinct = {n_distinct});
                                                     """)
-            self._db.cursor().execute(distinct_update_query)
+            self._db.cursor().execute(distinct_update_query)  # type: ignore - weird psycopg stuff
 
-    def _retrieve_total_rows_from_stats(self, table: TableReference) -> Optional[int]:
+    def total_rows(self, table: TableReference) -> Optional[Cardinality]:
         schema = table.schema or "public"
         count_query = "SELECT reltuples FROM pg_class WHERE oid = %s::regclass AND relnamespace = %s::regnamespace"
         self._db.cursor().execute(count_query, (table.full_name, schema))
@@ -1788,9 +1770,14 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         if not result_set:
             return None
         count = result_set[0]
-        return int(count)
+        return Cardinality.of(count)
 
-    def _retrieve_distinct_values_from_stats(self, column: BoundColumnReference) -> Optional[int]:
+    def num_distinct(self, column: ColumnReference) -> Optional[int]:
+        if not ColumnReference.assert_bound(column):
+            raise UnboundColumnError(column)
+        elif column.table.virtual:
+            raise VirtualTableError(column.table)
+
         schema = column.table.schema or "public"
         dist_query = """
             SELECT n_distinct
@@ -1805,6 +1792,10 @@ class PostgresStatisticsInterface(DatabaseStatistics):
             return None
         dist_values = result_set[0]
 
+        null_frac = self.null_frac(column)
+        assert null_frac is not None
+        null_correction = 1 if null_frac > 0 else 0
+
         # interpreting the n_distinct column is difficult, since different value ranges indicate different things
         # (see https://www.postgresql.org/docs/current/view-pg-stats.html)
         # If the value is >= 0, it represents the actual (approximated) number of distinct non-zero values in the
@@ -1812,25 +1803,50 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         # If the value is < 0, it represents 'the negative of the number of distinct values divided by the number of
         # rows'. Therefore, we have to correct the number of distinct values manually in this case.
         if dist_values >= 0:
-            return int(dist_values)
+            return int(dist_values) + null_correction
 
         # correct negative values
-        n_rows = self._retrieve_total_rows_from_stats(column.table)
+        n_rows = self.total_rows(column.table)
         assert n_rows is not None, "Could not retrieve total row count for table"
 
-        return int(-1 * n_rows * dist_values)
+        return int(-1 * n_rows * dist_values) + null_correction
 
-    def _retrieve_min_max_values_from_stats(self, column: BoundColumnReference) -> Optional[tuple[Any, Any]]:
+    def null_frac(self, column: ColumnReference) -> Optional[float]:
+        if not ColumnReference.assert_bound(column):
+            raise UnboundColumnError(column)
+        elif column.table.virtual:
+            raise VirtualTableError(column.table)
+
+        schema = column.table.schema or "public"
+        null_query = """
+            SELECT null_frac
+            FROM pg_stats
+            WHERE tablename = %s
+                AND attname = %s
+                AND schemaname = %s
+        """
+        self._db.cursor().execute(null_query, (column.table.full_name, column.name, schema))
+        result_set = self._db.cursor().fetchone()
+        if not result_set:
+            return None
+        return float(result_set[0])
+
+    def min_max(self, column: ColumnReference) -> tuple[Any, Any]:
         # Postgres does not keep track of min/max values, so we need to determine them manually
-        if not self.enable_emulation_fallback:
-            raise UnsupportedDatabaseFeatureError(self._db, "min/max value statistics")
-        return self._calculate_min_max_values(column, cache_enabled=True)
+        # XXX: maybe it would be possible to infer min/max values from the histogram. Do we want to do this instead?
+        if not db.enable_emulation_fallback:
+            raise UnsupportedDatabaseFeatureError(
+                self._db, "min/max value statistics. Set db.enable_emulation_fallback to activate."
+            )
+        return PreciseStatistics(self._db).min_max(column)
 
-    def _retrieve_most_common_values_from_stats(
-        self, column: BoundColumnReference, k: int | None
-    ) -> Sequence[tuple[Any, int]]:
-        table = column.table
-        schema = table.schema or "public"
+    def most_common_values(self, column: ColumnReference) -> Optional[MostCommonValues]:
+        if not ColumnReference.assert_bound(column):
+            raise UnboundColumnError(column)
+        elif column.table.virtual:
+            raise VirtualTableError(column.table)
+
+        schema = column.table.schema or "public"
         # Postgres stores the Most common values in a column of type anyarray (since in this column, many MCVs from
         # many different tables and data types are present). However, this type is not very convenient to work on.
         # Therefore, we first need to convert the anyarray to an array of the actual attribute type.
@@ -1838,41 +1854,62 @@ class PostgresStatisticsInterface(DatabaseStatistics):
 
         # now, load the most frequent values. Since the frequencies are expressed as a fraction of the total number of
         # rows, we need to multiply this number again to obtain the true number of occurrences
-        mcv_query = """
-            SELECT UNNEST(most_common_vals::text::{conv}),
-                UNNEST(most_common_freqs) * (SELECT reltuples
-                                             FROM pg_class
-                                             WHERE oid = %s::regclass
-                                             AND relnamespace = %s::regnamespace)
+        mcv_query = f"""
+            SELECT UNNEST(most_common_vals::text::{attribute_converter}),
+                UNNEST(most_common_freqs)
             FROM pg_stats
             WHERE tablename = %s
                 AND attname = %s
                 AND schemaname = %s
         """
-        mcv_query = mcv_query.format(conv=attribute_converter)
 
         # NB: we have to repeat a few parameters here. Unfortunately, it seems that psycopg
         # does not support casts for named parameters - %(tab)s::regclass does not work
         self._db.cursor().execute(
-            mcv_query,
-            (table.full_name, schema, table.full_name, column.name, schema),
+            mcv_query,  # type: ignore - weird psycopg stuff
+            (
+                column.table.full_name,
+                column.name,
+                schema,
+            ),
         )
         result_set = self._db.cursor().fetchall()
         assert result_set is not None
-
         if not result_set:
-            return []
-        elif k is None or k <= 0:
-            return result_set
-        else:
-            return result_set[:k]
+            return None
 
-    def _retrieve_histogram_from_stats(
-        self,
-        column: BoundColumnReference,
-        *,
-        interpolation: HistogramApproximation,
+        # Sadly our job is not done yet:
+        #
+        # Postgres handles NULLs separately and importantly does not allow them to become part of the MCVs.
+        # But since the MCV frequencies are relative to the total number of (none-NULL) values, we need to scale
+        # them up to obtain the true frequency.
+        #
+        # What is worse, is that NULL might itself be one of the MCVs.
+        # Therefore, we also have to insert it back in.
+
+        n_rows = self.total_rows(column.table)
+        null_frac = self.null_frac(column)
+        assert n_rows is not None and null_frac is not None
+        scale_up = float((1 - null_frac) * n_rows)
+
+        result_set: list[tuple[Any, int]] = [(val, int(freq * scale_up)) for val, freq in result_set]
+
+        min_freq = result_set[-1][1]
+        n_nulls = int(null_frac * n_rows)
+        if n_nulls > min_freq:
+            null_tuple = (None, n_nulls)
+            bisect.insort_left(result_set, null_tuple, key=lambda x: x[1])
+
+        return MostCommonValues(result_set)
+
+    def histogram(
+        self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni"
     ) -> Optional[Histogram]:
+        if not ColumnReference.assert_bound(column):
+            raise UnboundColumnError(column)
+        elif column.table.virtual:
+            raise VirtualTableError(column.table)
+
         attribute_converter = self._array_cast(column)
         schema = column.table.schema or "public"
 
@@ -1882,18 +1919,39 @@ class PostgresStatisticsInterface(DatabaseStatistics):
             WHERE schemaname = %s AND tablename = %s AND attname = %s
             """.format(conv=attribute_converter)
 
-        self._db.cursor().execute(query_template, (schema, column.table.full_name, column.name))
+        self._db.cursor().execute(
+            query_template,  # type: ignore - weird psycopg stuff
+            (schema, column.table.full_name, column.name),
+        )
         result_set = self._db.cursor().fetchall()
         if not result_set:
             return None
         bounds = [row[0] for row in result_set]
 
-        n_rows = self._retrieve_total_rows_from_stats(column.table)
-        assert n_rows
+        # Sadly our job is not done yet:
+        #
+        # Postgres builds a histogram only for all values that are not part of the MCV list
+        # At runtime, the histogram is merged with the MCVs to obtain the "true" distribution
+        # We must do the same here
+        #
+        # Similarly, Postgres does not store the bucket frequency, but only the bucket boundaries.
+        # This is because PG constructs an equi-depth histogram so all buckets (should) have (more or less) the same
+        # frequency. As a consequence it would be redundant to explicitly store this information. We need to infer
+        # the frequency based on the total number of rows and tuples.
+        # But there is more, because we ALSO need to take care with NULL values because they appear in the total rows
+        # but not in the histogram.
+        #
+        # Stuff is complicated, man.
 
-        bucket_freq = n_rows // len(bounds)
+        n_rows = self.total_rows(column.table)
+        null_frac = self.null_frac(column)
+        assert n_rows is not None and null_frac is not None
 
-        mcvs = self._retrieve_most_common_values_from_stats(column, k=None)
+        bucket_freq = (1 - null_frac) * n_rows // len(bounds)
+
+        mcvs = self.most_common_values(column)
+        if mcvs is None:
+            mcvs = MostCommonValues.empty()
 
         normalized_bounds = []
         normalized_frequencies: list[int] = []
@@ -2704,7 +2762,7 @@ class PostgresOptimizer(OptimizerInterface):
             query = self._pg_instance._hinting_backend.format_query(query)
         else:
             query = self._explainify(query)
-        raw_query_plan: list = self._pg_instance.execute_query(query, cache_enabled=False)
+        raw_query_plan: list = self._pg_instance.execute_query(query)
         query_plan = PostgresExplainPlan(raw_query_plan[0])
         return query_plan.as_qep()
 
@@ -2721,7 +2779,7 @@ class PostgresOptimizer(OptimizerInterface):
         query = transform.as_explain_analyze(query)
 
         try:
-            raw_query_plan: dict = self._pg_instance.execute_query(query, cache_enabled=False, timeout=timeout)[0]
+            raw_query_plan: dict = self._pg_instance.execute_query(query, timeout=timeout)[0]
         except TimeoutError:
             return None
 
@@ -2751,7 +2809,7 @@ class PostgresOptimizer(OptimizerInterface):
             query = self._pg_instance._hinting_backend.format_query(query)
         else:
             query = self._explainify(query)
-        query_plan = self._pg_instance.execute_query(query, cache_enabled=False)
+        query_plan = self._pg_instance.execute_query(query)
         estimate: int = query_plan[0]["Plan"]["Plan Rows"]
         return Cardinality(estimate)
 
@@ -2761,7 +2819,7 @@ class PostgresOptimizer(OptimizerInterface):
             query = self._pg_instance._hinting_backend.format_query(query)
         else:
             query = self._explainify(query)
-        query_plan = self._pg_instance.execute_query(query, cache_enabled=False)
+        query_plan = self._pg_instance.execute_query(query)
         estimate: float = query_plan[0]["Plan"]["Total Cost"]
         return estimate
 
@@ -2791,25 +2849,25 @@ class PostgresOptimizer(OptimizerInterface):
         return query
 
 
-def _reconnect(name: str, *, pool: DatabasePool) -> PostgresInterface:
+def _reconnect(key: str, *, pool: DatabasePool) -> PostgresInterface:
     """Fetches a connection from the database pool.
 
     If the connection is in a bad state (e.g. because the user called close() before), it is re-established.
 
     Parameters
     ----------
-    name : str
+    key : str
         The name of the database connection in the pool.
     pool : DatabasePool
         The current pool.
     """
-    current_instance = pool.retrieve_database(name)
+    current_instance = pool.retrieve_database(key)
     assert isinstance(current_instance, PostgresInterface)
 
     status = current_instance._connection.info.status
     if status != psycopg.pq.ConnStatus.OK:
         # Actually there are a lot of other ConnStatus values beyond OK and Bad
-        # We could handle them explicitly here, or we might just defined anything that is not OK as Bad.
+        # We could handle them explicitly here, or we might just define anything that is not OK as Bad.
         # The latter seems much simpler so let's just do this for now.
         current_instance.reset_connection()
 
@@ -2857,12 +2915,10 @@ def _read_connection_from_file(config_file: Path) -> str:
 
 def connect(
     *,
-    name: str = "postgres",
     application_name: str = "PostBOUND",
     connect_string: str = "",
     config_file: str | Path = "",
     encoding: str = "UTF8",
-    cache_enabled: bool = False,
     refresh: bool = False,
     private: bool = False,
     debug: bool = False,
@@ -2903,9 +2959,6 @@ def connect(
 
     Parameters
     ----------
-    name : str, optional
-        A name to identify the current connection if multiple connections to different Postgres instances should be maintained.
-        This is used to register the instance on the `DatabasePool`. Defaults to *postgres*.
     application_name : str, optional
         Identifier for the Postgres server. This will be the name that is shown in the server logs and process lists.
     connect_string : str, optional
@@ -2918,9 +2971,6 @@ def connect(
         file extension.
     encoding : str, optional
         The client enconding of the connection. Defaults to *UTF8*.
-    cache_enabled : bool, optional
-        Controls the default caching behaviour of the Postgres instance. Caching of general queries is disabled by default,
-        whereas queries from the statistics interface are cached by default.
     refresh : bool, optional
         If true, a new connection to the database will always be established, even if a connection to the same database is
         already pooled. The registration key will be suffixed to prevent collisions. By default, the current connection is
@@ -2945,10 +2995,6 @@ def connect(
        database
     .. Postgres environment variables: https://www.postgresql.org/docs/current/libpq-envars.html
     """
-    db_pool = DatabasePool.get_instance()
-    if name in db_pool and not refresh:
-        return _reconnect(name, pool=db_pool)
-
     if connect_string:
         connect_string = connect_string.strip()
     elif config_file:
@@ -2992,21 +3038,21 @@ def connect(
             "the connect() method for more details."
         )
 
+    pool_key = f"postgres[{connect_string}]"
+    db_pool = DatabasePool.get_instance()
+    if pool_key in db_pool and not refresh:
+        return _reconnect(pool_key, pool=db_pool)
+
     postgres_db = PostgresInterface(
         connect_string,
         application_name=application_name,
-        system_name=name,
         client_encoding=encoding,
-        cache_enabled=cache_enabled,
         debug=debug,
     )
+
     if not private:
-        orig_name = name
-        instance_idx = 2
-        while name in db_pool:
-            name = f"{orig_name} - {instance_idx}"
-            instance_idx += 1
-        db_pool.register_database(name, postgres_db)
+        db_pool.register_database(pool_key, postgres_db)
+
     return postgres_db
 
 
@@ -3458,11 +3504,9 @@ def _timeout_query_worker(
     pg_instance: PostgresInterface | None = None
     try:
         connect_string = pg_config["connect_string"]
-        cache_enabled = pg_config.get("cache_enabled", False)
         pg_instance = PostgresInterface(
             connect_string,
             application_name="PostBOUND Timeout Worker",
-            cache_enabled=cache_enabled,
         )
         status_pipe.send(_BackendConnectedEvent(pg_instance.backend_pid()))
         pg_instance.apply_configuration(pg_config["config"])
@@ -3687,7 +3731,6 @@ class TimeoutQueryExecutor:
         """Generate a pickable representation of the current Postgres connection."""
         return {
             "connect_string": self._pg_instance.connect_string,
-            "cache_enabled": self._pg_instance.cache_enabled,
             "config": self._pg_instance.current_configuration(runtime_changeable_only=True),
         }
 
@@ -4741,9 +4784,7 @@ class WorkloadShifter:
         if not 0.0 < row_pct < 1.0:
             raise ValueError("Not a valid row percentage: " + str(row_pct))
 
-        total_n_rows = self.pg_instance.statistics().total_rows(
-            TableReference(table), cache_enabled=False, emulated=True
-        )
+        total_n_rows = self.pg_instance.statistics().total_rows(TableReference(table))
         if total_n_rows is None:
             raise StateError("Could not determine total number of rows for table " + table)
-        return round(row_pct * total_n_rows)
+        return round(row_pct * int(total_n_rows))

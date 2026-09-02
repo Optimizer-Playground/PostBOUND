@@ -294,7 +294,7 @@ class QueryPreparation:
                 on.prewarm_tables(query.tables())
 
         for stmt in self.preparatory_stmts:
-            on.execute_query(stmt, cache_enabled=False)
+            on.execute_query(stmt)
 
         return query
 
@@ -537,7 +537,7 @@ def _execute_query(
                 return _TimeoutExecution(timeout=timeout)
         else:
             exec_start = time.perf_counter_ns()
-            result_set = on.execute_query(query, cache_enabled=False, raw=True)
+            result_set = on.execute_query(query, raw=True)
             exec_end = time.perf_counter_ns()
         exec_time = (exec_end - exec_start) / 10**9  # convert to seconds
 

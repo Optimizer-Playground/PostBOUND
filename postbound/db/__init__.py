@@ -27,6 +27,7 @@ the `db` package.
 
 from __future__ import annotations
 
+from ._cache import ResultCache
 from ._db import (
     Connection,
     Cursor,
@@ -53,30 +54,51 @@ from ._db import (
     current_database,
     simplify_result_set,
 )
+from ._stats import PreciseStatistics
+
+enable_emulation_fallback: bool = True
+"""
+Controls, whether database systems that do not maintain a specific kind of statistic are allowed to compute a similar
+value instead. For example, some DBMS such as DuckDB do not maintain histograms for column distributions. With the
+fallback, DuckDB's statistics catalog would be allowed to compute the histogram on the fly.
+
+Note that allowing the fallback might result in a significant advantage in terms of precision, because such an emulation
+is usually based on exact calculation, rather than approximation which most systems that actually implement the
+statistic must use.
+
+Disabling the fallback forces DBMSes to raise an `UnsupportedDatabaseFeatureError` if a statistic is not maintained.
+Also note that this is a different failure situation than if a DBMS is capable of maintaining a statistic, but the
+statistic is not available for a specific object. For example, PostgreSQL only creates most common values lists for
+columns that are considered "sufficiently skewed". In this case, the absence of a statistic is indicated by a *None*
+value.
+"""
 
 __all__ = [
     "Cursor",
     "Connection",
-    "PrewarmingSupport",
-    "TimeoutSupport",
-    "StopwatchSupport",
-    "QueryCacheWarning",
     "Database",
-    "ForeignKeyRef",
     "DatabaseSchema",
     "DatabaseStatistics",
+    "DatabasePool",
+    "ForeignKeyRef",
     "HintWarning",
     "HintService",
     "Histogram",
     "HistogramApproximation",
     "MostCommonValues",
     "OptimizerInterface",
-    "DatabasePool",
-    "UnsupportedDatabaseFeatureError",
+    "PrewarmingSupport",
+    "PreciseStatistics",
+    "QueryCacheWarning",
     "DatabaseServerError",
     "DatabaseUserError",
-    "current_database",
-    "simplify_result_set",
+    "ResultCache",
     "ResultSet",
     "ResultRow",
+    "StopwatchSupport",
+    "TimeoutSupport",
+    "UnsupportedDatabaseFeatureError",
+    "current_database",
+    "enable_emulation_fallback",
+    "simplify_result_set",
 ]

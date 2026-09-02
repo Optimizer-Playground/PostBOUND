@@ -73,13 +73,13 @@ from .qal import (
     QuantifierExpression,
     QuantifierOperator,
     Select,
-    SqlQuery,
+    SelectStatement,
     SetOperator,
     SetQuery,
     SqlClause,
     SqlExpression,
     SqlOperator,
-    SelectStatement,
+    SqlQuery,
     StarExpression,
     StaticValueExpression,
     SubqueryExpression,
@@ -1099,14 +1099,14 @@ def _pglast_parse_expression(pglast_data: dict, *, namespace: QueryNamespace, qu
                 query_txt=query_txt,
             )
             if sublink_type == "EXISTS_SUBLINK":
-                return UnaryPredicate.create_exists(subquery)  # type: ignore - see comment on build_query() in _qal
+                return UnaryPredicate.create_exists(subquery)
             elif sublink_type == "EXPR_SUBLINK":
-                return SubqueryExpression(subquery)  # type: ignore - see comment on build_query() in _qal
+                return SubqueryExpression(subquery)
 
             testexpr = _pglast_parse_expression(expression["testexpr"], namespace=namespace, query_txt=query_txt)
 
             if sublink_type == "ANY_SUBLINK" and "operName" not in expression:
-                return InPredicate.create_subquery(testexpr, subquery)  # type: ignore - see comment on build_query() in _qal
+                return InPredicate.create_subquery(testexpr, subquery)
 
             if sublink_type == "ANY_SUBLINK":
                 pglast_op = _PglastOperatorMap[expression["operName"]]
@@ -1484,7 +1484,7 @@ def _pglast_parse_from_entry(pglast_data: dict, *, namespace: QueryNamespace, qu
                 query_txt=query_txt,
             )
 
-            subquery_source = SubqueryTableSource(subquery, target_name=alias, lateral=is_lateral)  # type: ignore - see comment on build_query() in _qal
+            subquery_source = SubqueryTableSource(subquery, target_name=alias, lateral=is_lateral)
             return subquery_source
 
         case "RangeFunction":

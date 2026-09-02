@@ -125,6 +125,13 @@ class Cardinality(Number):
         """
         return self._valid
 
+    def is_zero(self) -> bool:
+        """Checks, whether this cardinality is zero.
+
+        Note that this method returns *False* for invalid cardinalities.
+        """
+        return self._valid and self._value == 0
+
     def get(self) -> float:
         """Provides the value of this cardinality.
 

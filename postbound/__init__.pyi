@@ -75,6 +75,7 @@ from ._stages import (
 )
 from .db import Database
 from .parser import parse_query
+from .qal import SqlQuery
 from .workloads import Workload
 
 __all__ = [
