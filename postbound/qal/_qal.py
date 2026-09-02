@@ -3496,10 +3496,26 @@ def as_predicate(
 
 
 @overload
-def as_predicate(column: ColumnReference, operation: BinaryOperator | str, *arguments) -> BinaryPredicate: ...
+def as_predicate(
+    column: ColumnReference, operation: Literal[UnaryOperator.IsNull, "is null", "IS NULL"]
+) -> UnaryPredicate: ...
 
 
-def as_predicate(column: ColumnReference, operation: BinaryOperator | str, *arguments) -> BasePredicate:
+@overload
+def as_predicate(
+    column: ColumnReference, operation: Literal[UnaryOperator.IsNotNull, "is not null", "IS NOT NULL"]
+) -> UnaryPredicate: ...
+
+
+@overload
+def as_predicate(column: ColumnReference, operation: BinaryOperator, *arguments) -> BinaryPredicate: ...
+
+
+@overload
+def as_predicate(column: ColumnReference, operation: UnaryOperator) -> UnaryPredicate: ...
+
+
+def as_predicate(column: ColumnReference, operation: BinaryOperator | UnaryOperator | str, *arguments) -> BasePredicate:
     """Utility method to quickly construct instances of base predicates.
 
     The given arguments are transformed into appropriate expression objects as necessary.
@@ -3537,9 +3553,20 @@ def as_predicate(column: ColumnReference, operation: BinaryOperator | str, *argu
         operation = operation.upper()
         aliases = {"!=": "<>", "==": "="}
         operation = aliases.get(operation, operation)
-        operation = BinaryOperator(operation)
+
+        if operation in BinaryOperator:
+            operation = BinaryOperator(operation)
+        elif operation in UnaryOperator:
+            operation = UnaryOperator(operation)
+        else:
+            raise ValueError(f"Unknown operator: {operation}")
 
     column: ColumnExpression = ColumnExpression(column)
+
+    if isinstance(operation, UnaryOperator):
+        if arguments:
+            raise ValueError(f"Unary predicate {operation} does not accept any arguments")
+        return UnaryPredicate(column, operation)
 
     if operation == BinaryOperator.Between:
         if len(arguments) == 1:
