@@ -68,13 +68,13 @@ from .qal import (
     PredicateVisitor,
     QuantifierExpression,
     Select,
-    SqlQuery,
+    SelectStatement,
     SetOpClause,
     SetQuery,
     SqlClause,
     SqlExpression,
     SqlExpressionVisitor,
-    SelectStatement,
+    SqlQuery,
     StarExpression,
     StaticValueExpression,
     SubqueryExpression,
@@ -449,7 +449,9 @@ def extract_query_fragment(
 
 
 @overload
-def extract_subquery(query: SelectStatement, intermediate: TableReference | Iterable[TableReference]) -> SelectStatement: ...
+def extract_subquery(
+    query: SelectStatement, intermediate: TableReference | Iterable[TableReference]
+) -> SelectStatement: ...
 
 
 @overload
@@ -489,7 +491,9 @@ def _default_subquery_name(tables: Iterable[TableReference]) -> str:
     return "_".join(table.identifier() for table in tables)
 
 
-def expand_to_query(predicate: AbstractPredicate, *, projection: Literal["star", "count_star"] = "star") -> SelectStatement:
+def expand_to_query(
+    predicate: AbstractPredicate, *, projection: Literal["star", "count_star"] = "star"
+) -> SelectStatement:
     """Provides a ``SELECT *`` query that computes the result set of a specific predicate.
 
     Parameters
@@ -510,7 +514,9 @@ def expand_to_query(predicate: AbstractPredicate, *, projection: Literal["star",
     return SelectStatement(select_clause=select_clause, from_clause=from_clause, where_clause=where_clause)
 
 
-def move_into_subquery(query: SelectStatement, tables: Iterable[TableReference], subquery_name: str = "") -> SelectStatement:
+def move_into_subquery(
+    query: SelectStatement, tables: Iterable[TableReference], subquery_name: str = ""
+) -> SelectStatement:
     """Transforms a specific query by moving some of its tables into a subquery.
 
     This transformation renames all usages of columns that are now produced by the subquery to references to the virtual
@@ -1334,7 +1340,9 @@ def _replace_expressions_in_clause(
 
 
 @overload
-def replace_expressions(query: SelectStatement, replacement: Callable[[SqlExpression], SqlExpression]) -> SelectStatement: ...
+def replace_expressions(
+    query: SelectStatement, replacement: Callable[[SqlExpression], SqlExpression]
+) -> SelectStatement: ...
 
 
 @overload
@@ -1342,9 +1350,7 @@ def replace_expressions(query: SetQuery, replacement: Callable[[SqlExpression], 
 
 
 @overload
-def replace_expressions(
-    query: SqlQuery, replacement: Callable[[SqlExpression], SqlExpression]
-) -> SqlQuery: ...
+def replace_expressions(query: SqlQuery, replacement: Callable[[SqlExpression], SqlExpression]) -> SqlQuery: ...
 
 
 def replace_expressions(query, replacement: Callable[[SqlExpression], SqlExpression]):
@@ -1790,7 +1796,7 @@ def _rename_columns_in_table_source(table_source, available_renamings: Mapping[C
                 return table_source
 
             for current_col, target_col in available_renamings.items():
-                if not current_col.belongs_to(table_source.table):
+                if not current_col.belongs_to(table_source.table):  # type: ignore - guarded by check above
                     continue
                 if current_col.table != target_col.table:
                     raise ValueError("Cannot rename columns in a VALUES table source to a different table")
@@ -1801,7 +1807,7 @@ def _rename_columns_in_table_source(table_source, available_renamings: Mapping[C
                 new_col_spec = [(col if col.name != current_col.name else target_col.name) for col in current_col_spec]
                 table_source = ValuesTableSource(
                     table_source.rows,
-                    alias=table_source.table.identifier(),
+                    alias=table_source.table.identifier(),  # type: ignore - guarded by check above
                     columns=new_col_spec,
                 )
             return table_source
@@ -2280,31 +2286,42 @@ class _TableReferenceRenamer(
 
 
 @overload
-def rename_table[T: SqlQuery](
-    source_query: T,
-    renamings: dict[TableReference, TableReference],
-    *,
-    prefix_column_names: bool = False,
-) -> T: ...
-
-
-@overload
-def rename_table[T: SqlQuery](
-    source_query: T,
-    from_table: TableReference,
-    target_table: TableReference,
-    *,
-    prefix_column_names: bool = False,
-) -> T: ...
-
-
-def rename_table[T: SqlQuery](
-    source_query: T,
+def rename_table(
+    source_query: SelectStatement,
     from_table: TableReference | dict[TableReference, TableReference],
     target_table: TableReference | None = None,
     *,
     prefix_column_names: bool = False,
-) -> T:
+) -> SelectStatement: ...
+
+
+@overload
+def rename_table(
+    source_query: SetQuery,
+    from_table: TableReference | dict[TableReference, TableReference],
+    target_table: TableReference | None = None,
+    *,
+    prefix_column_names: bool = False,
+) -> SetQuery: ...
+
+
+@overload
+def rename_table(
+    source_query: SqlQuery,
+    from_table: TableReference | dict[TableReference, TableReference],
+    target_table: TableReference | None = None,
+    *,
+    prefix_column_names: bool = False,
+) -> SqlQuery: ...
+
+
+def rename_table(
+    source_query,
+    from_table: TableReference | dict[TableReference, TableReference],
+    target_table: TableReference | None = None,
+    *,
+    prefix_column_names: bool = False,
+):
     """Changes all references to a specific table to refer to another table instead.
 
     Parameters
@@ -2354,7 +2371,9 @@ def rename_table[T: SqlQuery](
 
 
 @overload
-def merge_tables(query: SelectStatement, tables: Iterable[TableReference], *, target: TableReference) -> SelectStatement: ...
+def merge_tables(
+    query: SelectStatement, tables: Iterable[TableReference], *, target: TableReference
+) -> SelectStatement: ...
 
 
 @overload
@@ -2362,9 +2381,7 @@ def merge_tables(query: SetQuery, tables: Iterable[TableReference], *, target: T
 
 
 @overload
-def merge_tables(
-    query: SqlQuery, tables: Iterable[TableReference], *, target: TableReference
-) -> SqlQuery: ...
+def merge_tables(query: SqlQuery, tables: Iterable[TableReference], *, target: TableReference) -> SqlQuery: ...
 
 
 def merge_tables(query, tables: Iterable[TableReference], *, target: TableReference):
