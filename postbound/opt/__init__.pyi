@@ -16,12 +16,6 @@ from ._helpers import (
     to_query_plan,
     update_plan,
 )
-from ._joingraph import (
-    IndexInfo,
-    JoinGraph,
-    JoinPath,
-    TableInfo,
-)
 
 __all__ = [
     "CardinalityDistortion",
@@ -35,10 +29,6 @@ __all__ = [
     "to_query_plan",
     "read_query_plan_json",
     "explode_query_plan",
-    "JoinGraph",
-    "JoinPath",
-    "IndexInfo",
-    "TableInfo",
     "dynprog",
     "enumeration",
     "native",
