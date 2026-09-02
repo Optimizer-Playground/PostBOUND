@@ -3508,11 +3508,11 @@ def as_predicate(
 
 
 @overload
-def as_predicate(column: ColumnReference, operation: BinaryOperator, *arguments) -> BinaryPredicate: ...
+def as_predicate(column: ColumnReference, operation: UnaryOperator) -> UnaryPredicate: ...
 
 
 @overload
-def as_predicate(column: ColumnReference, operation: UnaryOperator) -> UnaryPredicate: ...
+def as_predicate(column: ColumnReference, operation: BinaryOperator | str, *arguments) -> BinaryPredicate: ...
 
 
 def as_predicate(column: ColumnReference, operation: BinaryOperator | UnaryOperator | str, *arguments) -> BasePredicate:
