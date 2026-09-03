@@ -2075,41 +2075,13 @@ def parse_query(query: str) -> SqlQuery: ...
 
 
 @overload
-def parse_query(query: str, *, accept_set_query: Literal[True]) -> SqlQuery: ...
-
-
-@overload
-def parse_query(query: str, *, accept_set_query: Literal[False]) -> SelectStatement: ...
-
-
-@overload
-def parse_query(query: str, *, accept_set_query: Literal[True], include_hints: bool) -> SqlQuery: ...
-
-
-@overload
-def parse_query(query: str, *, accept_set_query: Literal[False], include_hints: bool) -> SelectStatement: ...
-
-
-@overload
-def parse_query(
-    query: str, *, accept_set_query: Literal[True], include_hints: bool, bind_columns: Optional[bool]
-) -> SqlQuery: ...
-
-
-@overload
-def parse_query(
-    query: str, *, accept_set_query: Literal[False], include_hints: bool, bind_columns: Optional[bool]
-) -> SelectStatement: ...
-
-
-@overload
 def parse_query(
     query: str,
     *,
     accept_set_query: Literal[True],
-    include_hints: bool,
-    bind_columns: Optional[bool],
-    db_schema: Optional[DatabaseSchema],
+    include_hints: bool = ...,
+    bind_columns: Optional[bool] = ...,
+    db_schema: Optional[DatabaseSchema] = ...,
 ) -> SqlQuery: ...
 
 
@@ -2118,62 +2090,10 @@ def parse_query(
     query: str,
     *,
     accept_set_query: Literal[False],
-    include_hints: bool,
-    bind_columns: Optional[bool],
-    db_schema: Optional[DatabaseSchema],
+    include_hints: bool = ...,
+    bind_columns: Optional[bool] = ...,
+    db_schema: Optional[DatabaseSchema] = ...,
 ) -> SelectStatement: ...
-
-
-@overload
-def parse_query(
-    query: str,
-    *,
-    include_hints: bool,
-) -> SqlQuery: ...
-
-
-@overload
-def parse_query(
-    query: str,
-    *,
-    include_hints: bool,
-    bind_columns: Optional[bool],
-) -> SqlQuery: ...
-
-
-@overload
-def parse_query(
-    query: str,
-    *,
-    include_hints: bool,
-    bind_columns: Optional[bool],
-    db_schema: Optional[DatabaseSchema],
-) -> SqlQuery: ...
-
-
-@overload
-def parse_query(
-    query: str,
-    *,
-    bind_columns: Optional[bool],
-) -> SqlQuery: ...
-
-
-@overload
-def parse_query(
-    query: str,
-    *,
-    bind_columns: Optional[bool],
-    db_schema: Optional[DatabaseSchema],
-) -> SqlQuery: ...
-
-
-@overload
-def parse_query(
-    query: str,
-    *,
-    db_schema: Optional[DatabaseSchema],
-) -> SqlQuery: ...
 
 
 def parse_query(

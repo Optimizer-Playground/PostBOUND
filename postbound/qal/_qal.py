@@ -2970,7 +2970,7 @@ class UnaryPredicate(BasePredicate):
         super().__init__(hash((operation, expression)))
 
     __slots__ = ("_operation", "_column")
-    __match_args__ = ("column", "operation")
+    __match_args__ = ("expression", "operator")
 
     @property
     def operator(self) -> Optional[UnaryOperator]:

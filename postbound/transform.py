@@ -1168,7 +1168,8 @@ def _replace_expression_in_predicate(predicate, replacement):
             return CompoundPredicate.create_not(replaced_child)
 
         case _:
-            raise ValueError(f"Unknown predicate type: {predicate}")
+            pred_type = type(predicate).__name__
+            raise ValueError(f"Unknown predicate type {pred_type}: {predicate}")
 
 
 @overload

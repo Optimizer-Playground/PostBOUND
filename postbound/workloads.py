@@ -948,7 +948,7 @@ def job(
     # JOB only uses aliases column references, so no need for explicit binding
     job_workload = Workload.read(workload_dir, name="JOB", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(job_workload, workload_dir)
-    return cast(Workload[str, SelectStatement], job)
+    return cast(Workload[str, SelectStatement], job_workload)
 
 
 def job_light(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:

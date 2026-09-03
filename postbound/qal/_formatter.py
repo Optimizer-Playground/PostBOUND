@@ -40,9 +40,9 @@ from ._qal import (
     OrPredicate,
     QuantifierExpression,
     Select,
-    SqlQuery,
     SetQuery,
     SqlExpression,
+    SqlQuery,
     StarExpression,
     StaticValueExpression,
     SubqueryExpression,
@@ -159,7 +159,7 @@ def _quick_format_explain(explain_clause: Explain, *, flavor: SqlDialect) -> lis
     if flavor != "postgres":
         return [str(explain_clause)]
 
-    options = ["SETTINGS", "SUMMARY"]
+    options = ["SETTINGS", "SUMMARY", "VERBOSE"]
     if explain_clause.analyze:
         options.append("ANALYZE")
     options.append("FORMAT JSON")
