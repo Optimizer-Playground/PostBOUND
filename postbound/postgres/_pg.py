@@ -1,18 +1,6 @@
-"""Contains the Postgres implementation of the Database interface.
-
-In many ways the Postgres implementation can be thought of as the reference or blueprint implementation of the database
-interface. This is due to two main reasons: first up, Postgres' capabilities follow a traditional architecture and its
-features cover most of the general aspects of query optimization (i.e. supported operators, join orders and statistics).
-Secondly, and on a more pragmatic note Potsgres was the first database system that was supported by PostBOUND and therefore
-a lot of the original Postgres interfaces eventually evolved into the more abstract database-independent interfaces.
-"""
-
 from __future__ import annotations
 
 import bisect
-import collections
-import concurrent
-import concurrent.futures
 import configparser
 import datetime
 import functools
@@ -24,23 +12,22 @@ import re
 import subprocess
 import sys
 import textwrap
-import threading
 import time
 import tomllib
 import warnings
 from collections import UserString
-from collections.abc import Callable, Iterable, Sequence, Sized
+from collections.abc import Iterable, Sized
 from dataclasses import dataclass
 from multiprocessing import connection as mp_conn
 from pathlib import Path
-from typing import Any, Literal, Optional, TextIO, get_args, overload
+from typing import Any, Literal, Optional, TextIO, overload
 
 import psycopg
 import psycopg.rows
 import psycopg.types.datetime as psycopg_datetime
 
-from . import db, qal, transform, util
-from ._core import (
+from .. import db, qal, transform, util
+from .._core import (
     BoundColumnReference,
     Cardinality,
     ColumnReference,
@@ -52,7 +39,7 @@ from ._core import (
     UnboundColumnError,
     VirtualTableError,
 )
-from ._hints import (
+from .._hints import (
     HintType,
     JoinTree,
     PhysicalOperatorAssignment,
@@ -61,8 +48,8 @@ from ._hints import (
     operators_from_plan,
     parameters_from_plan,
 )
-from ._qep import QueryPlan, SortKey
-from .db import (
+from .._qep import QueryPlan
+from ..db import (
     Database,
     DatabasePool,
     DatabaseSchema,
@@ -81,419 +68,18 @@ from .db import (
     UnsupportedDatabaseFeatureError,
     simplify_result_set,
 )
-from .qal import (
+from ..qal import (
     Hint,
     SqlQuery,
 )
-from .util import StateError, Version, jsondict
-
-_SignificantPostgresSettings = {
-    # Resource consumption settings (see https://www.postgresql.org/docs/current/runtime-config-resource.html)
-    # Memory
-    "shared_buffers",
-    "huge_pages",
-    "huge_page_size",
-    "temp_buffers",
-    "max_prepared_transactions",
-    "work_mem",
-    "hash_mem_multiplier",
-    "maintenance_work_mem",
-    "autovacuum_work_mem",
-    "vacuum_buffer_usage_limit",
-    "logical_decoding_work_mem",
-    "max_stack_depth",
-    "shared_memory_type",
-    "dynamic_shared_memory_type",
-    "min_dynamic_shared_memory",
-    # Disk
-    "temp_file_limit",
-    # Kernel Resource Usage
-    "max_files_per_process",
-    # Cost-based Vacuum Delay
-    "vacuum_cost_delay",
-    "vacuum_cost_page_hit",
-    "vacuum_cost_page_miss",
-    "vacuum_cost_page_dirty",
-    "vacuum_cost_limit",
-    # Background Writer
-    "bgwriter_delay",
-    "bgwriter_lru_maxpages",
-    "bgwriter_lru_multiplier",
-    "bgwriter_flush_after",
-    # Asynchronous Behavior
-    "backend_flush_after",
-    "effective_io_concurrency",
-    "maintenance_io_concurrency",
-    "max_worker_processes",
-    "max_parallel_workers_per_gather",
-    "max_parallel_maintenance_workers",
-    "max_parallel_workers",
-    "parallel_leader_participation",
-    "old_snapshot_threshold",
-    # Query Planning Settings (see https://www.postgresql.org/docs/current/runtime-config-query.html)
-    # Planner Method Configuration
-    "enable_async_append",
-    "enable_bitmapscan",
-    "enable_gathermerge",
-    "enable_hashagg",
-    "enable_hashjoin",
-    "enable_incremental_sort",
-    "enable_indexscan",
-    "enable_indexonlyscan",
-    "enable_material",
-    "enable_memoize",
-    "enable_mergejoin",
-    "enable_nestloop",
-    "enable_parallel_append",
-    "enable_parallel_hash",
-    "enable_partition_pruning",
-    "enable_partitionwise_join",
-    "enable_partitionwise_aggregate",
-    "enable_presorted_aggregate",
-    "enable_seqscan",
-    "enable_sort",
-    "enable_tidscan",
-    # Planner Cost Constants
-    "seq_page_cost",
-    "random_page_cost",
-    "cpu_tuple_cost",
-    "cpu_index_tuple_cost",
-    "cpu_operator_cost",
-    "parallel_setup_cost",
-    "parallel_tuple_cost",
-    "min_parallel_table_scan_size",
-    "min_parallel_index_scan_size",
-    "effective_cache_size",
-    "jit_above_cost",
-    "jit_inline_above_cost",
-    "jit_optimize_above_cost",
-    # Genetic Query Optimizer
-    "geqo",
-    "geqo_threshold",
-    "geqo_effort",
-    "geqo_pool_size",
-    "geqo_generations",
-    "geqo_selection_bias",
-    "geqo_seed",
-    # Other Planner Options
-    "default_statistics_target",
-    "constraint_exclusion",
-    "cursor_tuple_fraction",
-    "from_collapse_limit",
-    "jit",
-    "join_collapse_limit",
-    "plan_cache_mode",
-    "recursive_worktable_factor"
-    # Automatic Vacuuming (https://www.postgresql.org/docs/current/runtime-config-autovacuum.html)
-    "autovacuum",
-    "autovacuum_max_workers",
-    "autovacuum_naptime",
-    "autovacuum_threshold",
-    "autovacuum_insert_threshold",
-    "autovacuum_analyze_threshold",
-    "autovacuum_scale_factor",
-    "autovacuum_analyze_scale_factor",
-    "autovacuum_freeze_max_age",
-    "autovacuum_multixact_freeze_max_age",
-    "autovacuum_cost_delay",
-    "autovacuum_cost_limit",
-}
-"""Postgres settings that are relevant to many PostBOUND workflows.
-
-These settings can influence performance measurements of different benchmarks. Therefore, we want to make their values
-transparent in order to assess the results.
-
-As a rule of thumb we include settings from three major categories: resource consumption (e.g. size of shared buffers),
-optimizer settings (e.g. enable operators) and auto vacuum. The final category is required because it determines how good the
-statistics are once a new database dump has been loaded or a data shift has been simulated. For all of these categories we
-include all settings, even if they are not important right now to the best of our knowledge. This is done to prevent tedious
-debugging if setting is later found to be indeed important: if the category to which it belongs is present in our "significant
-settings", it is guaranteed to be monitored.
-
-Most notably settings regarding replication, logging and network settings are excluded, as well as settings regarding locking.
-This is done because PostBOUNDs database abstraction assumes read-only workloads with a single query at a time. If data shifts
-are simulated, these are supposed to be happen strictly before or after a read-only workload is executed and benchmarked.
-
-All settings are up-to-date as of Postgres version 16.
-"""
-
-_RuntimeChangeablePostgresSettings = {setting for setting in _SignificantPostgresSettings} - {
-    "autovacuum_max_workers",
-    "autovacuum_naptime",
-    "autovacuum_threshold",
-    "autovacuum_insert_threshold",
-    "autovacuum_analyze_threshold",
-    "autovacuum_scale_factor",
-    "autovacuum_analyze_scale_factor",
-    "autovacuum_freeze_max_age",
-    "autovacuum_multixact_freeze_max_age",
-    "autovacuum_cost_delay",
-    "autovacuum_cost_limit",
-    "autovacuum_work_mem",
-    "bgwriter_delay",
-    "bgwriter_lru_maxpages",
-    "bgwriter_lru_multiplier",
-    "bgwriter_flush_after",
-    "dynamic_shared_memory_type",
-    "huge_pages",
-    "huge_page_size",
-    "max_files_per_process",
-    "max_prepared_transactions",
-    "max_worker_processes",
-    "min_dynamic_shared_memory",
-    "old_snapshot_threshold",
-    "shared_buffers",
-    "shared_memory_type",
-}
-"""These are exactly those settings from `_SignificantPostgresSettings` that can be changed at runtime."""
-
-
-class PostgresSetting(str):
-    """Model for a single Postgres configuration such as *SET enable_nestloop = 'off';*.
-
-    This setting can be used directly as a replacement where a string is expected, or its different components can be accessed
-    via the `parameter` and `value` attribute.
-
-    Parameters
-    ----------
-    parameter : str
-        The name of the setting
-    value : object
-        The setting's current or desired value
-    """
-
-    def __init__(self, parameter: str, value: object) -> None:
-        self._param = parameter
-        self._val = value
-
-    def __new__(cls, parameter: str, value: object):
-        value = "on" if value is True else "off" if value is False else value
-        return super().__new__(cls, f"SET {parameter} = '{value}';")
-
-    __match_args__ = ("parameter", "value")
-
-    @property
-    def parameter(self) -> str:
-        """Gets the name of the setting.
-
-        Returns
-        -------
-        str
-            The name
-        """
-        return self._param
-
-    @property
-    def value(self) -> object:
-        """Gets the current or desired value of the setting.
-
-        Returns
-        -------
-        object
-            The raw, i.e. un-escaped value of the setting.
-        """
-        return self._val
-
-    def update(self, value: object) -> PostgresSetting:
-        """Creates a new setting with the same name but a different value.
-
-        Parameters
-        ----------
-        value : object
-            The new value
-
-        Returns
-        -------
-        PostgresSetting
-            The new setting
-        """
-        return PostgresSetting(self.parameter, value)
-
-    def __getnewargs__(self):
-        return (self.parameter, self.value)
-
-
-class PostgresConfiguration(collections.UserString):
-    """Model for a collection of different postgres settings that form a complete server configuration.
-
-    Each configuration is build of indivdual `PostgresSetting` objects. The configuration can be used directly as a replacement
-    when a string is expected, or its different settings can be accessed individually - either through the accessor methods, or
-    by using a dict-like syntax: calling ``config[setting]`` with a string setting value will provide the matching
-    `PostgresSetting`. Since the configuration also subclasses string, the precise behavior of `__getitem__` depends on the
-    argument type: string arguments provide settings whereas integer arguments result in specific characters. All other string
-    methods are implemented such that the normal string behavior is retained. All additional behavior is part of new methods.
-
-    Parameters
-    ----------
-    settings : Iterable[PostgresSetting]
-        The settings that form the configuration.
-
-    Warnings
-    --------
-    Notice that while the configuration is a *UserString*, pyscopg currently does not support executing the configuration, i.e.
-    executing ``cursor.execute(config)`` will not work. Instead, the configuration has to be manually converted into a string
-    first by calling *str* as in ``cursor.execute(str(config))``. This also applies to the `execute_query()` method of the
-    `PostgresInterface` class, since it uses psycopg under the hood.
-    """
-
-    @staticmethod
-    def load(*args, **kwargs) -> PostgresConfiguration:
-        """Generates a new configuration based on (setting name, value) pairs.
-
-        Parameters
-        ----------
-        args
-            Ready-to-use `PostgresSetting` objects
-        kwargs
-            Additional settings
-
-        Returns
-        -------
-        PostgresConfiguration
-            The configuration
-        """
-        return PostgresConfiguration(list(args) + [PostgresSetting(key, val) for key, val in kwargs.items()])
-
-    def __init__(self, settings: Iterable[PostgresSetting]) -> None:
-        self._settings: dict[str, PostgresSetting] = {setting.parameter: setting for setting in settings}
-        super().__init__(self._format())
-
-    @property
-    def settings(self) -> Sequence[PostgresSetting]:
-        """Gets the settings that are part of the configuration.
-
-        Returns
-        -------
-        Sequence[PostgresSetting]
-            The settings in the order in which they were originally specified.
-        """
-        return list(self._settings.values())
-
-    def parameters(self) -> Sequence[str]:
-        """Provides all setting names that are specified in this configuration.
-
-        Returns
-        -------
-        Sequence[str]
-            The setting names in the order in which they were orignally specified.
-        """
-        return list(self._settings.keys())
-
-    def add(
-        self,
-        setting: PostgresSetting | str | None = None,
-        value: object = None,
-        **kwargs,
-    ) -> PostgresConfiguration:
-        """Creates a new configuration with additional settings.
-
-        The setting can be supplied either as a `PostgresSetting` object or as a key-value pair.
-        The latter case allows both positional arguments, as well as as keyword arguments.
-
-        Parameters
-        ----------
-        setting : PostgresSetting | str
-            The setting to add. This can either be a readily created `PostgresSetting` object or a string that will be used as
-            the setting name. In the latter case, the `value` has to be supplied as well.
-        value : object
-            The value of the setting. This is only used if `setting` is a string.
-        kwargs
-            If the setting is not specified as a string, nor as a `PostgresSetting` object, it has to be specified as keyword
-            arguments. The keyword argument names are used as the setting names, the values are used as the setting values.
-
-        Returns
-        -------
-        PostgresConfiguration
-            The updated configuration. The original config is not modified.
-        """
-        if isinstance(setting, str):
-            setting = PostgresSetting(setting, value)
-
-        target_settings = dict(self._settings)
-        if isinstance(setting, PostgresSetting):
-            target_settings[setting.parameter] = setting
-        else:
-            settings = {key: PostgresSetting(key, val) for key, val in kwargs.items()}
-            target_settings.update(settings)
-
-        return PostgresConfiguration(target_settings.values())
-
-    def remove(self, setting: PostgresSetting | str) -> PostgresConfiguration:
-        """Creates a new configuration without a specific setting.
-
-        Parameters
-        ----------
-        setting : PostgresSetting
-            The setting to remove
-
-        Returns
-        -------
-        PostgresConfiguration
-            The updated configuration. The original config is not modified.
-        """
-        parameter = setting.parameter if isinstance(setting, PostgresSetting) else setting
-        target_settings = dict(self._settings)
-        target_settings.pop(parameter, None)
-        return PostgresConfiguration(target_settings.values())
-
-    def update(self, setting: PostgresSetting | str, value: object) -> PostgresConfiguration:
-        """Creates a new configuration with an updated setting.
-
-        Parameters
-        ----------
-        setting : PostgresSetting | str
-            The setting to update. This can either be the raw setting name, or a `PostgresSetting` object. In either case,
-            the updated value has to be supplied via the `value` parameter. (When supplying a `PostgresSetting`, only its
-            name is used.)
-        value : object
-            The updated value of the setting.
-
-        Returns
-        -------
-        PostgresConfiguration
-            The updated configuration. The original config is not modified.
-        """
-        match setting:
-            case str():
-                setting = PostgresSetting(setting, value)
-            case PostgresSetting(name, _):
-                setting = PostgresSetting(name, value)
-
-        target_settings = dict(self._settings)
-        target_settings[setting.parameter] = setting
-
-        return PostgresConfiguration(target_settings.values())
-
-    def as_dict(self) -> dict[str, object]:
-        """Provides all settings as setting name -> setting value mappings.
-
-        Returns
-        -------
-        dict[str, object]
-            The settings. Changes to this dictionary will not be reflected in the configuration object.
-        """
-        return dict(self._settings)
-
-    def _format(self) -> str:
-        """Provides the string representation of the configuration.
-
-        Returns
-        -------
-        str
-            The string representation
-        """
-        return "\n".join([str(setting) for setting in self.settings])
-
-    def __getitem__(self, index):
-        if isinstance(index, str):
-            return self._settings[index]
-        return super().__getitem__(index)
-
-    def __setitem__(self, key: str, value: str | PostgresSetting) -> None:
-        if isinstance(value, str):
-            value = PostgresSetting(key, value)
-        self._settings[key] = value
-        self.data = self._format()
+from ..util import StateError, Version, jsondict
+from ._config import (
+    PostgresConfiguration,
+    PostgresSetting,
+    RuntimeChangeablePostgresSettings,
+    SignificantPostgresSettings,
+)
+from ._explain import PostgresExplainPlan
 
 
 class PostgresConfigInterface:
@@ -671,7 +257,7 @@ class PostgresInterface(Database):
         self._db_schema = PostgresSchemaInterface(self)
         self._hinting_backend = PostgresHintService(self)
 
-        self._timeout_executor = TimeoutQueryExecutor(self)
+        self._timeout_executor = _TimeoutQueryExecutor(self)
         self._last_query_runtime = math.nan
 
         super().__init__(system_name)
@@ -779,7 +365,7 @@ class PostgresInterface(Database):
         db_name = self._cursor.fetchone()[0]  # type: ignore
         return db_name
 
-    def database_system_version(self) -> Version:
+    def dbms_version(self) -> Version:
         self._cursor.execute("SELECT VERSION();")
         version_string = self._cursor.fetchone()[0]  # type: ignore
         version_match = _PGVersionPattern.match(version_string)
@@ -820,7 +406,7 @@ class PostgresInterface(Database):
     def describe(self) -> jsondict:
         base_info: dict[str, Any] = {
             "system_name": self.dbms_name(),
-            "system_version": self.database_system_version(),
+            "system_version": self.dbms_version(),
             "database": self.database_name(),
             "hinting_mode": self._hinting_backend.describe(),
             "statistics": self.statistics().describe(),
@@ -828,7 +414,7 @@ class PostgresInterface(Database):
         self._cursor.execute("SELECT name, setting FROM pg_settings")
         system_settings = self._cursor.fetchall()
         base_info["system_settings"] = {
-            setting: value for setting, value in system_settings if setting in _SignificantPostgresSettings
+            setting: value for setting, value in system_settings if setting in SignificantPostgresSettings
         }
 
         schema_info: list[jsondict] = []
@@ -1081,9 +667,7 @@ class PostgresInterface(Database):
         """
         self._cursor.execute("SELECT name, setting FROM pg_settings")
         system_settings = self._cursor.fetchall()
-        allowed_settings = (
-            _RuntimeChangeablePostgresSettings if runtime_changeable_only else _SignificantPostgresSettings
-        )
+        allowed_settings = RuntimeChangeablePostgresSettings if runtime_changeable_only else SignificantPostgresSettings
         configuration = {setting: value for setting, value in system_settings if setting in allowed_settings}
         return PostgresConfiguration.load(**configuration)
 
@@ -1098,7 +682,7 @@ class PostgresInterface(Database):
         """
         if (
             isinstance(configuration, PostgresSetting)
-            and configuration.parameter not in _RuntimeChangeablePostgresSettings
+            and configuration.parameter not in RuntimeChangeablePostgresSettings
         ):
             warnings.warn(
                 f"Cannot apply configuration setting '{configuration.parameter}' at runtime",
@@ -1109,7 +693,7 @@ class PostgresInterface(Database):
             supported_settings: list[PostgresSetting] = []
             unsupported_settings: list[str] = []
             for setting in configuration.settings:
-                if setting.parameter in _RuntimeChangeablePostgresSettings:
+                if setting.parameter in RuntimeChangeablePostgresSettings:
                     supported_settings.append(setting)
                 else:
                     unsupported_settings.append(setting.parameter)
@@ -2849,6 +2433,415 @@ class PostgresOptimizer(OptimizerInterface):
         return query
 
 
+@dataclass
+class _BackendConnectedEvent:
+    backend_pid: int
+
+
+@dataclass
+class _WorkerErrorEvent:
+    error: Exception
+
+
+@dataclass
+class _QueryReadyEvent:
+    pass
+
+
+@dataclass
+class _QueryFinishedEvent:
+    pass
+
+
+@dataclass
+class _ResultEvent:
+    status: Literal["success", "timeout", "failure"]
+    result_set: ResultSet | None
+    exec_time: float
+    error: Exception | None = None
+
+    @staticmethod
+    def ok(result_set: ResultSet | None, exec_time: float) -> _ResultEvent:
+        return _ResultEvent("success", result_set, exec_time)
+
+    @staticmethod
+    def timeout(duration: float) -> _ResultEvent:
+        return _ResultEvent("timeout", None, duration)
+
+    @staticmethod
+    def failed(error: Exception) -> _ResultEvent:
+        return _ResultEvent("failure", None, math.nan, error=error)
+
+
+def _timeout_worker_ctl(
+    status_pipe: mp_conn.Connection,
+    *,
+    timeout: float,
+    executor: _TimeoutQueryExecutor,
+) -> _ResultEvent:
+    event = status_pipe.recv()
+    match event:
+        case _BackendConnectedEvent(pid):
+            return _timeout_worker_prep(status_pipe, timeout=timeout, backend_pid=pid, executor=executor)
+        case _WorkerErrorEvent(e):
+            return _ResultEvent.failed(e)
+        case _:
+            raise StateError("Unexpected event", event)
+
+
+def _timeout_worker_prep(
+    status_pipe: mp_conn.Connection,
+    *,
+    timeout: float,
+    backend_pid: int,
+    executor: _TimeoutQueryExecutor,
+) -> _ResultEvent:
+    event = status_pipe.recv()
+    match event:
+        case _QueryReadyEvent():
+            return _timeout_worker_run_query(
+                status_pipe,
+                timeout=timeout,
+                backend_pid=backend_pid,
+                executor=executor,
+            )
+        case _WorkerErrorEvent(e):
+            _timeout_worker_abort(e, backend_pid, executor=executor)
+            return _ResultEvent.failed(e)
+        case _:
+            raise StateError("Unexpected event", event)
+
+
+def _timeout_worker_run_query(
+    status_pipe: mp_conn.Connection,
+    *,
+    timeout: float,
+    backend_pid: int,
+    executor: _TimeoutQueryExecutor,
+) -> _ResultEvent:
+    query_finished = status_pipe.poll(timeout)
+    if not query_finished:
+        return _timeout_worker_timeout(timeout, backend_pid=backend_pid, executor=executor)
+
+    event = status_pipe.recv()
+    match event:
+        case _QueryFinishedEvent():
+            return _timeout_worker_await_result(status_pipe, backend_pid=backend_pid, executor=executor)
+        case _WorkerErrorEvent(e):
+            _timeout_worker_abort(e, backend_pid, executor=executor)
+            return _ResultEvent.failed(e)
+        case _:
+            raise StateError("Unexpected event", event)
+
+
+def _timeout_worker_await_result(
+    status_pipe: mp_conn.Connection,
+    *,
+    backend_pid: int,
+    executor: _TimeoutQueryExecutor,
+) -> _ResultEvent:
+    event = status_pipe.recv()
+    match event:
+        case _ResultEvent():
+            return event
+        case _WorkerErrorEvent(e):
+            _timeout_worker_abort(e, backend_pid, executor=executor)
+            return _ResultEvent.failed(e)
+        case _:
+            raise StateError("Unexpected event", event)
+
+
+def _timeout_worker_timeout(timeout: float, *, backend_pid: int, executor: _TimeoutQueryExecutor) -> _ResultEvent:
+    executor._abort_backend(backend_pid)
+    return _ResultEvent.timeout(timeout)
+
+
+def _timeout_worker_abort(error: Exception, backend_pid: int, *, executor: _TimeoutQueryExecutor) -> _ResultEvent:
+    executor._abort_backend(backend_pid)
+    return _ResultEvent.failed(error)
+
+
+def _timeout_query_worker(
+    query: SqlQuery | str,
+    *,
+    pg_config: dict,
+    status_pipe: mp_conn.Connection,
+    **kwargs,
+) -> None:
+    """Internal function to the `TimeoutQueryExecutor` to run individual queries.
+
+    Query results are sent via the `result_send` pipe, not as a return value. In case of any errors, these are sent via the
+    `err_send` pipe. Therefore, it is best to check the `err_send` pipe first, before reading from the `result_send` pipe.
+
+    Parameters
+    ----------
+    query : SqlQuery | str
+        Query to execute
+    pg_config : dict
+        Pickable representation of the current Postgres connection. This is used to re-establish the connection in the parallel
+        worker.
+    result_send : mp_conn.Connection
+        Pipe connection to send the query result
+    err_send : mp_conn.Connection
+        Pipe connection to send any errors that occurred during the query execution
+    backend_send : mp_conn.Connection
+        Pipe connection to send the backend PID
+    kwargs : Any
+        Additional parameters to pass to the `PostgresInterface.execute_query` method.
+    """
+    pg_instance: PostgresInterface | None = None
+    try:
+        connect_string = pg_config["connect_string"]
+        pg_instance = PostgresInterface(
+            connect_string,
+            application_name="PostBOUND Timeout Worker",
+        )
+        status_pipe.send(_BackendConnectedEvent(pg_instance.backend_pid()))
+        pg_instance.apply_configuration(pg_config["config"])
+        cursor = pg_instance.cursor()
+        if isinstance(query, SqlQuery):
+            query = _apply_preparatory_statements(query, cur=cursor)
+            query = pg_instance._hinting_backend.format_query(query)
+        elif isinstance(query, UserString):
+            query = str(query)
+
+        # NB: The query execution logic is a slightly modified version of the one in PostgresInterface.execute_query
+        # Make sure to keep them in sync.
+        # We duplicate the logic here rather than calling the method directly to make the timeout measurement as accurate
+        # as possible. By just delegating to execute_query(), we would also include stuff like caching checks and result
+        # simplification in the timeout measurement, which is not desired.
+
+        try:
+            status_pipe.send(_QueryReadyEvent())
+            start_time = time.perf_counter_ns()
+            cursor.execute(query)  # type: ignore
+            end_time = time.perf_counter_ns()
+            status_pipe.send(_QueryFinishedEvent())
+        except (psycopg.InternalError, psycopg.OperationalError) as e:
+            msg = "\n".join(
+                [
+                    f"At {util.timestamp()}",
+                    "For query:",
+                    str(query),
+                    "Message:",
+                    str(e),
+                ]
+            )
+            raise DatabaseServerError(msg, e)
+        except psycopg.Error as e:
+            msg = "\n".join(
+                [
+                    f"At {util.timestamp()}",
+                    "For query:",
+                    str(query),
+                    "Message:",
+                    str(e),
+                ]
+            )
+            raise DatabaseUserError(msg, e)
+
+        runtime = (end_time - start_time) / 10**9
+        pg_instance._last_query_runtime = runtime
+
+        if cursor.rownumber is None:
+            # For statements that do not return a result (e.g. SET),
+            # rownumber is None. We can use this as an indicator whether
+            # fetching results is possible.
+            status_pipe.send(_ResultEvent.ok(None, runtime))
+
+        raw_result_set = cursor.fetchall()
+        if kwargs.get("raw", False):
+            result = raw_result_set
+        else:
+            result = simplify_result_set(raw_result_set)
+
+        status_pipe.send(_ResultEvent.ok(result, runtime))
+    except Exception as e:
+        status_pipe.send(_WorkerErrorEvent(e))
+    finally:
+        if pg_instance is not None:
+            pg_instance.close()
+
+
+class _TimeoutQueryExecutor:
+    """The TimeoutQueryExecutor provides a mechanism to execute queries with a timeout attached.
+
+    If the query takes longer than the designated timeout, its execution is cancelled. The query execution itself is delegated
+    to the `PostgresInterface`, so all its rules still apply. At the same time, using the timeout executor service can
+    invalidate some of the state that is exposed by the database interface (see *Warnings* below). Therefore, the relevant
+    variables should be refreshed once the timeout executor was used.
+
+    In addition to calling the `execute_query` method directly, the executor also implements *__call__* for more convenient
+    access. Both methods accept the same parameters.
+
+    Parameters
+    ----------
+    postgres_instance : Optional[PostgresInterface], optional
+        Database to execute the queries. If omitted, this is inferred from the `DatabasePool`.
+
+    Warnings
+    --------
+    When a query gets cancelled due to the timeout being reached, the current cursor as well as database connection might be
+    refreshed. Any direct references to these instances should no longer be used.
+    """
+
+    def __init__(self, postgres_instance: Optional[PostgresInterface] = None) -> None:
+        self._pg_instance: PostgresInterface
+        if postgres_instance is not None:
+            self._pg_instance = postgres_instance
+        else:
+            fallback = DatabasePool.get_instance().current_database()
+            if not isinstance(fallback, PostgresInterface):
+                raise ValueError(
+                    "Cannot create TimeoutQueryExecutor: No Postgres instance was supplied and the current database is not a "
+                    "Postgres instance."
+                )
+            self._pg_instance = fallback
+
+        self._timeout_watchdog = None
+
+    def execute_query(self, query: SqlQuery | str, timeout: float, **kwargs) -> Any:
+        """Runs a query on the database connection, cancelling if it takes longer than a specific timeout.
+
+        Parameters
+        ----------
+        query : SqlQuery | str
+            Query to execute
+        timeout : float
+            Maximum query execution time in seconds.
+        **kwargs
+            Additional parameters to pass to the `PostgresInterface.execute_query` method.
+
+        Returns
+        -------
+        Any
+            The query result if it terminated timely. Rules from `PostgresInterface.execute_query` apply.
+
+        Raises
+        ------
+        TimeoutError
+            If the query execution was not finished after `timeout` seconds.
+
+        See Also
+        --------
+        PostgresInterface.execute_query
+        PostgresInterface.reset_connection
+        """
+        cached_query: bool = kwargs.get("cache_enabled", False) and query in self._pg_instance._query_cache
+        if cached_query:
+            return self._pg_instance._query_cache[str(query)]
+
+        self._init_watchdog()
+
+        # We implement the timeout mechanism in a separate worker process. The main process keeps track of the progress of that
+        # worker using a state pattern. Each major step in the process is represented by a separate event that is in turn
+        # processed by a separate state handler (implement as a simple function). The protocol looks like this:
+        #
+        # 1. The worker process is started and establishes a connection to the database. Once connected, it sends a
+        #    _BackendConnectedEvent to the state machine entry (_timeout_worker_ctl). This event contains the backend PID of
+        #    the connection. In case of any errors later on, we use this PID to cancel the query (especially if there is a
+        #    timeout). If an error occurs during connection establishment, a _WorkerErrorEvent is sent instead. This
+        #    effectively cancels the entire query execution.
+        # 2. Upon receiving the _BackendConnectedEvent, the state machine transitions to the query preparation state
+        #    (_timeout_worker_prep). In parallel, the worker prepares the query for execution, which involves applying any
+        #    necessary configuration settings, running preparatory statements, etc. Once the query is ready to be executed, a
+        #    _QueryReadyEvent is sent and the state machine transitions to the query execution state. In case of any errors we
+        #    shut down the backend.
+        # 3. The worker starts executing the query and the state machine starts the timeout countdown
+        #    (_timeout_worker_run_query). We only start the timeout now because connection establishment takes some time and we
+        #    have seen that this can lead to spurious timeouts if the timeout is very short.
+        # 4. As soon as the query terminates, the worker sends a _QueryFinishedEvent. In the meantime, the main process waits
+        #    for this event with the designated timeout. If the timeout is reached before the event arrives, the query did not
+        #    finish in time and we proceed to cancel it (_timeout_worker_timeout). If the query finishes in time, we transition
+        #    to wait for the final result (_timeout_worker_await_result).
+        # 5. The worker prepares the final result set (mostly simplification) and calculates the actual execution time. This
+        #    is wrapped in a _ResultEvent and sent to the main process. Afterwards, the worker proceeds to close the
+        #    backend connection.
+        # 6. The main process receives the _ResultEvent and the timeout executor proceeds to shut down the worker process.
+        # 7. The main process checks and handles the _ResultEvent as necessary.
+
+        status_recv, status_send = mp.Pipe(False)
+
+        query_worker = mp.Process(
+            target=_timeout_query_worker,
+            args=(query,),
+            kwargs={
+                "pg_config": self._pg_fingerprint(),
+                "status_pipe": status_send,
+                **kwargs,
+            },
+        )
+
+        query_worker.start()
+        result = _timeout_worker_ctl(status_recv, timeout=timeout, executor=self)
+        timed_out = result.status == "timeout"
+        if timed_out:
+            query_worker.terminate()
+
+        query_worker.join()
+        query_worker.close()
+        status_send.close()
+        status_recv.close()
+
+        match result.status:
+            case "success" | "timeout":
+                self._pg_instance._last_query_runtime = result.exec_time
+                query_result = result.result_set
+            case "failure":
+                assert result.error is not None
+                self._pg_instance._last_query_runtime = math.nan
+                raise result.error
+            case _:
+                raise StateError("Unexpected result status", result.status)
+
+        if not timed_out and kwargs.get("cache_enabled", False):
+            warnings.warn(
+                "Cannot cache query results that were obtained with a timeout.",
+                category=QueryCacheWarning,
+                stacklevel=2,
+            )
+
+        if timed_out:
+            raise TimeoutError(query)
+        else:
+            return query_result
+
+    def close(self) -> None:
+        """Closes any internal resources held by the timeout executor.
+
+        After calling this method, the timeout executor should no longer be used.
+        """
+        if self._timeout_watchdog is not None:
+            self._timeout_watchdog.close()
+            self._timeout_watchdog = None
+
+    def _pg_fingerprint(self) -> dict:
+        """Generate a pickable representation of the current Postgres connection."""
+        return {
+            "connect_string": self._pg_instance.connect_string,
+            "config": self._pg_instance.current_configuration(runtime_changeable_only=True),
+        }
+
+    def _init_watchdog(self) -> None:
+        if self._timeout_watchdog is not None:
+            return
+
+        assert self._pg_instance is not None
+        self._timeout_watchdog = psycopg.connect(
+            self._pg_instance.connect_string,
+            application_name="PostBOUND Timeout Watchdog",
+        )
+
+    def _abort_backend(self, pid: int) -> None:
+        assert self._timeout_watchdog is not None
+        with self._timeout_watchdog.cursor() as cursor:
+            cursor.execute(f"SELECT pg_cancel_backend({pid});")  # type: ignore
+        self._timeout_watchdog.rollback()
+
+    def __call__(self, query: SqlQuery | str, timeout: float, **kwargs) -> Any:
+        return self.execute_query(query, timeout, **kwargs)
+
+
 def _reconnect(key: str, *, pool: DatabasePool) -> PostgresInterface:
     """Fetches a connection from the database pool.
 
@@ -3054,1737 +3047,3 @@ def connect(
         db_pool.register_database(pool_key, postgres_db)
 
     return postgres_db
-
-
-def start(pgdata: str | Path = "", *, logfile: str | Path = "") -> None:
-    """Starts a local Postgres server.
-
-    This function assumes that *pg_ctl* is available on the system PATH and either the server's data directory is specified
-    explicitly, or set via the *PGDATA* environment variable.
-    """
-    if subprocess.call("which pg_ctl") != 0:
-        raise ValueError("Cannot start Postgres server: pg_ctl is not on PATH")
-
-    pgdata = pgdata or os.environ.get("PGDATA", "")
-    pgdata = Path(pgdata).expanduser()
-    if not pgdata:
-        raise ValueError(
-            "Cannot start Postgres server: Must either supply pgdata argument or set PGDATA environment variable"
-        )
-
-    args = ["pg_ctl", "-D", pgdata]
-    if logfile:
-        args.extend(["-l", logfile])
-    args.append("start")
-
-    subprocess.run(args, check=True)
-
-
-def stop(pgdata: str | Path = "", *, raise_on_error: bool = False) -> None:
-    """Stops a running (local) Postgres server.
-
-    This function assumes that *pg_ctl* is available on the system PATH and either the server's data directory is specified
-    explicitly, or set via the *PGDATA* environment variable.
-
-    If the server cannot be stopped due to whatever reason, an error can be raised by setting the corresponding parameter.
-    Otherwise, it is silently ignored.
-    """
-    if subprocess.call("which pg_ctl") != 0:
-        raise ValueError("Cannot stop Postgres server: pg_ctl is not on PATH")
-
-    pgdata = pgdata or os.environ.get("PGDATA", "")
-    pgdata = Path(pgdata).expanduser()
-    if not pgdata:
-        raise ValueError(
-            "Cannot stop Postgres server: Must either supply pgdata argument or set PGDATA environment variable"
-        )
-
-    subprocess.run(["pg_ctl", "-D", pgdata, "stop"], check=raise_on_error)
-
-
-def is_running(pgdata: str | Path = "") -> bool:
-    """Checks, whether a local Postgres server is currently running.
-
-    This function assumes that *pg_ctl* is available on the system PATH. A data directory can be supplied to check whether
-    a server is running for the specific database. If *pgdata* is not supplied, the *PGDATA* environment variable is used as
-    a fallback.
-    """
-    if subprocess.call("which pg_ctl") != 0:
-        raise ValueError("Cannot start Postgres server: pg_ctl is not on PATH")
-
-    cmd = ["pg_ctl"]
-    pgdata = pgdata or os.environ.get("PGDATA", "")
-    if pgdata:
-        cmd.extend(["-D", str(pgdata)])
-    cmd.append("status")
-
-    res = subprocess.run(cmd)
-    return res.returncode == 0
-
-
-def _parallel_query_initializer(connect_string: str, local_data: threading.local, verbose: bool = False) -> None:
-    """Internal function for the `ParallelQueryExecutor` to setup worker connections.
-
-    Parameters
-    ----------
-    connect_string : str
-        Connection info to establish a network connection to the Postgres instance. Delegates to Psycopg
-    local_data : threading.local
-        Data object to store the opened connection
-    verbose : bool, optional
-        Whether to print logging information, by default *False*
-
-    References
-    ----------
-
-    .. Psyopg v3: https://www.psycopg.org/psycopg3/ This is used internally by the Postgres interface to interact with the
-       database
-    """
-    log = util.make_logger(verbose)
-    tid = threading.get_ident()
-    connection = psycopg.connect(connect_string, application_name=f"PostBOUND parallel worker ID {tid}")
-    connection.autocommit = True
-    local_data.connection = connection
-    log(f"[worker id={tid}, ts={util.timestamp()}] Connected")
-
-
-def _parallel_query_worker(
-    query: str | SqlQuery,
-    local_data: threading.local,
-    timeout: Optional[int] = None,
-    verbose: bool = False,
-) -> tuple[SqlQuery | str, Any]:
-    """Internal function for the `ParallelQueryExecutor` to run individual queries.
-
-    Parameters
-    ----------
-    query : str | SqlQuery
-        The query to execute. The parallel executor does not make use of caching whatsoever, so no additional parameters are
-        required.
-    local_data : threading.local
-        Data object that contains the database connection to use. This should have been initialized by
-        `_parallel_query_initializer`
-    timeout : Optional[int], optional
-        The number of seconds to wait until the calculation is aborted. Defaults to *None*, which indicates no timeout. In
-        case of timeout, *None* is returned.
-    verbose : bool, optional
-        Whether to print logging information, by default *False*
-
-    Returns
-    -------
-    tuple[SqlQuery | str, Any]
-        A tuple of the original query and the (simplified) result set. See `Database.execute_query` for an outline of the
-        simplification process. This method applies the same rules. The query is also provided to distinguish the different
-        result sets that arrive in parallel.
-    """
-    log = util.make_logger(verbose)
-    connection: psycopg.connection.Connection = local_data.connection
-    connection.rollback()
-    cursor = connection.cursor()
-    if timeout:
-        cursor.execute(f"SET statement_timeout = '{timeout}s';")  # type: ignore - weird psycopg stuff
-
-    log(f"[worker id={threading.get_ident()}, ts={util.timestamp()}] Now executing query {query}")
-    try:
-        cursor.execute(str(query))  # type: ignore - weird psycopg stuff
-        log(f"[worker id={threading.get_ident()}, ts={util.timestamp()}] Executed query {query}")
-    except psycopg.errors.QueryCanceled as e:
-        if "canceling statement due to statement timeout" in e.args:
-            log(f"[worker id={threading.get_ident()}, ts={util.timestamp()}] Query {query} timed out")
-            return query, None
-        else:
-            raise e
-
-    result_set = cursor.fetchall()
-    cursor.close()
-
-    return query, result_set
-
-
-class ParallelQueryExecutor:
-    """The ParallelQueryExecutor provides mechanisms to conveniently execute queries in parallel.
-
-    The parallel execution happens by maintaining a number of worker threads that execute the incoming queries.
-    The number of input queries can exceed the worker pool size, potentially by a large margin. If that is the case,
-    input queries will be buffered until a worker is available.
-
-    This parallel executor has nothing to do with the Database interface and acts entirely independently and
-    Postgres-specific.
-
-    Parameters
-    ----------
-    connect_string : str
-        Connection info to establish a network connection to the Postgres instance. Delegates to Psycopg
-    n_threads : Optional[int], optional
-        The maximum number of parallel workers to use. If this is not specified, uses ``os.cpu_count()`` many workers.
-    timeout : Optional[int], optional
-        The number of seconds to wait until an individual query is aborted. Timeouts do not affect other queries (both those
-        running in parallel or those running afterwards on the same worker). In case of a timeout, the query's entry in the
-        result set will be *None*.
-    verbose : bool, optional
-        Whether to print logging information during the query execution. This is off by default.
-
-    See Also
-    --------
-    Database
-    PostgresInterface
-
-    References
-    ----------
-
-    .. Psyopg v3: https://www.psycopg.org/psycopg3/ This is used internally by the Postgres interface to interact with the
-       database
-    """
-
-    def __init__(
-        self,
-        connect_string: str,
-        n_threads: Optional[int] = None,
-        *,
-        timeout: Optional[int] = None,
-        verbose: bool = False,
-    ) -> None:
-        self._n_threads = n_threads if n_threads is not None and n_threads > 0 else os.cpu_count()
-        self._connect_string = connect_string
-        self._timeout = timeout
-        self._verbose = verbose
-
-        self._thread_data = threading.local()
-        self._thread_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=self._n_threads,
-            initializer=_parallel_query_initializer,
-            initargs=(
-                self._connect_string,
-                self._thread_data,
-            ),
-        )  # type: ignore - Python's type hints cannot capture the true TPE signature
-        self._tasks: list[concurrent.futures.Future] = []
-        self._results: list[Any] = []
-        self._queries: dict[concurrent.futures.Future, SqlQuery | str] = {}
-
-    def queue_query(self, query: SqlQuery | str) -> None:
-        """Adds a new query to the queue, to be executed as soon as possible.
-
-        If a timeout was specified when creating the executor, this timeout will be applied to the query.
-
-        Parameters
-        ----------
-        query : SqlQuery | str
-            The query to execute
-        """
-        future = self._thread_pool.submit(
-            _parallel_query_worker,
-            query,
-            self._thread_data,
-            self._timeout,
-            self._verbose,
-        )
-        self._tasks.append(future)
-        self._queries[future] = query
-
-    def drain_queue(
-        self,
-        timeout: Optional[float] = None,
-        *,
-        callback: Optional[Callable[[SqlQuery | str, ResultSet | None], None]] = None,
-    ) -> None:
-        """Blocks, until all queries currently queued have terminated.
-
-        Parameters
-        ----------
-        timeout : Optional[float], optional
-            The number of seconds to wait until the calculation is aborted. Defaults to *None*, which indicates no timeout,
-            i.e. wait forever. Note that in contrast to the timeout specified when creating the executor, this timeout
-            applies to the entire queue and not to individual queries. For example, one can set the per-query timeout to 1s
-            which means that each query can be executed for at most 1 second. If an additional timeout of 10s is specified
-            on the queue, the entire queue will be aborted if it takes longer than 10 seconds to complete.
-        callback : Optional[Callable[[SqlQuery | str, ResultSet | None], None]], optional
-            A callback to be executed with each query that completes. The callback receives the query that was executed and
-            the corresponding (raw) result set as arguments. If the query ran into a timeout, the result set is *None*.
-
-        Raises
-        ------
-        TimeoutError or concurrent.futures.TimeoutError
-            If some queries have not completed after the given `timeout`.
-        """
-        for future in concurrent.futures.as_completed(self._tasks, timeout=timeout):
-            result_set = future.result()
-            self._results.append(result_set)
-
-            if not callback:
-                continue
-
-            query = self._queries[future]
-            callback(query, result_set)
-
-    def result_set(self) -> dict[str | SqlQuery, ResultSet | None]:
-        """Provides the results of all queries that have terminated already, mapping query -> result set
-
-        Returns
-        -------
-        dict[str | SqlQuery, ResultSet | None]
-            The query results. The raw result sets are provided without any simplification. If the query timed out, the result
-            set is *None* (in contrast to empty result sets like `[]`).
-        """
-        return dict(self._results)
-
-    def close(self) -> None:
-        """Terminates all worker threads. The executor is essentially useless afterwards."""
-        self._thread_pool.shutdown()
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __str__(self) -> str:
-        running_workers = [future for future in self._tasks if future.running()]
-        completed_workers = [future for future in self._tasks if future.done()]
-
-        return (
-            f"Concurrent query pool of {self._n_threads} workers, {len(self._tasks)} tasks "
-            f"(run={len(running_workers)} fin={len(completed_workers)})"
-        )
-
-
-@dataclass
-class _BackendConnectedEvent:
-    backend_pid: int
-
-
-@dataclass
-class _WorkerErrorEvent:
-    error: Exception
-
-
-@dataclass
-class _QueryReadyEvent:
-    pass
-
-
-@dataclass
-class _QueryFinishedEvent:
-    pass
-
-
-@dataclass
-class _ResultEvent:
-    status: Literal["success", "timeout", "failure"]
-    result_set: ResultSet | None
-    exec_time: float
-    error: Exception | None = None
-
-    @staticmethod
-    def ok(result_set: ResultSet | None, exec_time: float) -> _ResultEvent:
-        return _ResultEvent("success", result_set, exec_time)
-
-    @staticmethod
-    def timeout(duration: float) -> _ResultEvent:
-        return _ResultEvent("timeout", None, duration)
-
-    @staticmethod
-    def failed(error: Exception) -> _ResultEvent:
-        return _ResultEvent("failure", None, math.nan, error=error)
-
-
-def _timeout_worker_ctl(
-    status_pipe: mp_conn.Connection,
-    *,
-    timeout: float,
-    executor: TimeoutQueryExecutor,
-) -> _ResultEvent:
-    event = status_pipe.recv()
-    match event:
-        case _BackendConnectedEvent(pid):
-            return _timeout_worker_prep(status_pipe, timeout=timeout, backend_pid=pid, executor=executor)
-        case _WorkerErrorEvent(e):
-            return _ResultEvent.failed(e)
-        case _:
-            raise StateError("Unexpected event", event)
-
-
-def _timeout_worker_prep(
-    status_pipe: mp_conn.Connection,
-    *,
-    timeout: float,
-    backend_pid: int,
-    executor: TimeoutQueryExecutor,
-) -> _ResultEvent:
-    event = status_pipe.recv()
-    match event:
-        case _QueryReadyEvent():
-            return _timeout_worker_run_query(
-                status_pipe,
-                timeout=timeout,
-                backend_pid=backend_pid,
-                executor=executor,
-            )
-        case _WorkerErrorEvent(e):
-            _timeout_worker_abort(e, backend_pid, executor=executor)
-            return _ResultEvent.failed(e)
-        case _:
-            raise StateError("Unexpected event", event)
-
-
-def _timeout_worker_run_query(
-    status_pipe: mp_conn.Connection,
-    *,
-    timeout: float,
-    backend_pid: int,
-    executor: TimeoutQueryExecutor,
-) -> _ResultEvent:
-    query_finished = status_pipe.poll(timeout)
-    if not query_finished:
-        return _timeout_worker_timeout(timeout, backend_pid=backend_pid, executor=executor)
-
-    event = status_pipe.recv()
-    match event:
-        case _QueryFinishedEvent():
-            return _timeout_worker_await_result(status_pipe, backend_pid=backend_pid, executor=executor)
-        case _WorkerErrorEvent(e):
-            _timeout_worker_abort(e, backend_pid, executor=executor)
-            return _ResultEvent.failed(e)
-        case _:
-            raise StateError("Unexpected event", event)
-
-
-def _timeout_worker_await_result(
-    status_pipe: mp_conn.Connection,
-    *,
-    backend_pid: int,
-    executor: TimeoutQueryExecutor,
-) -> _ResultEvent:
-    event = status_pipe.recv()
-    match event:
-        case _ResultEvent():
-            return event
-        case _WorkerErrorEvent(e):
-            _timeout_worker_abort(e, backend_pid, executor=executor)
-            return _ResultEvent.failed(e)
-        case _:
-            raise StateError("Unexpected event", event)
-
-
-def _timeout_worker_timeout(timeout: float, *, backend_pid: int, executor: TimeoutQueryExecutor) -> _ResultEvent:
-    executor._abort_backend(backend_pid)
-    return _ResultEvent.timeout(timeout)
-
-
-def _timeout_worker_abort(error: Exception, backend_pid: int, *, executor: TimeoutQueryExecutor) -> _ResultEvent:
-    executor._abort_backend(backend_pid)
-    return _ResultEvent.failed(error)
-
-
-def _timeout_query_worker(
-    query: SqlQuery | str,
-    *,
-    pg_config: dict,
-    status_pipe: mp_conn.Connection,
-    **kwargs,
-) -> None:
-    """Internal function to the `TimeoutQueryExecutor` to run individual queries.
-
-    Query results are sent via the `result_send` pipe, not as a return value. In case of any errors, these are sent via the
-    `err_send` pipe. Therefore, it is best to check the `err_send` pipe first, before reading from the `result_send` pipe.
-
-    Parameters
-    ----------
-    query : SqlQuery | str
-        Query to execute
-    pg_config : dict
-        Pickable representation of the current Postgres connection. This is used to re-establish the connection in the parallel
-        worker.
-    result_send : mp_conn.Connection
-        Pipe connection to send the query result
-    err_send : mp_conn.Connection
-        Pipe connection to send any errors that occurred during the query execution
-    backend_send : mp_conn.Connection
-        Pipe connection to send the backend PID
-    kwargs : Any
-        Additional parameters to pass to the `PostgresInterface.execute_query` method.
-    """
-    pg_instance: PostgresInterface | None = None
-    try:
-        connect_string = pg_config["connect_string"]
-        pg_instance = PostgresInterface(
-            connect_string,
-            application_name="PostBOUND Timeout Worker",
-        )
-        status_pipe.send(_BackendConnectedEvent(pg_instance.backend_pid()))
-        pg_instance.apply_configuration(pg_config["config"])
-        cursor = pg_instance.cursor()
-        if isinstance(query, SqlQuery):
-            query = _apply_preparatory_statements(query, cur=cursor)
-            query = pg_instance._hinting_backend.format_query(query)
-        elif isinstance(query, UserString):
-            query = str(query)
-
-        # NB: The query execution logic is a slightly modified version of the one in PostgresInterface.execute_query
-        # Make sure to keep them in sync.
-        # We duplicate the logic here rather than calling the method directly to make the timeout measurement as accurate
-        # as possible. By just delegating to execute_query(), we would also include stuff like caching checks and result
-        # simplification in the timeout measurement, which is not desired.
-
-        try:
-            status_pipe.send(_QueryReadyEvent())
-            start_time = time.perf_counter_ns()
-            cursor.execute(query)  # type: ignore
-            end_time = time.perf_counter_ns()
-            status_pipe.send(_QueryFinishedEvent())
-        except (psycopg.InternalError, psycopg.OperationalError) as e:
-            msg = "\n".join(
-                [
-                    f"At {util.timestamp()}",
-                    "For query:",
-                    str(query),
-                    "Message:",
-                    str(e),
-                ]
-            )
-            raise DatabaseServerError(msg, e)
-        except psycopg.Error as e:
-            msg = "\n".join(
-                [
-                    f"At {util.timestamp()}",
-                    "For query:",
-                    str(query),
-                    "Message:",
-                    str(e),
-                ]
-            )
-            raise DatabaseUserError(msg, e)
-
-        runtime = (end_time - start_time) / 10**9
-        pg_instance._last_query_runtime = runtime
-
-        if cursor.rownumber is None:
-            # For statements that do not return a result (e.g. SET),
-            # rownumber is None. We can use this as an indicator whether
-            # fetching results is possible.
-            status_pipe.send(_ResultEvent.ok(None, runtime))
-
-        raw_result_set = cursor.fetchall()
-        if kwargs.get("raw", False):
-            result = raw_result_set
-        else:
-            result = simplify_result_set(raw_result_set)
-
-        status_pipe.send(_ResultEvent.ok(result, runtime))
-    except Exception as e:
-        status_pipe.send(_WorkerErrorEvent(e))
-    finally:
-        if pg_instance is not None:
-            pg_instance.close()
-
-
-class TimeoutQueryExecutor:
-    """The TimeoutQueryExecutor provides a mechanism to execute queries with a timeout attached.
-
-    If the query takes longer than the designated timeout, its execution is cancelled. The query execution itself is delegated
-    to the `PostgresInterface`, so all its rules still apply. At the same time, using the timeout executor service can
-    invalidate some of the state that is exposed by the database interface (see *Warnings* below). Therefore, the relevant
-    variables should be refreshed once the timeout executor was used.
-
-    In addition to calling the `execute_query` method directly, the executor also implements *__call__* for more convenient
-    access. Both methods accept the same parameters.
-
-    Parameters
-    ----------
-    postgres_instance : Optional[PostgresInterface], optional
-        Database to execute the queries. If omitted, this is inferred from the `DatabasePool`.
-
-    Warnings
-    --------
-    When a query gets cancelled due to the timeout being reached, the current cursor as well as database connection might be
-    refreshed. Any direct references to these instances should no longer be used.
-    """
-
-    def __init__(self, postgres_instance: Optional[PostgresInterface] = None) -> None:
-        self._pg_instance: PostgresInterface
-        if postgres_instance is not None:
-            self._pg_instance = postgres_instance
-        else:
-            fallback = DatabasePool.get_instance().current_database()
-            if not isinstance(fallback, PostgresInterface):
-                raise ValueError(
-                    "Cannot create TimeoutQueryExecutor: No Postgres instance was supplied and the current database is not a "
-                    "Postgres instance."
-                )
-            self._pg_instance = fallback
-
-        self._timeout_watchdog = None
-
-    def execute_query(self, query: SqlQuery | str, timeout: float, **kwargs) -> Any:
-        """Runs a query on the database connection, cancelling if it takes longer than a specific timeout.
-
-        Parameters
-        ----------
-        query : SqlQuery | str
-            Query to execute
-        timeout : float
-            Maximum query execution time in seconds.
-        **kwargs
-            Additional parameters to pass to the `PostgresInterface.execute_query` method.
-
-        Returns
-        -------
-        Any
-            The query result if it terminated timely. Rules from `PostgresInterface.execute_query` apply.
-
-        Raises
-        ------
-        TimeoutError
-            If the query execution was not finished after `timeout` seconds.
-
-        See Also
-        --------
-        PostgresInterface.execute_query
-        PostgresInterface.reset_connection
-        """
-        cached_query: bool = kwargs.get("cache_enabled", False) and query in self._pg_instance._query_cache
-        if cached_query:
-            return self._pg_instance._query_cache[str(query)]
-
-        self._init_watchdog()
-
-        # We implement the timeout mechanism in a separate worker process. The main process keeps track of the progress of that
-        # worker using a state pattern. Each major step in the process is represented by a separate event that is in turn
-        # processed by a separate state handler (implement as a simple function). The protocol looks like this:
-        #
-        # 1. The worker process is started and establishes a connection to the database. Once connected, it sends a
-        #    _BackendConnectedEvent to the state machine entry (_timeout_worker_ctl). This event contains the backend PID of
-        #    the connection. In case of any errors later on, we use this PID to cancel the query (especially if there is a
-        #    timeout). If an error occurs during connection establishment, a _WorkerErrorEvent is sent instead. This
-        #    effectively cancels the entire query execution.
-        # 2. Upon receiving the _BackendConnectedEvent, the state machine transitions to the query preparation state
-        #    (_timeout_worker_prep). In parallel, the worker prepares the query for execution, which involves applying any
-        #    necessary configuration settings, running preparatory statements, etc. Once the query is ready to be executed, a
-        #    _QueryReadyEvent is sent and the state machine transitions to the query execution state. In case of any errors we
-        #    shut down the backend.
-        # 3. The worker starts executing the query and the state machine starts the timeout countdown
-        #    (_timeout_worker_run_query). We only start the timeout now because connection establishment takes some time and we
-        #    have seen that this can lead to spurious timeouts if the timeout is very short.
-        # 4. As soon as the query terminates, the worker sends a _QueryFinishedEvent. In the meantime, the main process waits
-        #    for this event with the designated timeout. If the timeout is reached before the event arrives, the query did not
-        #    finish in time and we proceed to cancel it (_timeout_worker_timeout). If the query finishes in time, we transition
-        #    to wait for the final result (_timeout_worker_await_result).
-        # 5. The worker prepares the final result set (mostly simplification) and calculates the actual execution time. This
-        #    is wrapped in a _ResultEvent and sent to the main process. Afterwards, the worker proceeds to close the
-        #    backend connection.
-        # 6. The main process receives the _ResultEvent and the timeout executor proceeds to shut down the worker process.
-        # 7. The main process checks and handles the _ResultEvent as necessary.
-
-        status_recv, status_send = mp.Pipe(False)
-
-        query_worker = mp.Process(
-            target=_timeout_query_worker,
-            args=(query,),
-            kwargs={
-                "pg_config": self._pg_fingerprint(),
-                "status_pipe": status_send,
-                **kwargs,
-            },
-        )
-
-        query_worker.start()
-        result = _timeout_worker_ctl(status_recv, timeout=timeout, executor=self)
-        timed_out = result.status == "timeout"
-        if timed_out:
-            query_worker.terminate()
-
-        query_worker.join()
-        query_worker.close()
-        status_send.close()
-        status_recv.close()
-
-        match result.status:
-            case "success" | "timeout":
-                self._pg_instance._last_query_runtime = result.exec_time
-                query_result = result.result_set
-            case "failure":
-                assert result.error is not None
-                self._pg_instance._last_query_runtime = math.nan
-                raise result.error
-            case _:
-                raise StateError("Unexpected result status", result.status)
-
-        if not timed_out and kwargs.get("cache_enabled", False):
-            warnings.warn(
-                "Cannot cache query results that were obtained with a timeout.",
-                category=QueryCacheWarning,
-                stacklevel=2,
-            )
-
-        if timed_out:
-            raise TimeoutError(query)
-        else:
-            return query_result
-
-    def close(self) -> None:
-        """Closes any internal resources held by the timeout executor.
-
-        After calling this method, the timeout executor should no longer be used.
-        """
-        if self._timeout_watchdog is not None:
-            self._timeout_watchdog.close()
-            self._timeout_watchdog = None
-
-    def _pg_fingerprint(self) -> dict:
-        """Generate a pickable representation of the current Postgres connection."""
-        return {
-            "connect_string": self._pg_instance.connect_string,
-            "config": self._pg_instance.current_configuration(runtime_changeable_only=True),
-        }
-
-    def _init_watchdog(self) -> None:
-        if self._timeout_watchdog is not None:
-            return
-
-        assert self._pg_instance is not None
-        self._timeout_watchdog = psycopg.connect(
-            self._pg_instance.connect_string,
-            application_name="PostBOUND Timeout Watchdog",
-        )
-
-    def _abort_backend(self, pid: int) -> None:
-        assert self._timeout_watchdog is not None
-        with self._timeout_watchdog.cursor() as cursor:
-            cursor.execute(f"SELECT pg_cancel_backend({pid});")  # type: ignore
-        self._timeout_watchdog.rollback()
-
-    def __call__(self, query: SqlQuery | str, timeout: float, **kwargs) -> Any:
-        return self.execute_query(query, timeout, **kwargs)
-
-
-PostgresExplainJoinNodes = {
-    "Nested Loop": JoinOperator.NestedLoopJoin,
-    "Hash Join": JoinOperator.HashJoin,
-    "Merge Join": JoinOperator.SortMergeJoin,
-}
-"""A mapping from Postgres EXPLAIN node names to the corresponding join operators."""
-
-PostgresExplainScanNodes = {
-    "Seq Scan": ScanOperator.SequentialScan,
-    "Index Scan": ScanOperator.IndexScan,
-    "Index Only Scan": ScanOperator.IndexOnlyScan,
-    "Bitmap Heap Scan": ScanOperator.BitmapScan,
-}
-"""A mapping from Postgres EXPLAIN node names to the corresponding scan operators."""
-
-PostgresExplainIntermediateNodes = {
-    "Materialize": IntermediateOperator.Materialize,
-    "Memoize": IntermediateOperator.Memoize,
-    "Sort": IntermediateOperator.Sort,
-}
-"""A mapping from Postgres EXPLAIN node names to the corresponding intermediate operators."""
-
-
-NodeType = Literal[
-    "Result",
-    "ProjectSet",
-    "ModifyTable",
-    "Append",
-    "Merge Append",
-    "Recursive Union",
-    "BitmapAnd",
-    "BitmapOr",
-    "Nested Loop",
-    "Merge Join",
-    "Hash Join",
-    "Seq Scan",
-    "Sample Scan",
-    "Gather",
-    "Gather Merge",
-    "Index Scan",
-    "Index Only Scan",
-    "Bitmap Index Scan",
-    "Bitmap Heap Scan",
-    "Tid Scan",
-    "Tid Range Scan",
-    "Subquery Scan",
-    "Function Scan",
-    "Table Function Scan",
-    "Values Scan",
-    "CTE Scan",
-    "Named Tuplestore Scan",
-    "WorkTable Scan",
-    "Foreign Scan",
-    "Custom Scan",
-    "Materialize",
-    "Memoize",
-    "Sort",
-    "Incremental Sort",
-    "Group",
-    "Aggregate",
-    "WindowAgg",
-    "Unique",
-    "SetOp",
-    "LockRows",
-    "Limit",
-    "Hash",
-]
-"""All different nodes that can be created by Postgres.
-
-This has been extracted directly from ExplainNode() in explain.c from the Postgres source code.
-"""
-
-
-class PostgresExplainNode:
-    """Simplified model of a plan node as provided by Postgres' *EXPLAIN* output in JSON format.
-
-    Generally speaking, a node stores all the information about the plan node that we currently care about. This is mostly
-    focused on optimizer statistics, along with some additional data. Explain nodes form a hierarchichal structure with each
-    node containing an arbitrary number of child nodes. Notice that this model is very loose in the sense that no constraints
-    are enforced and no sanity checking is performed. For example, this means that nodes can contain more than two children
-    even though this can never happen in a real *EXPLAIN* plan. Similarly, the correspondence between filter predicates and
-    the node typse (e.g. join filter for a join node) is not checked.
-
-    All relevant data from the explain node is exposed as attributes on the objects. Even though these are mutable, they should
-    be thought of as read-only data objects.
-
-    Parameters
-    ----------
-    explain_data : dict
-        The JSON data of the current explain node. This is parsed and prepared as part of the *__init__* method.
-
-    Attributes
-    ----------
-    node_type : NodeType | None, default None
-        The node type. This should never be empty or *None*, even though it is technically allowed.
-    cost : float, default NaN
-        The optimizer's cost estimation for this node. This includes the cost of all child nodes as well. This should normally
-        not be *NaN*, even though it is technically allowed.
-    cardinality_estimate : float, default NaN
-        The optimizer's estimation of the number of tuples that will be *produced* by this operator. This should normally not
-        be *NaN*, even though it is technically allowed.
-    execution_time : float, default NaN
-        For *EXPLAIN ANALYZE* plans, this is the actual total execution time of the node in seconds. For pure *EXPLAIN*
-        plans, this is *NaN*
-    true_cardinality : float, default NaN
-        For *EXPLAIN ANALYZE* plans, this is the average of the number of tuples that were actually produced for each loop of
-        the node. For pure *EXPLAIN* plans, this is *NaN*
-    loops : int, default 1
-        For *EXPLAIN ANALYZE* plans, this is the number of times the operator was invoked. The number of invocations can mean
-        a number of different things: for parallel operators, this normally matches the number of parallel workers. For scans,
-        this matches the number of times a new tuple was requested (e.g. for an index nested-loop join the number of loops of
-        the index scan part indicates how many times the index was probed).
-    relation_name : str | None, default None
-        The name of the relation/table that is processed by this node. This should be defined on scan nodes, but could also
-        be present on other nodes.
-    relation_alias : str | None, default None
-        The alias of the relation/table under which the relation was accessed in th equery plan. See `relation_name`.
-    index_name : str | None, default None
-        The name of the index that was probed. This should be defined on index scans and index-only scans, but could also be
-        present on other nodes.
-    filter_condition : str | None, default None
-        A post-processing filter that is applied to all rows emitted by this operator. This is most important for scan
-        operations with an attached filter predicate, but can also be present on some joins.
-    index_condition : str | None, default None
-        The condition that is used to locate the matching tuples in an index scan or index-only scan
-    join_filter : str | None, default None
-        The condition that is used to determine matching tuples in a join
-    hash_condition : str | None, default None
-        The condition that is used to determine matching tuples in a hash join
-    recheck_condition : str | None, default None
-        For lossy bitmap scans or bitmap scans based on lossy indexes, this is post-processing check for whether the produced
-        tuples actually match the filter condition
-    parent_relationship : str | None, default None
-        Describes the role that this node plays in relation to its parent. Common values are *inner* which denotes that
-        this is the inner child of a join and *outer* which denotes the opposite.
-    parallel_workers : int | float, default NaN
-        For parallel operators in *EXPLAIN ANALYZE* plans, this is the actual number of worker processes that were started.
-        Notice that in total there is one additional worker. This process takes care of spawning the other workers and
-        managing them, but can also take part in the input processing.
-    sort_keys : list[str]
-        The columns that are used to sort the tuples that are produced by this node. This is most important for sort nodes,
-        but can also be present on other nodes.
-    shared_blocks_read : float, default NaN
-        For *EXPLAIN ANALYZE* plans with *BUFFERS* enabled, this is the number of blocks/pages that where retrieved from
-        disk while executing this node, including the reads of all its child nodes.
-    shared_blocks_buffered : float, default NaN
-        For *EXPLAIN ANALYZE* plans with *BUFFERS* enabled, this is the number of blocks/pages that where retrieved from
-        the shared buffer while executing this node, including the hits of all its child nodes.
-    temp_blocks_read : float, default NaN
-        For *EXPLAIN ANALYZE* blocks with *BUFFERS* enabled, this is the number of short-term data structures (e.g. hash
-        tables, sorts) that where read by this node, including reads of all its child nodes.
-    temp_blocks_written : float, default NaN
-        For *EXPLAIN ANALYZE* blocks with *BUFFERS* enabled, this is the number of short-term data structures (e.g. hash
-        tables, sorts) that where written by this node, including writes of all its child nodes.
-    plan_width : float, default NaN
-        The average width of the tuples that are produced by this node.
-    children : list[PostgresExplainNode]
-        All child / input nodes for the current node
-    """
-
-    @staticmethod
-    def all_node_types() -> frozenset[NodeType]:
-        """All node types that are currently recognized by PostBOUND."""
-        return frozenset(get_args(NodeType))
-
-    def __init__(self, explain_data: dict) -> None:
-        self.node_type: NodeType = explain_data["Node Type"]
-
-        self.cost: float = explain_data.get("Total Cost", math.nan)
-        self.cardinality_estimate: float = explain_data.get("Plan Rows", math.nan)
-        self.execution_time: float = explain_data.get("Actual Total Time", math.nan) / 1000
-
-        # true_cardinality is accessed as a property to add a warning for BitmapAnd/Or nodes
-        self._true_card: float = explain_data.get("Actual Rows", math.nan)
-
-        self.loops: float = explain_data.get("Actual Loops", 1)
-
-        self.relation_name: str | None = explain_data.get("Relation Name", None)
-        self.relation_alias: str | None = explain_data.get("Alias", None)
-        self.index_name: str | None = explain_data.get("Index Name", None)
-        self.subplan_name: str | None = explain_data.get("Subplan Name", None)
-        self.cte_name: str | None = explain_data.get("CTE Name", None)
-
-        self.filter_condition: str | None = explain_data.get("Filter", None)
-        self.index_condition: str | None = explain_data.get("Index Cond", None)
-        self.join_filter: str | None = explain_data.get("Join Filter", None)
-        self.hash_condition: str | None = explain_data.get("Hash Cond", None)
-        self.recheck_condition: str | None = explain_data.get("Recheck Cond", None)
-        self.parent_relationship: str | None = explain_data.get("Parent Relationship", None)
-        self.launched_workers: int = explain_data.get("Workers Launched", 0)
-        self.planned_workers: int = explain_data.get("Workers Planned", 0)
-        self.sort_keys: str = explain_data.get("Sort Key", "")
-
-        self.shared_blocks_read: int = explain_data.get("Shared Read Blocks", math.nan)
-        self.shared_blocks_cached: int = explain_data.get("Shared Hit Blocks", math.nan)
-        self.temp_blocks_read: int = explain_data.get("Temp Read Blocks", math.nan)
-        self.temp_blocks_written: int = explain_data.get("Temp Written Blocks", math.nan)
-        self.plan_width: int = explain_data.get("Plan Width", math.nan)
-        self.children = [PostgresExplainNode(child) for child in explain_data.get("Plans", [])]
-
-        self.explain_data: dict = explain_data
-        self._hash_val = hash(
-            (
-                self.node_type,
-                self.relation_name,
-                self.relation_alias,
-                self.index_name,
-                self.subplan_name,
-                self.cte_name,
-                self.filter_condition,
-                self.index_condition,
-                self.join_filter,
-                self.hash_condition,
-                self.recheck_condition,
-                self.parent_relationship,
-                self.launched_workers,
-                tuple(self.children),
-            )
-        )
-
-    @property
-    def true_cardinality(self) -> float:
-        if self.node_type in {"BitmapAnd", "BitmapOr"}:
-            # For BitmapAnd/BitmapOr nodes, the actual number of rows is always 0.
-            # This is due to limitations in the Postgres implementation.
-            warnings.warn(
-                "Postgres does not report the actual number of rows for bitmap nodes correctly. Returning NaN.",
-                stacklevel=2,
-            )
-            return math.nan
-        return self._true_card
-
-    def is_scan(self) -> bool:
-        """Checks, whether the current node corresponds to a scan node.
-
-        For Bitmap index scans, which are multi-level scan operators, this is true for the heap scan part that takes care of
-        actually reading the tuples according to the bitmap provided by the bitmap index scan operators.
-
-        Returns
-        -------
-        bool
-            Whether the node is a scan node
-        """
-        return self.node_type in PostgresExplainScanNodes
-
-    def is_join(self) -> bool:
-        """Checks, whether the current node corresponds to a join node.
-
-        Returns
-        -------
-        bool
-            Whether the node is a join node
-        """
-        return self.node_type in PostgresExplainJoinNodes
-
-    def is_analyze(self) -> bool:
-        """Checks, whether this *EXPLAIN* plan is an *EXPLAIN ANALYZE* plan or a pure *EXPLAIN* plan.
-
-        The analyze variant does not only obtain the plan, but actually executes it. This enables the comparison of the
-        optimizer's estimates to the actual values. If a plan is an *EXPLAIN ANALYZE* plan, some attributes of this node
-        receive actual values. These include `execution_time`, `true_cardinality`, `loops` and `parallel_workers`.
-
-
-        Returns
-        -------
-        bool
-            Whether the node represents part of an *EXPLAIN ANALYZE* plan
-        """
-        return not math.isnan(self.execution_time)
-
-    def filter_conditions(self) -> dict[str, str]:
-        """Collects all filter conditions that are defined on this node
-
-        Returns
-        -------
-        dict[str, str]
-            A dictionary mapping the type of filter condition (e.g. index condition or join filter) to the actual filter value.
-        """
-        conditions: dict[str, str] = {}
-        if self.filter_condition is not None:
-            conditions["Filter"] = self.filter_condition
-        if self.index_condition is not None:
-            conditions["Index Cond"] = self.index_condition
-        if self.join_filter is not None:
-            conditions["Join Filter"] = self.join_filter
-        if self.hash_condition is not None:
-            conditions["Hash Cond"] = self.hash_condition
-        if self.recheck_condition is not None:
-            conditions["Recheck Cond"] = self.recheck_condition
-        return conditions
-
-    def inner_outer_children(self) -> Sequence[PostgresExplainNode]:
-        """Provides the children of this node in a sequence of inner, outer if applicable.
-
-        For all nodes where this structure is not meaningful (e.g. intermediate nodes that operate on a single relation or
-        scan nodes), the child nodes are returned as-is (e.g. as a list of a single child or an empty list).
-
-        Returns
-        -------
-        Sequence[PostgresExplainNode]
-            The children of the current node in a unified format
-        """
-        if len(self.children) < 2:
-            return self.children
-        assert len(self.children) == 2
-
-        first_child, second_child = self.children
-        inner_child = first_child if first_child.parent_relationship == "Inner" else second_child
-        outer_child = first_child if second_child == inner_child else second_child
-        return (inner_child, outer_child)
-
-    def parse_table(self) -> Optional[TableReference]:
-        """Provides the table that is processed by this node.
-
-        Returns
-        -------
-        Optional[TableReference]
-            The table being scanned. For non-scan nodes, or nodes where no table can be inferred, *None* will be returned.
-        """
-        if not self.relation_name:
-            return None
-        alias = (
-            self.relation_alias if self.relation_alias is not None and self.relation_alias != self.relation_name else ""
-        )
-        return TableReference(self.relation_name, alias)
-
-    def as_qep(self) -> QueryPlan:
-        """Transforms the postgres-specific plan to a standardized `QueryPlan` instance.
-
-        Notice that this transformation is lossy since not all information from the Postgres plan can be represented in query
-        execution plan instances. Furthermore, this transformation can be problematic for complicated queries that use
-        special Postgres features. Most importantly, for queries involving subqueries, special node types and parent
-        relationships can be contained in the plan, that cannot be represented by other parts of PostBOUND. If this method
-        and the resulting query execution plans should be used on complex workloads, it is advisable to check the plans twice
-        before continuing.
-
-        Returns
-        -------
-        QueryPlan
-            The equivalent query execution plan for this node
-
-        Raises
-        ------
-        ValueError
-            If the node contains more than two children.
-        """
-        return self._generate_qep()
-
-    def _generate_qep(self, *, card_adjustment: float = 1.0) -> QueryPlan:
-        child_nodes = []
-        inner_child, outer_child, subplan_child = None, None, None
-
-        # planned workers is 0 for sequential execution, otherwise it contains the number of additional workers
-        # if we already have a card adjustment, we are alrady in a parallel subplan so we re-use the existing adjustment
-        # otherwise, the total adjustment is planned_workers + 1 to account for the main process
-        child_adjustment = card_adjustment if card_adjustment > 1 else (self.planned_workers + 1)
-
-        for child in self.children:
-            parent_rel = child.parent_relationship
-            qep_child = child._generate_qep(card_adjustment=child_adjustment)
-
-            match parent_rel:
-                case "Inner":
-                    inner_child = qep_child
-                case "Outer":
-                    outer_child = qep_child
-                case "SubPlan" | "InitPlan" | "Subquery":
-                    subplan_child = qep_child
-                case "Member":
-                    child_nodes.append(qep_child)
-                case _:
-                    raise ValueError(f"Unknown parent relationship '{parent_rel}' for child {child}")
-
-        if inner_child and outer_child:
-            child_nodes = [outer_child, inner_child] + child_nodes
-        elif outer_child:
-            child_nodes.insert(0, outer_child)
-        elif inner_child:
-            child_nodes.insert(0, inner_child)
-
-        table = self.parse_table()
-        subplan_name = self.subplan_name or self.cte_name
-
-        true_card = self.true_cardinality * self.loops
-        estimated_card = self.cardinality_estimate * card_adjustment
-
-        if self.is_scan():
-            operator = PostgresExplainScanNodes.get(self.node_type, None)
-        elif self.is_join():
-            operator = PostgresExplainJoinNodes.get(self.node_type, None)
-        else:
-            operator = PostgresExplainIntermediateNodes.get(self.node_type, None)
-
-        sort_keys = self._parse_sort_keys() if self.sort_keys else self._infer_sorting_from_children()
-        shared_hits = None if math.isnan(self.shared_blocks_cached) else self.shared_blocks_cached
-        shared_misses = None if math.isnan(self.shared_blocks_read) else self.shared_blocks_read
-
-        if self.launched_workers > 0:
-            par_workers = self.launched_workers
-        elif self.planned_workers > 0:
-            par_workers = self.planned_workers
-        else:
-            par_workers = None
-
-        plan = QueryPlan(
-            self.node_type,
-            base_table=table,
-            operator=operator,
-            children=child_nodes,
-            parallel_workers=par_workers,
-            index=self.index_name,
-            sort_keys=sort_keys,
-            estimated_cost=self.cost,
-            estimated_cardinality=Cardinality(estimated_card),
-            actual_cardinality=Cardinality(true_card),
-            execution_time=self.execution_time,
-            cache_hits=shared_hits,
-            cache_misses=shared_misses,
-            subplan_root=subplan_child,
-            subplan_name=subplan_name,
-        )
-
-        return plan
-
-    def inspect(self, *, _indentation: int = 0) -> str:
-        """Provides a pretty string representation of the *EXPLAIN* sub-plan that can be printed.
-
-        Parameters
-        ----------
-        _indentation : int, optional
-            This parameter is internal to the method and ensures that the correct indentation is used for the child nodes
-            of the plan. When inspecting the root node, this value is set to its default value of `0`.
-
-        Returns
-        -------
-        str
-            A string representation of the *EXPLAIN* sub-plan.
-        """
-        if self.parent_relationship in ("InitPlan", "SubPlan"):
-            padding = " " * (max(_indentation - 2, 0))
-            cte_name = self.subplan_name if self.subplan_name else ""
-            own_inspection = [f"{padding}{self.parent_relationship}: {cte_name}"]
-        else:
-            own_inspection = []
-        padding = " " * _indentation
-        prefix = f"{padding}<- " if padding else ""
-        own_inspection += [prefix + str(self)]
-        child_inspections = [child.inspect(_indentation=_indentation + 2) for child in self.children]
-        return "\n".join(own_inspection + child_inspections)
-
-    def _infer_sorting_from_children(self) -> list[SortKey]:
-        # TODO: Postgres is a cruel mistress. Even if output is sorted, it might not be marked as such.
-        # For example, in index scans, this is implictly encoded in the index condition, somethimes even nested in other
-        # expressions. We first need a reliable way to parse the expressions into a PostBOUND-compatible format.
-        # See _parse_sort_keys for a start.
-        return []
-
-    def _parse_sort_keys(self) -> list[SortKey]:
-        # TODO implementation
-        return []
-
-    def __hash__(self) -> int:
-        return self._hash_val
-
-    def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self.node_type == other.node_type
-            and self.relation_name == other.relation_name
-            and self.relation_alias == other.relation_alias
-            and self.children == other.children
-        )
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __str__(self) -> str:
-        analyze_content = (
-            f" (actual time={self.execution_time}s rows={self.true_cardinality} loops={self.loops})"
-            if self.is_analyze()
-            else ""
-        )
-        explain_content = f"(cost={self.cost} rows={self.cardinality_estimate})"
-        conditions = " ".join(f"{condition}: {value}" for condition, value in self.filter_conditions().items())
-        conditions = " " + conditions if conditions else ""
-        if self.is_scan():
-            tab = self.parse_table()
-            assert tab is not None
-            scan_info = f" on {tab.identifier()}"
-        elif self.cte_name:
-            scan_info = f" on {self.cte_name}"
-        else:
-            scan_info = ""
-        return self.node_type + scan_info + explain_content + analyze_content + conditions
-
-
-class PostgresExplainPlan:
-    """Models an entire *EXPLAIN* plan produced by Postgres
-
-    In contrast to `PostgresExplainNode`, this includes additional parameters (planning time and execution time) for the entire
-    plan, rather than just portions of it.
-
-    This class supports all methods that are specified on the general `QueryPlan` and returns the correct data for its actual
-    plan.
-
-    Parameters
-    ----------
-    explain_data : dict | list[dict]
-        The JSON data of the entire explain plan. This is parsed and prepared as part of the *__init__* method.
-
-
-    Attributes
-    ----------
-    planning_time : float
-        The time in seconds that the optimizer spent to build the plan
-    execution_time : float
-        The time in seconds the query execution engine needed to calculate the result set of the query. This does not account
-        for network time to transmit the result set.
-    query_plan : PostgresExplainNode
-        The actual plan
-    """
-
-    def __init__(self, explain_data: dict | list[dict]) -> None:
-        self.explain_data = explain_data[0] if isinstance(explain_data, list) else explain_data
-        if not (isinstance(self.explain_data, dict) and "Plan" in self.explain_data):
-            raise ValueError(f"Invalid explain data: missing 'Plan' key: {explain_data}")
-
-        self.planning_time: float = self.explain_data.get("Planning Time", math.nan) / 1000
-        self.execution_time: float = self.explain_data.get("Execution Time", math.nan) / 1000
-        self.query_plan = PostgresExplainNode(self.explain_data["Plan"])
-        self._normalized_plan = self.query_plan.as_qep()
-
-    @property
-    def root(self) -> PostgresExplainNode:
-        """Gets the root node of the actual query plan."""
-        return self.query_plan
-
-    def is_analyze(self) -> bool:
-        """Checks, whether this *EXPLAIN* plan is an *EXPLAIN ANALYZE* plan or a pure *EXPLAIN* plan.
-
-        The analyze variant does not only obtain the plan, but actually executes it. This enables the comparison of the
-        optimizer's estimates to the actual values. If a plan is an *EXPLAIN ANALYZE* plan, some attributes of this node
-        receive actual values. These include `execution_time`, `true_cardinality`, `loops` and `parallel_workers`.
-
-
-        Returns
-        -------
-        bool
-            Whether the plan represents an *EXPLAIN ANALYZE* plan
-        """
-        return self.query_plan.is_analyze()
-
-    def as_qep(self) -> QueryPlan:
-        """Provides the actual explain plan as a normalized query execution plan instance
-
-        For notes on pecularities of this method, take a look at the *See Also* section
-
-        Returns
-        -------
-        QueryPlan
-            The query execution plan
-
-        See Also
-        --------
-        PostgresExplainNode.as_qep
-        """
-        return self._normalized_plan
-
-    def inspect(self) -> str:
-        """Provides a pretty string representation of the actual plan.
-
-        Returns
-        -------
-        str
-            A string representation of the plan
-
-        See Also
-        --------
-        PostgresExplainNode.inspect
-        """
-        return self.query_plan.inspect()
-
-    def __json__(self) -> Any:
-        return self.explain_data
-
-    def __getattribute__(self, name: str) -> Any:
-        # All methods that are not defined on the Postgres plan delegate to the default DB plan
-        try:
-            return object.__getattribute__(self, name)
-        except AttributeError:
-            root_plan_node = object.__getattribute__(self, "query_plan")
-            try:
-                return root_plan_node.__getattribute__(name)
-            except AttributeError:
-                normalized_plan = object.__getattribute__(self, "_normalized_plan")
-                return normalized_plan.__getattribute__(name)
-
-    def __hash__(self) -> int:
-        return hash(self.query_plan)
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, type(self)) and self.query_plan == other.query_plan
-
-    def __repr__(self) -> str:
-        return str(self)
-
-    def __str__(self) -> str:
-        if self.is_analyze():
-            prefix = f"EXPLAIN ANALYZE (plan time={self.planning_time}, exec time={self.execution_time})"
-        else:
-            prefix = "EXPLAIN"
-
-        return f"{prefix} root: {self.query_plan}"
-
-
-class WorkloadShifter:
-    """The shifter provides simple means to manipulate the current contents of a database.
-
-    Currently, such means only include the deletion of specific rows, but other tools could be added in the future.
-
-    Parameters
-    ----------
-    pg_instance : PostgresInterface
-        The database to manipulate
-    """
-
-    def __init__(self, pg_instance: PostgresInterface) -> None:
-        self.pg_instance = pg_instance
-
-    def remove_random(
-        self,
-        table: TableReference | str,
-        *,
-        n_rows: Optional[int] = None,
-        row_pct: Optional[float] = None,
-        vacuum: bool = False,
-    ) -> None:
-        """Deletes tuples from a specific tables at random.
-
-        Parameters
-        ----------
-        table : TableReference | str
-            The table from which to delete
-        n_rows : Optional[int], optional
-            The absolute number of rows to delete. Defaults to *None* in which case the `row_pct` is used.
-        row_pct : Optional[float], optional
-            The share of rows to delete. Value should be in range (0, 1). Defaults to *None* in which case the `n_rows` is
-            used.
-        vacuum : bool, optional
-            Whether the database should be vacuumed after deletion. This optimizes the page layout by compacting the pages and
-            forces a refresh of all statistics.
-
-        Raises
-        ------
-        ValueError
-            If no correct `n_rows` or `row_pct` values have been given.
-
-        Warnings
-        --------
-        Notice that deletions in the given table can trigger further deletions in other tables through cascades in the schema.
-        """
-        table_name = table.full_name if isinstance(table, TableReference) else table
-        n_rows = self._determine_row_cnt(table_name, n_rows, row_pct)
-        pk_column = self.pg_instance.schema().primary_key_column(table_name)
-        if pk_column is None:
-            raise ValueError(f"Cannot perform random removal on table '{table_name}': No primary key found")
-
-        removal_template = textwrap.dedent("""
-                                           WITH delete_samples AS (
-                                               SELECT {col} AS sample_id, RANDOM() AS _pb_rand_val
-                                               FROM {table}
-                                               ORDER BY _pb_rand_val
-                                               LIMIT {cnt}
-                                           )
-                                           DELETE FROM {table}
-                                           WHERE EXISTS (SELECT 1 FROM delete_samples WHERE sample_id = {col})
-                                           """)
-        removal_query = removal_template.format(table=table_name, col=pk_column.name, cnt=n_rows)
-        self._perform_removal(removal_query, vacuum)
-
-    def remove_ordered(
-        self,
-        column: ColumnReference | str,
-        *,
-        n_rows: Optional[int] = None,
-        row_pct: Optional[float] = None,
-        ascending: bool = True,
-        null_placement: Optional[Literal["first", "last"]] = None,
-        vacuum: bool = False,
-    ) -> None:
-        """Deletes the smallest/largest tuples from a specific table.
-
-        Parameters
-        ----------
-        column : ColumnReference | str
-            The column to infer the deletion order. Can be either a proper column reference including the containing table, or
-            a fully-qualified column string such as _table.column_ .
-        n_rows : Optional[int], optional
-            The absolute number of rows to delete. Defaults to *None* in which case the `row_pct` is used.
-        row_pct : Optional[float], optional
-            The share of rows to delete. Value should be in range (0, 1). Defaults to *None* in which case the `n_rows` is
-            used.
-        ascending : bool, optional
-            Whether the first or the last rows should be deleted. *NULL* values are according to `null_placement`.
-        null_placement : Optional[Literal["first", "last"]], optional
-            Where to put *NULL* values in the order. Using the default value of *None* treats *NULL* values as being the
-            largest values possible.
-        vacuum : bool, optional
-            Whether the database should be vacuumed after deletion. This optimizes the page layout by compacting the pages and
-            forces a refresh of all statistics.
-
-        Raises
-        ------
-        ValueError
-            If no correct `n_rows` or `row_pct` values have been given.
-
-        Warnings
-        --------
-        Notice that deletions in the given table can trigger further deletions in other tables through cascades in the schema.
-        """
-
-        if isinstance(column, str):
-            table_name, col_name = column.split(".")
-        elif isinstance(column, ColumnReference) and column.table is not None:
-            table_name, col_name = column.table.full_name, column.name
-        elif isinstance(column, ColumnReference):
-            raise UnboundColumnError(column)
-        else:
-            raise TypeError("Unknown column type: " + str(column))
-        n_rows = self._determine_row_cnt(table_name, n_rows, row_pct)
-        pk_column = self.pg_instance.schema().primary_key_column(table_name)
-        if pk_column is None:
-            raise ValueError(f"Cannot perform ordered removal on table '{table_name}': No primary key found")
-
-        order_direction = "ASC" if ascending else "DESC"
-        null_vals = "" if null_placement is None else f"NULLS {null_placement.upper()}"
-        removal_template = textwrap.dedent("""
-                                           WITH delete_entries AS (
-                                               SELECT {pk_col}
-                                               FROM {table}
-                                               ORDER BY {order_col} {order_dir} {nulls}, {pk_col} ASC
-                                               LIMIT {cnt}
-                                           )
-                                           DELETE FROM {table} t
-                                           WHERE EXISTS (SELECT 1 FROM delete_entries
-                                                         WHERE delete_entries.{pk_col} = t.{pk_col})
-                                           """)
-        removal_query = removal_template.format(
-            table=table_name,
-            pk_col=pk_column.name,
-            order_col=col_name,
-            order_dir=order_direction,
-            nulls=null_vals,
-            cnt=n_rows,
-        )
-        self._perform_removal(removal_query, vacuum)
-
-    def generate_marker_table(
-        self,
-        target_table: str,
-        marker_pct: float = 0.5,
-        *,
-        target_column: str = "id",
-        marker_table: Optional[str] = None,
-        marker_column: Optional[str] = None,
-    ) -> None:
-        """Generates a new table that can be used to store rows that should be deleted at a later point in time.
-
-        The marker table will be created if it does not exist already. It contains exactly two columns: one column for the
-        marker index (an ascending integer value) and another column that stores the primary keys of rows that should be
-        deleted from the target table. If the marker table exists already, all current markings (but not the marked rows
-        themselves) are removed. Afterwards, the new rows to delete are selected at random.
-
-        By default, only the target table is a required parameter. All other parameters have default values or can be inferred
-        from the target table. The marker index column is *marker_idx*.
-
-        Parameters
-        ----------
-        target_table : str
-            The table from which rows should be removed
-        marker_pct : float
-            The percentage of rows that should be included in the marker table. Allowed range is *[0, 1]*.
-        target_column : str, optional
-            The column that contains the values used to identify the rows to be deleted in the target table. Defaults to *id*.
-        marker_table : Optional[str], optional
-            The name of the marker table that should store the row identifiers. Defaults to
-            *<target table name>_delete_markers*.
-        marker_column : Optional[str], optional
-            The name of the column in the marker table that should contain the target column values. Defaults to
-            *<target table name>_<target column name>*.
-
-        See Also
-        --------
-        remove_marked
-        export_marker_table
-        """
-        marker_table = f"{target_table}_delete_marker" if marker_table is None else marker_table
-        marker_column = f"{target_table}_{target_column}" if marker_column is None else marker_column
-        target_col_ref = ColumnReference(target_column, TableReference(target_table))
-        target_column_type = self.pg_instance.schema().datatype(target_col_ref)
-        marker_create_query = textwrap.dedent(f"""
-                                              CREATE TABLE IF NOT EXISTS {marker_table} (
-                                                  marker_idx BIGSERIAL PRIMARY KEY,
-                                                  {marker_column} {target_column_type}
-                                              );
-                                              """)
-        marker_pct = round(marker_pct * 100)
-        marker_inflate_query = textwrap.dedent(f"""
-                                               INSERT INTO {marker_table}({marker_column})
-                                               SELECT {target_column}
-                                               FROM {target_table} TABLESAMPLE BERNOULLI ({marker_pct});
-                                               """)
-        with self.pg_instance.obtain_new_local_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(marker_create_query)  # type: ignore
-            cursor.execute(f"DELETE FROM {marker_table};")  # type: ignore
-            cursor.execute(marker_inflate_query)  # type: ignore
-
-    def export_marker_table(
-        self,
-        *,
-        target_table: Optional[str] = None,
-        marker_table: Optional[str] = None,
-        out_file: Optional[str | Path] = None,
-    ) -> None:
-        """Stores a marker table in a CSV file on disk.
-
-        This allows the marker table to be re-imported later on.
-
-        Parameters
-        ----------
-        target_table : Optional[str], optional
-            The name of the target table for which the marker has been created. This can be used to infer the name of the
-            marker table if the defaults have been used.
-        marker_table : Optional[str], optional
-            The name of the marker table. Can be omitted if the default name has been used and `target_table` is specified.
-        out_file : Optional[str | Path], optional
-            The name and path of the output CSV file to create. If omitted, the name will be `<marker table name>.csv` and the
-            file will be placed in the current working directory. If specified, an absolute path must be used.
-
-        Raises
-        ------
-        ValueError
-            If neither `target_table` nor `marker_table` are given.
-
-        See Also
-        --------
-        import_marker_table
-        remove_marked
-        """
-        if target_table is None and marker_table is None:
-            raise ValueError("Either marker table or target table are required!")
-        marker_table = f"{target_table}_delete_marker" if marker_table is None else marker_table
-        out_file = Path(f"{marker_table}.csv").absolute() if out_file is None else out_file
-        self.pg_instance.cursor().execute(f"COPY {marker_table} TO '{out_file}' DELIMITER ',' CSV HEADER;")  # type: ignore
-
-    def import_marker_table(
-        self,
-        *,
-        target_table: Optional[str] = None,
-        marker_table: Optional[str] = None,
-        target_column: str = "id",
-        marker_column: Optional[str] = None,
-        target_column_type: Optional[str] = None,
-        in_file: Optional[str | Path] = None,
-    ) -> None:
-        """Loads the contents of a marker table from a CSV file from disk.
-
-        The table will be created if it does not exist already. If the marker table exists already, all current markings (but
-        not the marked rows themselves) are removed. Afterwards, the new markings are imported.
-
-        Parameters
-        ----------
-        target_table : Optional[str], optional
-            The name of the target table for which the marker has been created. This can be used to infer the name of the
-            marker table if the defaults have been used.
-        marker_table : Optional[str], optional
-            The name of the marker table. Can be omitted if the default name has been used and `target_table` is specified.
-        target_column : str, optional
-            The column that contains the values used to identify the rows to be deleted in the target table. Defaults to *id*.
-        marker_table : Optional[str], optional
-            The name of the marker table that should store the row identifiers. Defaults to
-            *<target table name>_delete_markers*.
-        target_column_type : Optional[str], optional
-            The datatype of the target column. If this parameter is not given, `target_table` has to be specified to infer the
-            proper datatype from the schema metadata.
-        in_file : Optional[str | Path], optional
-            The name and path of the CSV file to read. If omitted, the name will be `<marker table name>.csv` and the
-            file will be loaded in the current working directory. If specified, an absolute path must be used.
-
-        Raises
-        ------
-        ValueError
-            If neither `target_table` nor `marker_table` are given.
-
-        See Also
-        --------
-        export_marker_table
-        remove_marked
-        """
-        if not target_table and not marker_table:
-            raise ValueError("Either marker table or target table are required!")
-        marker_table = f"{target_table}_delete_marker" if marker_table is None else marker_table
-        marker_column = f"{target_table}_{target_column}" if marker_column is None else marker_column
-        in_file = Path(f"{marker_table}.csv").absolute() if in_file is None else in_file
-
-        if target_column_type is None:
-            assert target_table is not None
-            target_col_ref = ColumnReference(target_column, TableReference(target_table))
-            target_column_type = self.pg_instance.schema().datatype(target_col_ref)
-
-        marker_create_query = textwrap.dedent(f"""
-                                              CREATE TABLE IF NOT EXISTS {marker_table} (
-                                                  marker_idx BIGSERIAL PRIMARY KEY,
-                                                  {marker_column} {target_column_type}
-                                              );
-                                              """)
-        marker_import_query = textwrap.dedent(f"""
-                                              COPY {marker_table}(marker_idx, {marker_column})
-                                              FROM '{in_file}'
-                                              DELIMITER ','
-                                              CSV HEADER;
-                                              """)
-        with self.pg_instance.obtain_new_local_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(marker_create_query)  # type: ignore
-            cursor.execute(f"DELETE FROM {marker_table}")  # type: ignore
-            cursor.execute(marker_import_query)  # type: ignore
-
-    def remove_marked(
-        self,
-        target_table: str,
-        *,
-        target_column: str = "id",
-        marker_table: Optional[str] = None,
-        marker_column: Optional[str] = None,
-        vacuum: bool = False,
-    ) -> None:
-        """Deletes rows according to their primary keys stored in a marker table.
-
-        Parameters
-        ----------
-        target_table : str
-            The table from which the rows should be removed.
-        target_column : str, optional
-            A column of the target table that is used to identify rows matching the marked rows to remove. Defaults to *id*.
-        marker_table : Optional[str], optional
-            A table containing marks of the rows to delete. Defaults to *<target table>_delete_markers*.
-        marker_column : Optional[str], optional
-            A column of the marker table that contains the values of the columns to remove. Defaults to
-            *<target table>_<target column>*.
-        vacuum : bool, optional
-            Whether the database should be vacuumed after deletion. This optimizes the page layout by compacting the pages and
-            forces a refresh of all statistics.
-
-        See Also
-        --------
-        generate_marker_table
-        """
-        # TODO: align parameter types with TableReference and ColumnReference
-        marker_table = f"{target_table}_delete_marker" if marker_table is None else marker_table
-        marker_column = f"{target_table}_{target_column}" if marker_column is None else marker_column
-        removal_query = textwrap.dedent(f"""
-                                        DELETE FROM {target_table}
-                                        WHERE EXISTS (SELECT 1 FROM {marker_table}
-                                                WHERE {marker_table}.{marker_column} = {target_table}.{target_column})""")
-        self._perform_removal(removal_query, vacuum)
-
-    def _perform_removal(self, removal_query: str, vacuum: bool) -> None:
-        """Executes a specific removal query and optionally cleans up the storage system.
-
-        Parameters
-        ----------
-        removal_query : str
-            The query that describes the desired delete operation.
-        vacuum : bool
-            Whether the database should be vacuumed after deletion. This optimizes the page layout by compacting the pages and
-            forces a refresh of all statistics.
-        """
-        with self.pg_instance.obtain_new_local_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(removal_query)  # type: ignore
-        if vacuum:
-            # We can't use the with-syntax here because VACUUM cannot be executed inside a transaction
-            conn = self.pg_instance.obtain_new_local_connection()
-            conn.autocommit = True
-            cursor = conn.cursor()
-            # We really need a full vacuum due to cascading deletes
-            cursor.execute("VACUUM FULL ANALYZE;")
-            cursor.close()
-            conn.close()
-
-    def _determine_row_cnt(self, table: str, n_rows: Optional[int], row_pct: Optional[float]) -> int:
-        """Calculates the absolute number of rows to delete while also performing sanity checks.
-
-        Parameters
-        ----------
-        table : str
-            The table from which rows should be deleted. This is necessary to determine the current row count.
-        n_rows : Optional[int]
-            The absolute number of rows to delete.
-        row_pct : Optional[float]
-            The fraction in (0, 1) of rows to delete.
-
-        Returns
-        -------
-        int
-            The absolute number rows to delete. This is equal to `n_rows` if that parameter was given. Otherwise, the number is
-            inferred from the `row_pct` and the current number of tuples in the table.
-
-        Raises
-        ------
-        ValueError
-            If either both or neither `n_rows` and `row_pct` was given or any of the parameters is outside of the allowed
-            range.
-        """
-        if n_rows is None and row_pct is None:
-            raise ValueError("Either absolute number of rows or row percentage must be given")
-        if n_rows is not None and row_pct is not None:
-            raise ValueError("Cannot use both absolute number of rows and row percentage")
-
-        if n_rows is not None and not n_rows > 0:
-            raise ValueError("Not a valid row count: " + str(n_rows))
-        elif n_rows is not None and n_rows > 0:
-            return n_rows
-
-        assert row_pct is not None, "Row percentage or n_rows must be given"
-        if not 0.0 < row_pct < 1.0:
-            raise ValueError("Not a valid row percentage: " + str(row_pct))
-
-        total_n_rows = self.pg_instance.statistics().total_rows(TableReference(table))
-        if total_n_rows is None:
-            raise StateError("Could not determine total number of rows for table " + table)
-        return round(row_pct * int(total_n_rows))

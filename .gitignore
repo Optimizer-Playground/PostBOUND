@@ -194,6 +194,8 @@ pb-venv/
 LocalTest*
 localtest*
 *.bkp
+experiments/
+experiment_log.json
 
 # Build files
 util/bin/
