@@ -9345,6 +9345,34 @@ def is_set_query(query: SqlQuery) -> TypeGuard[SetQuery]:
     return isinstance(query, SetQuery)
 
 
+@overload
+def all_binary_predicates(predicates: list[AbstractPredicate]) -> TypeGuard[list[BinaryPredicate]]: ...
+
+
+@overload
+def all_binary_predicates(predicates: tuple[AbstractPredicate, ...]) -> TypeGuard[tuple[BinaryPredicate, ...]]: ...
+
+
+@overload
+def all_binary_predicates(predicates: set[AbstractPredicate]) -> TypeGuard[set[BinaryPredicate]]: ...
+
+
+@overload
+def all_binary_predicates(predicates: Sequence[AbstractPredicate]) -> TypeGuard[Sequence[BinaryPredicate]]: ...
+
+
+@overload
+def all_binary_predicates(predicates: Collection[AbstractPredicate]) -> TypeGuard[Collection[BinaryPredicate]]: ...
+
+
+@overload
+def all_binary_predicates(predicates: Iterable[AbstractPredicate]) -> TypeGuard[Iterable[BinaryPredicate]]: ...
+
+
+def all_binary_predicates(predicates):
+    return all(isinstance(pred, BinaryPredicate) for pred in predicates)
+
+
 class QueryTypeError(RuntimeError):
     """Error to indicate that a different type of query was expected (e.g. an `ExplicitSqlQuery` instead of a `SetQuery`)."""
 
