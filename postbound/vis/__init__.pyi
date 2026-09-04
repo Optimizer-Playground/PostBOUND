@@ -9,14 +9,12 @@ from .optimizer import (
     estimated_cards,
     merged_annotation,
     plot_analyze_plan,
-    plot_join_graph,
     plot_join_tree,
     plot_query_plan,
     plot_relalg,
     setup_annotations,
 )
 from .plots import make_facetted_grid_plot, make_grid_plot
-from .tonic import plot_tonic_qeps
 from .trees import plot_tree
 
 __all__ = [
@@ -32,11 +30,9 @@ __all__ = [
     "merged_annotation",
     "plot_analyze_plan",
     "plot_graph",
-    "plot_join_graph",
     "plot_join_tree",
     "plot_query_plan",
     "plot_relalg",
-    "plot_tonic_qeps",
     "plot_tree",
     "setup_annotations",
 ]

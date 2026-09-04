@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 
@@ -59,7 +59,7 @@ class ProcResult(str):
 
 
 def run_cmd(
-    cmd: str | Iterable[Any],
+    cmd: str | Sequence[Any],
     *args,
     work_dir: str | pathlib.Path | None = None,
     **kwargs,
@@ -95,7 +95,7 @@ def run_cmd(
     current_dir = os.getcwd()
 
     if isinstance(cmd, Iterable) and not isinstance(cmd, str):
-        cmd, args = str(cmd[0]), cmd[1:] + list(args)
+        cmd, args = str(cmd[0]), [*cmd[1:], *args]
     invocation = [cmd] + [str(arg) for arg in args]
 
     os.chdir(work_dir)

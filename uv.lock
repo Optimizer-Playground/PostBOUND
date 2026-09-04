@@ -1849,6 +1849,7 @@ vis = [
 dev = [
     { name = "ipython" },
     { name = "jupyterlab" },
+    { name = "postbound", extra = ["duckdb", "mysql", "vis"] },
     { name = "pre-commit" },
     { name = "pyarrow" },
     { name = "ruff" },
@@ -1884,6 +1885,7 @@ provides-extras = ["vis", "duckdb", "mysql"]
 dev = [
     { name = "ipython", specifier = ">=9.8.0" },
     { name = "jupyterlab", specifier = ">=4.6.1" },
+    { name = "postbound", extras = ["duckdb", "mysql", "vis"] },
     { name = "pre-commit", specifier = ">=4.4" },
     { name = "pyarrow", specifier = ">=23.0.0" },
     { name = "ruff", specifier = "==0.16.6" },

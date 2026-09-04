@@ -486,7 +486,9 @@ def _optimize_query(query: SelectStatement, *, pipeline: OptimizationPipeline | 
         optimized_query = pipeline.optimize_query(query)
         opt_end = time.perf_counter_ns()
         optimization_time = (opt_end - opt_start) / 10**9  # convert to seconds
-        return _SuccessfullOptimization(optimized_query=optimized_query, optimization_time=optimization_time)
+        return _SuccessfullOptimization(optimized_query=optimized_query, optimization_time=optimization_time)  # ty: ignore[invalid-argument-type] -- OptimizationPipeline.optimize_query is declared
+        # to return SqlQuery, but _SuccessfullOptimization narrows to SelectStatement. Widening
+        # the dataclass would ripple through the result frames, so it is left for a separate change.
     except Exception as e:
         return _FailedOptimization(error=e)
 

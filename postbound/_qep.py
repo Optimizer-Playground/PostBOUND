@@ -968,7 +968,8 @@ class QueryPlan:
                 **kwargs,
             )
 
-        if estimates is not None and any(not math.isnan(v) for v in (estimated_cardinality, estimated_cost)):
+        individual_estimates = (estimated_cardinality, estimated_cost)
+        if estimates is not None and any(v is not None and not math.isnan(v) for v in individual_estimates):
             raise ValueError("PlanEstimates and individual estimates cannot be provided at the same time")
         if estimates is None:
             estimates = PlanEstimates(cardinality=estimated_cardinality, cost=estimated_cost)

@@ -1,4 +1,4 @@
-"""Utilities to visualize different aspects of query optimization, namely join trees and join graphs."""
+"""Utilities to visualize different aspects of query optimization, namely join trees and query plans."""
 
 from __future__ import annotations
 
@@ -7,14 +7,12 @@ from collections.abc import Callable, Sequence
 from typing import Literal, overload
 
 import graphviz as gv
-import networkx as nx
 
 from .. import relalg, transform, util
 from .._core import TableReference
-from .._hints import JoinTree, LogicalJoinTree
+from .._hints import JoinTree
 from .._qep import QueryPlan
 from ..db import Database, DatabasePool
-from ..opt._joingraph import JoinGraph
 from ..qal import SelectStatement
 from . import trees
 
@@ -28,8 +26,8 @@ def _join_tree_labels(node: JoinTree) -> tuple[str, dict]:
         base_text = str(node.base_table)
         base_style = {"color": "grey"}
 
-    if isinstance(node, LogicalJoinTree):
-        base_text += f"\n Card = {node.cardinality}"
+    if node.annotation is not None:
+        base_text += f"\n Card = {node.annotation}"
 
     return base_text, base_style
 
@@ -43,115 +41,6 @@ def plot_join_tree(join_tree: JoinTree) -> gv.Graph:
     if not join_tree:
         return gv.Graph()
     return trees.plot_tree(join_tree, _join_tree_labels, _join_tree_traversal)
-
-
-def _fallback_default_join_edge(graph: gv.Digraph, join_table: TableReference, partner_table: TableReference) -> None:
-    graph.edge(str(join_table), str(partner_table), dir="none")
-
-
-def _render_pk_fk_join_edge(
-    graph: gv.Digraph,
-    query: SelectStatement,
-    join_table: TableReference,
-    partner_table: TableReference,
-) -> None:
-    db_schema = DatabasePool.get_instance().current_database().schema()
-    join_predicate = query.predicates().joins_between(join_table, partner_table)
-    if not join_predicate:
-        return _fallback_default_join_edge(graph, join_table, partner_table)
-
-    join_columns = join_predicate.join_partners()
-    if len(join_columns) != 1:
-        return _fallback_default_join_edge(graph, join_table, partner_table)
-
-    join_col, partner_col = next(iter(join_columns))
-    if db_schema.is_primary_key(join_col) and db_schema.has_secondary_index(partner_col):
-        graph.edge(str(partner_col.table), str(join_col.table))
-    elif db_schema.is_primary_key(partner_col) and db_schema.has_secondary_index(join_col):
-        graph.edge(str(join_col.table), str(partner_col.table))
-    else:
-        _fallback_default_join_edge(graph, join_table, partner_table)
-
-
-def _plot_join_graph_from_query(
-    query: SelectStatement,
-    table_annotations: Callable[[TableReference], str] | None = None,
-    include_pk_fk_joins: bool = False,
-) -> gv.Graph:
-    if not query.predicates():
-        return gv.Graph()
-    join_graph: nx.Graph = query.predicates().join_graph()
-    gv_graph = gv.Digraph() if include_pk_fk_joins else gv.Graph
-    for table in join_graph.nodes:
-        node_label = str(table)
-        node_label += ("\n" + table_annotations(table)) if table_annotations is not None else ""
-        gv_graph.node(str(table), label=node_label)
-    for start, target in join_graph.edges:
-        if include_pk_fk_joins:
-            _render_pk_fk_join_edge(gv_graph, query, start, target)
-        else:
-            gv_graph.edge(str(start), str(target))
-    return gv_graph
-
-
-def _plot_join_graph_directly(
-    join_graph: JoinGraph,
-    table_annotations: Callable[[TableReference], str] | None = None,
-) -> gv.Digraph:
-    gv_graph = gv.Digraph()
-    for table in join_graph:
-        node_color = "black" if join_graph.is_free_table(table) else "blue"
-        node_label = str(table)
-        node_label += ("\n" + table_annotations(table)) if table_annotations is not None else ""
-        gv_graph.node(str(table), label=node_label, color=node_color)
-    for start, target in join_graph.all_joins():
-        if join_graph.is_pk_fk_join(start, target):  # start is FK, target is PK
-            gv_graph.edge(str(start), str(target))  # edge arrow goes from start to target (i.e. FK to PK)
-        elif join_graph.is_pk_fk_join(target, start):  # target is FK, start is PK
-            gv_graph.edge(str(target), str(start))  # edge arrow goes form target to start (i.e. FK to PK)
-        else:
-            gv_graph.edge(str(start), str(target), dir="none")
-    return gv_graph
-
-
-def plot_join_graph(
-    query_or_join_graph: SelectStatement | JoinGraph,
-    table_annotations: Callable[[TableReference], str] | None = None,
-    *,
-    include_pk_fk_joins: bool = False,
-    out_path: str = "",
-    out_format: str = "svg",
-) -> gv.Graph | gv.Digraph:
-    """Creates a Graphviz visualization of a join graph.
-
-    The join graph can be either supplied directly (in which case it will be visualized as a directed graph), or implicitly
-    through its SQL query. In this case, the join graph is inferred based on the join conditions. Such a graph can be further
-    customized to also highlight primary-key/foreign-key relationships as a directed graph.
-
-    The directed graph variants will point from the foreign key table to the primary key table.
-
-    To customize the information shown on each table node, a custom `table_annotations` function can be provided. Several such
-    functions for common annotations are already provided in this module. Annotation functions have a very simple signature:
-    they take the table currently being rendered as input and return a string containing the metadata to be shown on the node.
-    To add additional context to these methods, it is advisable to use `functools.partial` to bind additional parameters.
-
-    See Also
-    --------
-    estimated_cards
-    annotate_filter_cards
-    annotate_cards
-    merged_annotation
-    """
-    if isinstance(query_or_join_graph, SelectStatement):
-        graph = _plot_join_graph_from_query(query_or_join_graph, table_annotations, include_pk_fk_joins)
-    elif isinstance(query_or_join_graph, JoinGraph):
-        graph = _plot_join_graph_directly(query_or_join_graph, table_annotations)
-    else:
-        raise TypeError("Argument must be either SqlQuery or JoinGraph, not" + str(type(query_or_join_graph)))
-
-    if out_path:
-        graph.render(out_path, format=out_format, cleanup=True)
-    return graph
 
 
 def estimated_cards(table: TableReference, *, query: SelectStatement, database: Database | None = None) -> str:
@@ -172,7 +61,7 @@ def estimated_cards(table: TableReference, *, query: SelectStatement, database: 
 
     See Also
     --------
-    plot_join_graph
+    merged_annotation
     """
     database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])
@@ -198,7 +87,7 @@ def annotate_filter_cards(table: TableReference, *, query: SelectStatement, data
 
     See Also
     --------
-    plot_join_graph
+    merged_annotation
     """
     database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])
@@ -226,7 +115,7 @@ def annotate_cards(table: TableReference, *, query: SelectStatement, database: D
 
     See Also
     --------
-    plot_join_graph
+    merged_annotation
     """
     database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])

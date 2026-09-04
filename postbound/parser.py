@@ -2071,7 +2071,13 @@ def _apply_extra_clauses(
 
 
 @overload
-def parse_query(query: str) -> SqlQuery: ...
+def parse_query(
+    query: str,
+    *,
+    include_hints: bool = ...,
+    bind_columns: bool | None = ...,
+    db_schema: DatabaseSchema | None = ...,
+) -> SqlQuery: ...
 
 
 @overload

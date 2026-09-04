@@ -244,7 +244,7 @@ class MockSchemaLookup(pb.db.DatabaseSchema):
     }
 
     def __init__(self) -> None:
-        super().__init__(None)  # type: ignore
+        super().__init__(None)
 
     def tables(
         self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
@@ -286,8 +286,8 @@ class TransformationTests(unittest.TestCase):
 
             self.assertSetEqual(parsed.select_clause.columns(), {col_r_a})
 
-            self.assertIsNotNone(parsed.where_clause)
-            self.assertSetEqual(parsed.where_clause.columns(), {col_r_b})  # type: ignore
+            assert parsed.where_clause is not None  # also narrows the Optional for the type checker
+            self.assertSetEqual(parsed.where_clause.columns(), {col_r_b})
 
             self.assertSetEqual(parsed.columns(), {col_r_a, col_r_b})
             self.assertSetEqual(parsed.tables(), {tab_r})
@@ -298,8 +298,8 @@ class TransformationTests(unittest.TestCase):
 
             self.assertSetEqual(parsed.select_clause.columns(), {col_s_c})
 
-            self.assertIsNotNone(parsed.where_clause)
-            self.assertSetEqual(parsed.where_clause.columns(), {col_r_a, col_r_b, col_s_c})  # type: ignore
+            assert parsed.where_clause is not None  # also narrows the Optional for the type checker
+            self.assertSetEqual(parsed.where_clause.columns(), {col_r_a, col_r_b, col_s_c})
 
             self.assertSetEqual(parsed.columns(), {col_r_a, col_r_b, col_s_c})
             self.assertSetEqual(parsed.tables(), {tab_r, tab_s})
@@ -322,8 +322,8 @@ class TransformationTests(unittest.TestCase):
 
             self.assertSetEqual(parsed.select_clause.columns(), {col_r_a})
 
-            self.assertIsNotNone(parsed.where_clause)
-            self.assertSetEqual(parsed.where_clause.columns(), {col_r_b})  # type: ignore
+            assert parsed.where_clause is not None  # also narrows the Optional for the type checker
+            self.assertSetEqual(parsed.where_clause.columns(), {col_r_b})
 
             self.assertSetEqual(parsed.columns(), {col_r_a, col_r_b})
             self.assertSetEqual(parsed.tables(), {tab_r})
@@ -334,8 +334,8 @@ class TransformationTests(unittest.TestCase):
 
             self.assertSetEqual(parsed.select_clause.columns(), {col_s_c})
 
-            self.assertIsNotNone(parsed.where_clause)
-            self.assertSetEqual(parsed.where_clause.columns(), {col_r_a, col_r_b, col_s_c})  # type: ignore
+            assert parsed.where_clause is not None  # also narrows the Optional for the type checker
+            self.assertSetEqual(parsed.where_clause.columns(), {col_r_a, col_r_b, col_s_c})
 
             self.assertSetEqual(parsed.columns(), {col_r_a, col_r_b, col_s_c})
             self.assertSetEqual(parsed.tables(), {tab_r, tab_s})
@@ -359,8 +359,8 @@ class TransformationTests(unittest.TestCase):
 
             self.assertSetEqual(parsed.select_clause.columns(), {col_r_a})
 
-            self.assertIsNotNone(parsed.where_clause)
-            self.assertSetEqual(parsed.where_clause.columns(), {col_r_b})  # type: ignore
+            assert parsed.where_clause is not None  # also narrows the Optional for the type checker
+            self.assertSetEqual(parsed.where_clause.columns(), {col_r_b})
 
             self.assertSetEqual(parsed.columns(), {col_r_a, col_r_b})
             self.assertSetEqual(parsed.tables(), {tab_r})
@@ -371,8 +371,8 @@ class TransformationTests(unittest.TestCase):
 
             self.assertSetEqual(parsed.select_clause.columns(), {col_s_c})
 
-            self.assertIsNotNone(parsed.where_clause)
-            self.assertSetEqual(parsed.where_clause.columns(), {col_r_a, col_r_b, col_s_c})  # type: ignore
+            assert parsed.where_clause is not None  # also narrows the Optional for the type checker
+            self.assertSetEqual(parsed.where_clause.columns(), {col_r_a, col_r_b, col_s_c})
 
             self.assertSetEqual(parsed.columns(), {col_r_a, col_r_b, col_s_c})
             self.assertSetEqual(parsed.tables(), {tab_r, tab_s})

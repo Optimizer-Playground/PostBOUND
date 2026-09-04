@@ -1,5 +1,9 @@
 # Stub interface for the postbound package
 
+# Set in __init__.py from the installed distribution metadata. Declared here because this
+# stub shadows __init__.py for type checkers.
+__version__: str
+
 from . import (
     bench,
     db,

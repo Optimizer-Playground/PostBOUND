@@ -15,7 +15,7 @@ def deprecated(func: Callable) -> Callable:
     @functools.wraps(func)
     def deprecation_wrapper(*args, **kwargs) -> Callable:
         warnings.warn(
-            f"Usage of {func.__name__} is deprecated",
+            f"Usage of {getattr(func, '__name__', func)} is deprecated",
             category=DeprecationWarning,
             stacklevel=2,
         )

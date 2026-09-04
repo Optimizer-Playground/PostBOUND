@@ -28,7 +28,7 @@ def plot_graph(graph: nx.Graph | nx.DiGraph, *, directed: bool | None = None, co
     if color:
         for _node, d in graph.nodes.data():
             unique_color_labels.add(d[color])
-        viridis = mpl.cm.viridis
+        viridis = mpl.colormaps["viridis"]
         normalized_colors = mpl.colors.Normalize(vmin=0, vmax=len(unique_color_labels) - 1)
         for i, color_label in enumerate(unique_color_labels):
             color_mapping[color_label] = mpl.colors.rgb2hex(viridis(normalized_colors(i)))

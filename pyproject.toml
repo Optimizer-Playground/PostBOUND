@@ -51,6 +51,10 @@ mysql = [
 # ruff and ty are pinned exactly: ruff's default rule set changes between minor releases and ty is
 # still pre-1.0, so an unpinned tool would report different results on different machines.
 dev = [
+    # Pull in every optional backend: without them ty cannot resolve the imports in vis/,
+    # duckdb.py and mysql.py, so type-check results would depend on which extras a
+    # developer happened to sync.
+    "postbound[duckdb,mysql,vis]",
     "ipython>=9.8.0",
     "jupyterlab>=4.6.1",
     "pre-commit>=4.4",
@@ -102,4 +106,53 @@ extend-immutable-calls = [
 ]
 
 [tool.ty.src]
-exclude = ["vol-postbound/**", "**/*.ipynb"]
+exclude = [
+    "vol-postbound/**",
+    "**/*.ipynb",
+    # BROKEN: both import `postbound.experiments`, which no longer exists. They need to be
+    # ported or deleted; until then there is nothing meaningful for ty to check.
+    "tools/ceb-generator.py",
+    "tools/query-generator.py",
+]
+
+# The overrides below silence rule families in specific files rather than excluding the files.
+# `unresolved-import` and `unresolved-attribute` are deliberately left enforced everywhere,
+# because those are the diagnostics that catch modules going stale after a refactoring.
+
+# relalg.py: RelNode.mutate() is declared to return RelNode but every subclass narrows the
+# return type to itself, which is not expressible without making RelNode generic in Self.
+# TODO: revisit once RelNode is parameterised, then drop this override.
+[[tool.ty.overrides]]
+include = ["postbound/relalg.py"]
+[tool.ty.overrides.rules]
+invalid-method-override = "ignore"
+invalid-return-type = "ignore"
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+unsupported-operator = "ignore"
+
+# vis/: thin wrappers over graphviz, matplotlib and seaborn, whose stubs are much stricter
+# than the runtime APIs actually are.
+[[tool.ty.overrides]]
+include = ["postbound/vis/**"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+no-matching-overload = "ignore"
+unknown-argument = "ignore"
+
+# util/dicts.py: frozendict disables mutation by assigning None over the inherited methods,
+# which is intentional but not expressible in the type system.
+[[tool.ty.overrides]]
+include = ["postbound/util/dicts.py"]
+[tool.ty.overrides.rules]
+invalid-assignment = "ignore"
+invalid-argument-type = "ignore"
+invalid-type-form = "ignore"
+
+# tests/ and db-support/: test fixtures pass SqlQuery where SelectStatement is declared, and
+# the db-support scripts use os.system on purpose.
+[[tool.ty.overrides]]
+include = ["tests/**", "db-support/**"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+deprecated = "ignore"

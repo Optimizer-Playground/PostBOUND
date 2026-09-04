@@ -316,7 +316,7 @@ class CustomHashDict[K, V](Mapping[K, V]):
         self._keys.remove(key)
 
     def __contains__(self, key: object) -> bool:
-        idx = self.hash_function(key, **self._hash_args)  # type: ignore
+        idx = self.hash_function(key, **self._hash_args)
         return idx in self._map
 
     def __len__(self) -> int:

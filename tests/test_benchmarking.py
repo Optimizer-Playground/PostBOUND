@@ -194,7 +194,7 @@ class StatsBenchmarkTests(unittest.TestCase):
 
     def test_learned_estimators(self) -> None:
         dummy_training_data = pb.train.TrainingData(
-            pd.DataFrame(columns=["query"]),  # type: ignore
+            pd.DataFrame(columns=["query"]),
             feature_map={"query": "query"},
         )
 

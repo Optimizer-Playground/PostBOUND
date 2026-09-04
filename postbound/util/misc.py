@@ -47,7 +47,7 @@ class Version:
             return False
 
     @staticmethod
-    def wrap(ver: Version | str | int | list[str] | list[int]) -> Version | None:
+    def wrap(ver: object) -> Version | None:
         """Tries to wrap the provided version representation into a Version instance. Returns None if not possible."""
         try:
             return _wrap_version(ver)

@@ -159,7 +159,7 @@ def nx_bfs_tree(
     shell_nodes = Queue([(node, edge) for node, edge in graph.adj[start_node].items()])
     visited_nodes = {start_node}
     while shell_nodes:
-        current_node, current_edge = shell_nodes.pop()
+        current_node, current_edge = shell_nodes.pop()  # ty: ignore[not-iterable] -- guarded by the `while shell_nodes` above
         visited_nodes.add(current_node)
         if condition(current_node, current_edge):
             neighbor_nodes = [
@@ -175,7 +175,7 @@ def nx_bfs_tree(
 
 
 @dataclasses.dataclass
-class GraphWalk:
+class GraphWalk(typing.Generic[NodeType]):
     """A graph walk models a traversal of some graph.
 
     Each walk begins at a specific *start node* and then follows a *path* along other nodes and edges.
