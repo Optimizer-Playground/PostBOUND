@@ -12,9 +12,7 @@ def _unique_node_identifier(identifier: tonic.QepsIdentifier) -> str:
     return str(hash((identifier, random.random())))
 
 
-def _render_subquery_path(
-    qeps: tonic.QEPsNode, current_node: str, current_graph: gv.Digraph
-) -> None:
+def _render_subquery_path(qeps: tonic.QEPsNode, current_node: str, current_graph: gv.Digraph) -> None:
     for identifier, qeps_child in qeps.child_nodes.items():
         child_node = _make_node_label(identifier, qeps_child)
         node_identifier = _unique_node_identifier(identifier)
@@ -25,11 +23,7 @@ def _render_subquery_path(
 
 def _make_node_label(identifier: tonic.QepsIdentifier, node: tonic.QEPsNode) -> str:
     cost_str = (
-        "["
-        + ", ".join(
-            f"{operator.value}={cost}" for operator, cost in node.operator_costs.items()
-        )
-        + "]"
+        "[" + ", ".join(f"{operator.value}={cost}" for operator, cost in node.operator_costs.items()) + "]"
         if node.operator_costs
         else ""
     )
@@ -63,8 +57,6 @@ def plot_tonic_qeps(
             _current_graph.node(node_identifier, label=child_node)
         if _current_node:
             _current_graph.edge(_current_node, node_identifier)
-        plot_tonic_qeps(
-            qeps_child, _current_node=node_identifier, _current_graph=_current_graph
-        )
+        plot_tonic_qeps(qeps_child, _current_node=node_identifier, _current_graph=_current_graph)
 
     return _current_graph

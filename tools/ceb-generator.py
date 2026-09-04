@@ -42,20 +42,12 @@ def main() -> None:
         "database connection. The database is used to determine valid candidate values for the different "
         "templates. The connect file has to be supported by psycopg. See postgres.connect() for more details.",
     )
-    parser.add_argument(
-        "template_dir", type=str, help="Directory containing the templates to use."
-    )
+    parser.add_argument("template_dir", type=str, help="Directory containing the templates to use.")
 
     args = parser.parse_args()
     if not os.path.isdir(args.template_dir):
-        raise FileNotFoundError(
-            f"Template directory '{args.template_dir}' does not exist."
-        )
-    pg_instance = (
-        postgres.connect(config_file=args.db_config)
-        if args.db_config
-        else postgres.connect()
-    )
+        raise FileNotFoundError(f"Template directory '{args.template_dir}' does not exist.")
+    pg_instance = postgres.connect(config_file=args.db_config) if args.db_config else postgres.connect()
 
     if not os.path.exists(args.out_dir):
         os.makedirs(args.out_dir)

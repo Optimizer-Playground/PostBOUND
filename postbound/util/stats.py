@@ -23,9 +23,7 @@ def jaccard(a: set | frozenset, b: set | frozenset) -> float:
 T = typing.TypeVar("T")
 
 
-def score_matrix(
-    elems: Iterable[T], scoring: Callable[[T, T], numbers.Number]
-) -> np.ndarray:
+def score_matrix(elems: Iterable[T], scoring: Callable[[T, T], numbers.Number]) -> np.ndarray:
     elems = list(elems)
     n = len(elems)
 

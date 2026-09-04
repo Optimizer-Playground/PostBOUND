@@ -63,7 +63,9 @@ def _calc_plan_estimates(
     return plan.with_estimates(cost=cost_est)
 
 
-def _collect_used_columns(query: SelectStatement, table: TableReference, *, schema: DatabaseSchema) -> set[ColumnReference]:
+def _collect_used_columns(
+    query: SelectStatement, table: TableReference, *, schema: DatabaseSchema
+) -> set[ColumnReference]:
     columns = query.columns_of(table)
     for star_expression in query.select_clause.star_expressions():
         if table not in star_expression.tables():

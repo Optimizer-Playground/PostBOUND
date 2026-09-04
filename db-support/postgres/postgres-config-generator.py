@@ -36,16 +36,10 @@ def determine_disk(directory: str) -> str:
     # df output format:
     # Filesystem     1K-blocks      Used Available Use% Mounted on
     # /dev/sda1       12345678    123456  12345678   1% /mnt
-    current_disk = subprocess.check_output(
-        f"df {directory} | grep '^/' | cut -d' ' -f1", shell=True, text=True
-    ).strip()
+    current_disk = subprocess.check_output(f"df {directory} | grep '^/' | cut -d' ' -f1", shell=True, text=True).strip()
 
     # Resolve logical volumes
-    full_path = (
-        subprocess.check_output(["realpath", current_disk], text=True)
-        .strip()
-        .split("/")[-1]
-    )
+    full_path = subprocess.check_output(["realpath", current_disk], text=True).strip().split("/")[-1]
     return full_path
 
 
@@ -82,9 +76,7 @@ class SystemInfo:
         return SystemInfo(
             n_cores=determine_number_of_cores(),
             memory_mb=determine_memory_size_mb(),
-            disk_type=disk_type
-            if disk_type
-            else determine_disk_type(determine_disk(db_directory)),
+            disk_type=disk_type if disk_type else determine_disk_type(determine_disk(db_directory)),
         )
 
     @property
@@ -136,12 +128,7 @@ def generate_pg_config(system_info: SystemInfo) -> dict[str, str]:
     pg_config["max_parallel_maintenance_workers"] = maintenance_workers
 
     work_mem_mb = round(
-        (
-            (system_info.memory_mb - shared_buffers_mb)
-            / (3 * max_connections)
-            / max_parallel_workers_per_gather
-            / 2
-        )
+        ((system_info.memory_mb - shared_buffers_mb) / (3 * max_connections) / max_parallel_workers_per_gather / 2)
     )
     pg_config["work_mem"] = f"{work_mem_mb}MB"
 
@@ -159,13 +146,8 @@ def make_config_head(db_directory: str) -> str:
                            """)
 
 
-def export_pg_config(
-    pg_config: dict[str, str], *, db_directory: str, out_path: str
-) -> None:
-    alter_statements = [
-        f"ALTER SYSTEM SET {conf_key} = '{conf_value}';"
-        for conf_key, conf_value in pg_config.items()
-    ]
+def export_pg_config(pg_config: dict[str, str], *, db_directory: str, out_path: str) -> None:
+    alter_statements = [f"ALTER SYSTEM SET {conf_key} = '{conf_value}';" for conf_key, conf_value in pg_config.items()]
     config_body = "\n".join(alter_statements) + "\n"
     header = make_config_head(db_directory)
 

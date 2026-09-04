@@ -66,15 +66,11 @@ def nx_sources(graph: nx.DiGraph) -> Collection[NodeType]:
     return [n for n in graph.nodes if graph.in_degree(n) == 0]
 
 
-def nx_filter_nodes(
-    graph: nx.Graph, predicate: Callable[[NodeType, dict], bool]
-) -> Collection[tuple[NodeType, dict]]:
+def nx_filter_nodes(graph: nx.Graph, predicate: Callable[[NodeType, dict], bool]) -> Collection[tuple[NodeType, dict]]:
     return [(n, d) for n, d in graph.nodes.data() if predicate(n, d)]
 
 
-def nx_random_walk(
-    graph: nx.Graph, *, starting_node: Optional[NodeType] = None
-) -> Generator[NodeType, None, None]:
+def nx_random_walk(graph: nx.Graph, *, starting_node: Optional[NodeType] = None) -> Generator[NodeType, None, None]:
     """A modified random walk implementation for NetworkX graphs.
 
     A random walk starts at any of the nodes of the graph. At each iteration, a neighboring node is selected and moved to.
@@ -105,21 +101,15 @@ def nx_random_walk(
 
     total_n_nodes = len(graph.nodes)
 
-    current_node = (
-        random.choice(list(graph.nodes)) if starting_node is None else starting_node
-    )
+    current_node = random.choice(list(graph.nodes)) if starting_node is None else starting_node
     visited_nodes.add(current_node)
     yield current_node
 
     while len(visited_nodes) < total_n_nodes:
-        shell_nodes |= set(
-            n for n in graph.adj[current_node].keys() if n not in visited_nodes
-        )
+        shell_nodes |= set(n for n in graph.adj[current_node].keys() if n not in visited_nodes)
         if not shell_nodes:
             # we have multiple connected components and need to jump into the other component
-            current_node = random.choice(
-                [n for n in graph.nodes if n not in visited_nodes]
-            )
+            current_node = random.choice([n for n in graph.nodes if n not in visited_nodes])
             visited_nodes.add(current_node)
             yield current_node
             continue
@@ -174,9 +164,7 @@ def nx_bfs_tree(
         visited_nodes.add(current_node)
         if condition(current_node, current_edge):
             neighbor_nodes = [
-                (node, edge)
-                for node, edge in graph.adj[current_node].items()
-                if node not in visited_nodes
+                (node, edge) for node, edge in graph.adj[current_node].items() if node not in visited_nodes
             ]
             if node_order:
                 sorted(
@@ -216,9 +204,7 @@ class GraphWalk:
     """
 
     start_node: NodeType
-    path: Sequence[tuple[NodeType, Optional[dict]]] = dataclasses.field(
-        default_factory=list
-    )
+    path: Sequence[tuple[NodeType, Optional[dict]]] = dataclasses.field(default_factory=list)
 
     def nodes(self) -> Sequence[NodeType]:
         """Provides all nodes that are visited by this walk, in the sequence in which they are visited.
@@ -240,9 +226,7 @@ class GraphWalk:
         """
         return self.start_node if not self.path else self.path[-1][0]
 
-    def expand(
-        self, next_node: NodeType, edge_data: Optional[dict] = None
-    ) -> GraphWalk:
+    def expand(self, next_node: NodeType, edge_data: Optional[dict] = None) -> GraphWalk:
         """Creates a new walk by prolonging the current one with one more edge at the end.
 
         Parameters
@@ -282,11 +266,7 @@ class GraphWalk:
         return hash((self.start_node, tuple(self.path)))
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, type(self))
-            and self.start_node == other.start_node
-            and self.path == other.path
-        )
+        return isinstance(other, type(self)) and self.start_node == other.start_node and self.path == other.path
 
     def __repr__(self) -> str:
         return str(self)
@@ -334,9 +314,7 @@ def _walk_frontier(
     if not available_edges and len(current_walk) < len(graph):
         jump_nodes = [node for node in graph.nodes if node not in current_frontier]
         for jump_node in jump_nodes:
-            yield from _walk_frontier(
-                graph, current_walk.expand(jump_node), current_frontier | {jump_node}
-            )
+            yield from _walk_frontier(graph, current_walk.expand(jump_node), current_frontier | {jump_node})
     elif not available_edges:
         yield current_walk
     else:

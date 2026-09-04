@@ -45,9 +45,7 @@ def plot_join_tree(join_tree: JoinTree) -> gv.Graph:
     return trees.plot_tree(join_tree, _join_tree_labels, _join_tree_traversal)
 
 
-def _fallback_default_join_edge(
-    graph: gv.Digraph, join_table: TableReference, partner_table: TableReference
-) -> None:
+def _fallback_default_join_edge(graph: gv.Digraph, join_table: TableReference, partner_table: TableReference) -> None:
     graph.edge(str(join_table), str(partner_table), dir="none")
 
 
@@ -67,13 +65,9 @@ def _render_pk_fk_join_edge(
         return _fallback_default_join_edge(graph, join_table, partner_table)
 
     join_col, partner_col = list(join_columns)[0]
-    if db_schema.is_primary_key(join_col) and db_schema.has_secondary_index(
-        partner_col
-    ):
+    if db_schema.is_primary_key(join_col) and db_schema.has_secondary_index(partner_col):
         graph.edge(str(partner_col.table), str(join_col.table))
-    elif db_schema.is_primary_key(partner_col) and db_schema.has_secondary_index(
-        join_col
-    ):
+    elif db_schema.is_primary_key(partner_col) and db_schema.has_secondary_index(join_col):
         graph.edge(str(join_col.table), str(partner_col.table))
     else:
         _fallback_default_join_edge(graph, join_table, partner_table)
@@ -90,9 +84,7 @@ def _plot_join_graph_from_query(
     gv_graph = gv.Digraph() if include_pk_fk_joins else gv.Graph
     for table in join_graph.nodes:
         node_label = str(table)
-        node_label += (
-            ("\n" + table_annotations(table)) if table_annotations is not None else ""
-        )
+        node_label += ("\n" + table_annotations(table)) if table_annotations is not None else ""
         gv_graph.node(str(table), label=node_label)
     for start, target in join_graph.edges:
         if include_pk_fk_joins:
@@ -110,19 +102,13 @@ def _plot_join_graph_directly(
     for table in join_graph:
         node_color = "black" if join_graph.is_free_table(table) else "blue"
         node_label = str(table)
-        node_label += (
-            ("\n" + table_annotations(table)) if table_annotations is not None else ""
-        )
+        node_label += ("\n" + table_annotations(table)) if table_annotations is not None else ""
         gv_graph.node(str(table), label=node_label, color=node_color)
     for start, target in join_graph.all_joins():
         if join_graph.is_pk_fk_join(start, target):  # start is FK, target is PK
-            gv_graph.edge(
-                str(start), str(target)
-            )  # edge arrow goes from start to target (i.e. FK to PK)
+            gv_graph.edge(str(start), str(target))  # edge arrow goes from start to target (i.e. FK to PK)
         elif join_graph.is_pk_fk_join(target, start):  # target is FK, start is PK
-            gv_graph.edge(
-                str(target), str(start)
-            )  # edge arrow goes form target to start (i.e. FK to PK)
+            gv_graph.edge(str(target), str(start))  # edge arrow goes form target to start (i.e. FK to PK)
         else:
             gv_graph.edge(str(start), str(target), dir="none")
     return gv_graph
@@ -157,25 +143,18 @@ def plot_join_graph(
     merged_annotation
     """
     if isinstance(query_or_join_graph, SelectStatement):
-        graph = _plot_join_graph_from_query(
-            query_or_join_graph, table_annotations, include_pk_fk_joins
-        )
+        graph = _plot_join_graph_from_query(query_or_join_graph, table_annotations, include_pk_fk_joins)
     elif isinstance(query_or_join_graph, JoinGraph):
         graph = _plot_join_graph_directly(query_or_join_graph, table_annotations)
     else:
-        raise TypeError(
-            "Argument must be either SqlQuery or JoinGraph, not"
-            + str(type(query_or_join_graph))
-        )
+        raise TypeError("Argument must be either SqlQuery or JoinGraph, not" + str(type(query_or_join_graph)))
 
     if out_path:
         graph.render(out_path, format=out_format, cleanup=True)
     return graph
 
 
-def estimated_cards(
-    table: TableReference, *, query: SelectStatement, database: Optional[Database] = None
-) -> str:
+def estimated_cards(table: TableReference, *, query: SelectStatement, database: Optional[Database] = None) -> str:
     """Annotates the nodes of a join graph with estimated cardinalities.
 
     Estimated cardinalities are obtained by asking the actual query optimizer from the `database`. Usually, they are calculated
@@ -195,20 +174,14 @@ def estimated_cards(
     --------
     plot_join_graph
     """
-    database = (
-        database
-        if database is not None
-        else DatabasePool.get_instance().current_database()
-    )
+    database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])
     filter_query = transform.as_star_query(filter_query)
     card_est = database.optimizer().cardinality_estimate(filter_query)
     return f"[{card_est} rows estimated]"
 
 
-def annotate_filter_cards(
-    table: TableReference, *, query: SelectStatement, database: Optional[Database] = None
-) -> str:
+def annotate_filter_cards(table: TableReference, *, query: SelectStatement, database: Optional[Database] = None) -> str:
     """Annotates the nodes of a join graph with true cardinalities *after* filters.
 
     Cardinalities are calculated by issuing actual *count(\\*)* queries to the `database`. All applicable filter
@@ -227,20 +200,14 @@ def annotate_filter_cards(
     --------
     plot_join_graph
     """
-    database = (
-        database
-        if database is not None
-        else DatabasePool.get_instance().current_database()
-    )
+    database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])
     count_query = transform.as_count_star_query(filter_query)
     card = database.execute_query(count_query, cache_enabled=True)
     return f"[{card} rows]"
 
 
-def annotate_cards(
-    table: TableReference, *, query: SelectStatement, database: Optional[Database] = None
-) -> str:
+def annotate_cards(table: TableReference, *, query: SelectStatement, database: Optional[Database] = None) -> str:
     """Annotates the nodes of a join graph with true cardinalities before and after filters.
 
     Cardinalities are calculated by issuing actual *count(\\*)* queries to the database. Two values are reported: the total
@@ -261,17 +228,11 @@ def annotate_cards(
     --------
     plot_join_graph
     """
-    database = (
-        database
-        if database is not None
-        else DatabasePool.get_instance().current_database()
-    )
+    database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])
     count_query = transform.as_count_star_query(filter_query)
     filter_card = database.execute_query(count_query, cache_enabled=True)
-    total_card = database.statistics().total_rows(
-        table, emulated=True, cache_enabled=True
-    )
+    total_card = database.statistics().total_rows(table, emulated=True, cache_enabled=True)
     return f"|R| = {total_card} |σ(R)| = {filter_card}"
 
 
@@ -353,18 +314,14 @@ def _query_plan_labels(
     return label, params
 
 
-def _query_plan_traversal(
-    node: QueryPlan, *, skip_intermediates: bool = False
-) -> list[QueryPlan]:
+def _query_plan_traversal(node: QueryPlan, *, skip_intermediates: bool = False) -> list[QueryPlan]:
     children = list(node.children)
     if node.subplan:
         children.append(node.subplan.root)
 
     if skip_intermediates:
         skipped = [
-            _query_plan_traversal(child, skip_intermediates=True)
-            if child.is_auxiliary()
-            else [child]
+            _query_plan_traversal(child, skip_intermediates=True) if child.is_auxiliary() else [child]
             for child in children
         ]
         children = util.flatten(skipped)
@@ -409,26 +366,20 @@ def plot_query_plan(
         return gv.Graph()
     return trees.plot_tree(
         plan,
-        functools.partial(
-            _query_plan_labels, annotation_generator=annotation_generator
-        ),
+        functools.partial(_query_plan_labels, annotation_generator=annotation_generator),
         functools.partial(_query_plan_traversal, skip_intermediates=skip_intermediates),
         **kwargs,
     )
 
 
 def _explain_analyze_annotations(node: QueryPlan) -> str:
-    card_row = (
-        f"[Rows expected={node.estimated_cardinality} actual={node.actual_cardinality}]"
-    )
+    card_row = f"[Rows expected={node.estimated_cardinality} actual={node.actual_cardinality}]"
     exec_time = round(node.execution_time, 4)
     runtime_row = f"[Exec time={exec_time}s]"
     return card_row + "\n" + runtime_row
 
 
-def plot_analyze_plan(
-    plan: QueryPlan, *, skip_intermediates: bool = False, **kwargs
-) -> gv.Graph:
+def plot_analyze_plan(plan: QueryPlan, *, skip_intermediates: bool = False, **kwargs) -> gv.Graph:
     """Creates a Graphviz visualization of an EXPLAIN ANALYZE query plan.
 
     This is a convenience wrapper around `plot_query_plan` that uses a default annotation generator suitable for showing
@@ -438,9 +389,7 @@ def plot_analyze_plan(
         return gv.Graph()
     return trees.plot_tree(
         plan,
-        functools.partial(
-            _query_plan_labels, annotation_generator=_explain_analyze_annotations
-        ),
+        functools.partial(_query_plan_labels, annotation_generator=_explain_analyze_annotations),
         functools.partial(_query_plan_traversal, skip_intermediates=skip_intermediates),
         **kwargs,
     )
@@ -508,9 +457,7 @@ def _relalg_node_labels(node: relalg.RelNode) -> tuple[str, dict]:
                 else:
                     expr_str = "(" + ", ".join(str(e) for e in expression) + ")"
                 pretty_mapping[target_str] = expr_str
-            mapping_str = ", ".join(
-                f"{target_col}: {expr}" for target_col, expr in pretty_mapping.items()
-            )
+            mapping_str = ", ".join(f"{target_col}: {expr}" for target_col, expr in pretty_mapping.items())
             node_str = f"{_make_label('χ')} {_make_sub(mapping_str)}"
         case _:
             node_str = _escape_label(str(node))

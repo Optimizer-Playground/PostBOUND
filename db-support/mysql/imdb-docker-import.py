@@ -75,11 +75,14 @@ def main():
             column_info[col_name] = nullable_col == "YES"
 
         virtual_cols = ", ".join(f"@v{col_name}" for col_name in column_info.keys())
-        col_wrapping = ",\n".join(f"{col_name} = NULLIF(@v{col_name}, '')" if nullable_col else f"{col_name} = @v{col_name}"
-                                  for col_name, nullable_col in column_info.items())
+        col_wrapping = ",\n".join(
+            f"{col_name} = NULLIF(@v{col_name}, '')" if nullable_col else f"{col_name} = @v{col_name}"
+            for col_name, nullable_col in column_info.items()
+        )
 
-        import_query = MysqlImportQuery.format(filename=file, table=table_name,
-                                               virtual_cols=virtual_cols, col_wrappings=col_wrapping)
+        import_query = MysqlImportQuery.format(
+            filename=file, table=table_name, virtual_cols=virtual_cols, col_wrappings=col_wrapping
+        )
         print("... Using import query", import_query, flush=True)
         import_cmd = MysqlImportCmd.format(cmd=import_query)
         proc_res = subprocess.run(import_cmd, shell=True)

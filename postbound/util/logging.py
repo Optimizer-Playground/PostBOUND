@@ -92,9 +92,7 @@ def standard_logger(enabled: bool = True) -> Logger:
                 continue
 
             mod_path = module.__name__.split(".")
-            mod_name = next(
-                (mod for mod in mod_path[::-1] if not mod.startswith("_")), None
-            )
+            mod_name = next((mod for mod in mod_path[::-1] if not mod.startswith("_")), None)
             if mod_name is None:
                 continue
 
