@@ -1,13 +1,16 @@
 #!/bin/bash
 
+# Installs PostBOUND and its dependencies via uv, for *using* PostBOUND (this is what the
+# Docker entrypoint calls). The dev tools are deliberately left out.
+#
+# If you are working ON PostBOUND rather than with it, don't use this script -- just run
+# `uv sync` and `uv run pre-commit install`. See CONTRIBUTING.md.
+
 set -e
 
 WD=$PWD
-TARGET_DIR=pb-venv/
-EXPLICIT_TARGET="false"
-EXTRAS=""
-MINIMAL_EXTRAS=""
-ALL_EXTRAS="[mysql,vis]"
+TARGET_DIR=""
+EXTRAS="--all-extras"
 BUILD_DOC="false"
 GIT_PULL="true"
 
@@ -15,19 +18,20 @@ show_help() {
   RET=$1
   echo -e "Usage: $0 <options>"
   echo -e ""
-  echo -e "Installs PostBOUND into a (possibly existing) Python virtual environment. This script is assumed to be run from the "
+  echo -e "Installs PostBOUND into a Python virtual environment using uv. This script is assumed to be run from the"
   echo -e "root of the PostBOUND repository, i.e. as tools/setup-py-venv.sh."
   echo -e "If PostBOUND is already installed, it will be upgraded."
   echo -e ""
+  echo -e "uv is required. If it is not installed, get it from https://docs.astral.sh/uv/ or run:"
+  echo -e "\tcurl -LsSf https://astral.sh/uv/install.sh | sh"
+  echo -e ""
   echo -e "Allowed options:"
   echo -e "\n--venv <dir>"
-  echo -e "\tPath to the virtual environment where PostBOUND will be installed. If this venv exists, it will be "
-  echo -e "\tused. Otherwise, an empty venv will be created at the location. Defaults to ./pb-venv/. This parameter is ignored"
-  echo -e "\tif a venv is already active."
+  echo -e "\tPath to the virtual environment where PostBOUND will be installed. Defaults to ./.venv, which is where"
+  echo -e "\tuv run and the pre-commit hooks look for it. Only override this if you know you need to."
   echo -e "\n--features <features>"
-  echo -e "\tOptional extras to install with PostBOUND. These are specified as a comma-separated list."
-  echo -e "\tSupported extras are: 'mysql' for installing the MySQL backend and 'vis' for using the visualization utilities."
-  echo -e "\tFurthermore, 'all' can be used to install all available extras and 'minimal' only installs the core package."
+  echo -e "\tOptional extras to install with PostBOUND, as a comma-separated list. Supported extras are 'vis', 'duckdb'"
+  echo -e "\tand 'mysql'. 'all' (the default) installs all of them, 'minimal' installs only the core package."
   echo -e "\n--include-doc"
   echo -e "\tAlso build the documentation."
   echo -e "\n--skip-pull"
@@ -43,26 +47,22 @@ while [ $# -gt 0 ] ; do
   case $1 in
     --venv)
       TARGET_DIR="$2"
-      EXPLICIT_TARGET="true"
       shift
       shift
       ;;
     --features)
       case $2 in
         all)
-          EXTRAS=$ALL_EXTRAS
+          EXTRAS="--all-extras"
           ;;
         minimal)
-          EXTRAS=$MINIMAL_EXTRAS
-          ;;
-        mysql)
-          EXTRAS="[mysql]"
-          ;;
-        vis)
-          EXTRAS="[vis]"
+          EXTRAS="--no-extra vis --no-extra duckdb --no-extra mysql"
           ;;
         *)
-          EXTRAS="[$2]"
+          EXTRAS=""
+          for extra in ${2//,/ } ; do
+            EXTRAS="$EXTRAS --extra $extra"
+          done
           ;;
       esac
       shift
@@ -85,63 +85,48 @@ while [ $# -gt 0 ] ; do
   esac
 done
 
-PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
-REQUIRED_VERSION="3.10"
+if ! command -v uv > /dev/null 2>&1 ; then
+  echo "!! uv is required but was not found on PATH."
+  echo "!! Install it with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+  exit 1
+fi
 
 if [ "$GIT_PULL" == "true" ] ; then
   echo ".. Checking for latest version of PostBOUND"
   git pull
 fi
 
-if [[ $(echo -e "$PYTHON_VERSION\n$REQUIRED_VERSION" | sort -V | head -n1) != "$REQUIRED_VERSION" ]]; then
-  echo ".. Default Python appears to be older than 3.10. Trying to set up local Python 3.10."
-  PYTHON="$WD/tools/python-3.10"
-  cd $PYTHON
-  ./python-setup.sh
-  . ./python-load-path.sh
-  echo ".. Setup complete, continuing with Python 3.10 (installed locally at $PYTHON)"
-  cd $WD
-fi
-
-if [ -z "$VIRTUAL_ENV" ] || [ "$EXPLICIT_TARGET" = "true" ] ; then
-
-  # We are not in a virtual environment, so we need to create or activate one.
-
-  if [ -d "$TARGET_DIR" ] ; then
-    echo ".. Installing into existing virtual environment $TARGET_DIR"
-  else
-    echo ".. Creating new virtual environment $TARGET_DIR"
-    python3 -m venv "$TARGET_DIR"
-  fi
-
-  . $TARGET_DIR/bin/activate
-
+if [ -n "$TARGET_DIR" ] ; then
+  echo ".. Installing into virtual environment $TARGET_DIR"
+  export UV_PROJECT_ENVIRONMENT="$TARGET_DIR"
 else
-
-  echo ".. Using active virtual environment $VIRTUAL_ENV"
-
+  echo ".. Installing into the default virtual environment .venv"
 fi
 
-echo ".. Building PostBOUND package"
-pip install build wheel ipython
-python3 -m build
-
-echo ".. Installing PostBOUND package"
-LATEST_WHEEL=$(ls dist/*.whl | sort -V | tail -n 1)
-pip install -r requirements.txt  # this skips unnecessary updates
-pip install --force-reinstall --no-deps "$LATEST_WHEEL$EXTRAS"  # this always forces the installation of the latest binary
+# uv provisions the interpreter named in .python-version itself, so there is no need to
+# check the system Python version or bootstrap one.
+# --no-dev keeps the linting/notebook tooling out of a user installation. It also makes
+# --features meaningful: the dev group depends on postbound[duckdb,mysql,vis], so with the
+# dev group enabled every extra would be pulled in regardless of what was requested here.
+echo ".. Installing PostBOUND and its dependencies"
+if [ "$BUILD_DOC" == "true" ] ; then
+  uv sync --no-dev $EXTRAS --group doc
+else
+  uv sync --no-dev $EXTRAS
+fi
 
 if [ "$BUILD_DOC" == "true" ] ; then
   echo ".. Building documentation"
-  cd $WD/docs
-  sphinx-apidoc --force \
-                --ext-autodoc \
-                --maxdepth 4 \
-                --module-first \
-                -o source/generated \
-                ../postbound
-  make html
+  cd "$WD/docs"
+  uv run --group doc sphinx-apidoc --force \
+                                   --ext-autodoc \
+                                   --maxdepth 4 \
+                                   --module-first \
+                                   -o source/generated \
+                                   ../postbound
+  uv run --group doc sphinx-build -M html source build
+  cd "$WD"
 fi
 
-echo ".. Done. Activate venv as '. $VIRTUAL_ENV/bin/activate' or 'source $VIRTUAL_ENV/bin/activate'."
-cd "$WD"
+VENV_PATH="${TARGET_DIR:-$WD/.venv}"
+echo ".. Done. Run commands with 'uv run <cmd>', or activate the venv as '. $VENV_PATH/bin/activate'."

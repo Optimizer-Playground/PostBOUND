@@ -14,6 +14,10 @@ RUN apt update && apt install -y \
     locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
 
+# uv manages the PostBOUND Python environment (see tools/setup-py-venv.sh). It provisions its
+# own interpreter from .python-version, so the system python3 is only there for helper scripts.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
 # Configure some general settings
 ARG USERNAME=postbound
 ENV USERNAME=$USERNAME
