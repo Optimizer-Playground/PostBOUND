@@ -1,0 +1,14 @@
+# Normalize line endings: everything is stored with LF in the repository and checked out
+# as-is, so that contributors on Windows, macOS and Linux all produce identical diffs.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.c    text eol=lf
+*.py   text eol=lf
+*.pyi  text eol=lf
+*.ipynb text eol=lf
+*.bat  text eol=crlf
+
+*.png binary
+*.jpg binary
+*.pdf binary

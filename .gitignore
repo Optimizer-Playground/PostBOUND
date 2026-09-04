@@ -178,27 +178,38 @@ pb-venv/
 .Rproj.user
 .Rhistory
 
-# VS code
-.vscode/
+# VS code -- the shared workspace settings are checked in, everything else is local.
+# Must be `.vscode/*` and not `.vscode/`: git cannot re-include a file whose parent
+# directory is excluded, so the negations below would be silently ignored.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 
 # PyCharm
 .idea/
 
-# Zed
-.zed/
+# Zed -- see above
+.zed/*
+!.zed/settings.json
 
 # MacOS
 .DS_Store
 
 # Project specific files
-LocalTest*
-localtest*
+# Note the leading slashes: these only ever refer to the repository root. Without them,
+# `experiments/` would also swallow `postbound/experiments/`.
+/LocalTest*
+/localtest*
 *.bkp
-experiments/
-experiment_log.json
+/experiments/
+/experiment_log.json
 
 # Build files
-util/bin/
+/util/bin/
+
+# Tool caches
+.ruff_cache/
+.ty_cache/
 
 # The imdb folder contains all sources for the IMDB dataset, we don't want this in VC
 # The same applies to the TPCH, SSB, Stats and Stack data
@@ -210,9 +221,9 @@ stack_data/
 stats_data/
 
 # Build artifacts
-dist/
-generated/
-results/
+/dist/
+/generated/
+/results/
 docs/build/
 docs/source/generated/
 

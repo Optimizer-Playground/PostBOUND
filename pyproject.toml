@@ -47,11 +47,17 @@ mysql = [
 "Homepage" = "https://github.com/Optimizer-Playground/PostBOUND"
 
 [dependency-groups]
+# Everything required to develop PostBOUND. `uv sync` installs this group by default.
+# ruff and ty are pinned exactly: ruff's default rule set changes between minor releases and ty is
+# still pre-1.0, so an unpinned tool would report different results on different machines.
 dev = [
     "ipython>=9.8.0",
     "jupyterlab>=4.6.1",
+    "pre-commit>=4.4",
     "pyarrow>=23.0.0",
-    "tables",
+    "ruff==0.16.6",
+    "tables==3.11.1",
+    "ty==0.0.78",
 ]
 doc = [
     "ipython>=9.8.0",
@@ -59,12 +65,30 @@ doc = [
     "sphinx-book-theme>=1.1.4",
 ]
 
+[tool.uv]
+required-version = ">=0.9"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["postbound*"]
 
-[tool.uv.sources]
-tables = { git = "https://github.com/PyTables/PyTables" }
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["docs/build", "docs/source/generated"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is enforced by the formatter; long docstring prose is not rewrapped
+    "UP046",   # PEP 695 generic classes: genuine refactors, tracked separately
+    "UP047",   # PEP 695 generic functions: ditto
+    "RUF001",  # ambiguous unicode in strings: intentional in the operator/plan symbols
+    "RUF002",  # ambiguous unicode in docstrings: intentional in the research prose
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["postbound"]
 
 [tool.ty.src]
-exclude = ["vol-postbound/**"]
+exclude = ["vol-postbound/**", "**/*.ipynb"]

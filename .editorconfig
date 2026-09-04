@@ -1,0 +1,28 @@
+# Shared editor defaults. Zed supports this natively, VS Code via the EditorConfig extension.
+# Formatting of Python code itself is owned by ruff, see [tool.ruff] in pyproject.toml.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{py,pyi}]
+indent_size = 4
+max_line_length = 120
+
+[*.{toml,yml,yaml,json,jsonc}]
+indent_size = 2
+
+[*.{sh,c,h}]
+indent_size = 2
+
+[*.md]
+# Markdown uses trailing double-spaces for hard line breaks
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
