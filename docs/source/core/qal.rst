@@ -173,7 +173,7 @@ derived from equivalence classes to the query. Use :func:`~postbound.qal.determi
 :func:`~postbound.transform.add_ec_predicates`.
 
 
-DML and DDL queries 
+DML and DDL queries
 -------------------
 
 Sadly, the :class:`~postbound.SqlQuery` abstraction is currently limited to plain ``SELECT`` queries.

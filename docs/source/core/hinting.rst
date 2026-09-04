@@ -23,7 +23,7 @@ General concept
 
 Many database systems provide query hints to influence the query optimizer. However, support varies widely between the
 systems. For example, `Oracle <https://docs.oracle.com/en/database/oracle/oracle-database/21/tgsql/influencing-the-optimizer.html#GUID-C558F7CF-446E-4078-B045-0B3BB026CB3C>`_
-has pretty extensive support for hints, whereas `MySQL <https://dev.mysql.com/doc/refman/9.3/en/optimizer-hints.html>`_ 
+has pretty extensive support for hints, whereas `MySQL <https://dev.mysql.com/doc/refman/9.3/en/optimizer-hints.html>`_
 has less hints and hints are sometimes not binding.
 PostgreSQL does not support query hints out of the box, but relies on extensions such as `pg_hint_plan <https:://github.com/ossc-db/pg_hint_plan>`_
 to implement the corresponding functionality.
@@ -108,7 +108,7 @@ SQLite query optimizer treats ``CROSS JOIN`` statements diffeerently than normal
 to `encode the join order <https://sqlite.org/optoverview.html#manual_control_of_query_plans_using_cross_join>`_.
 It is up to the hinting backend of the current database system to decide what the approach to enforce the optimization
 decisions is. Therefore, the final query, its hint block and other modifications should be treated as an implementation
-detail of the hinting backend and not as a part of the PostBOUND API. 
+detail of the hinting backend and not as a part of the PostBOUND API.
 
 .. tip::
 

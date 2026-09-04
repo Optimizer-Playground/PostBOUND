@@ -124,7 +124,7 @@ Such differences hinder the implementation of optimizer prototypes if they rely 
 To address this, :class:`~postbound.db.DatabaseStatistics` offer an *emulation mode*. The basic idea is that whenever a
 database system does not maintain a specific statistic, an equivalent SQL query is issued that computes the same
 information. For example, say you want to retrieve the most common values of a column on MySQL. Calling
-:meth:`~postbound.db.DatabaseStatistics.most_common_values` will instead issue the following query: 
+:meth:`~postbound.db.DatabaseStatistics.most_common_values` will instead issue the following query:
 ``SELECT col, COUNT(*) FROM tab GROUP BY col ORDER BY COUNT(*) DESC LIMIT 10``.
 
 Since these computations can be pretty expensive, the statistics catalog provides its own

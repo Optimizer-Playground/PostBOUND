@@ -49,7 +49,7 @@ file using the :func:`~postbound.duckdb.connect` function. The returned database
 .. code-block:: python
 
     import postbound as pb
-    
+
     duck_instance = pb.duckdb.connect("stats.duckdb")
     stats = pb.workloads.stats()
     duck_instance.execute_query(stats["q-1"])
@@ -92,7 +92,7 @@ the EXPLAIN output manually using :func:`~postbound.duckdb.parse_duckdb_plan`. B
 
     # obtain a query plan directly:
     plan = duck_instance.optimizer().query_plan(stats["q-1"])
-    
+
     # this is equivalent to:
     explain_query = pb.transform.as_explain(stats["q-1"])
     raw_plan = duck_instance.execute_query(explain_query)

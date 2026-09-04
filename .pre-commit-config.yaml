@@ -1,0 +1,54 @@
+# Shared git hooks. Enable them once after cloning:
+#
+#     uv sync && uv run pre-commit install
+#
+# The ruff and ty hooks intentionally shell out to `uv run` instead of using the upstream
+# ruff-pre-commit / ty-pre-commit repositories. Those would pin their own tool versions via
+# `rev:`, which could drift from the pins in pyproject.toml. Going through uv means the hook
+# and your editor use the exact same binary from uv.lock.
+default_install_hook_types: [pre-commit, pre-push]
+minimum_pre_commit_version: "4.0.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        # .bat files must keep CRLF, see .gitattributes
+        exclude: '\.bat$'
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-case-conflict
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --force-exclude --fix
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+
+      - id: ty
+        name: ty check
+        entry: uv run ty check
+        language: system
+        # ty checks the whole project rather than just the staged files: a change in b.py can
+        # introduce a diagnostic in a.py, so passing only the staged paths would give a false
+        # sense of security. always_run also covers deletion-only commits.
+        pass_filenames: false
+        always_run: true
+        require_serial: true

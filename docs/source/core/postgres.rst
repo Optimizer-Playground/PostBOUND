@@ -40,7 +40,7 @@ server using the :func:`~postbound.postgres.connect` function. The returned data
 .. code-block:: python
 
     import postbound as pb
-    
+
     pg_instance = pb.postgres.connect(config_file="pg-connect.toml")
     job = pb.workloads.job()
     pg_instance.execute_query(job["1a"])
@@ -98,7 +98,7 @@ results:
 
     # obtain a query plan directly:
     plan = pg_instance.optimizer().query_plan(job["1a"])
-    
+
     # this is equivalent to:
     explain_query = pb.transform.as_explain(job["1a"])
     raw_plan = pg_instance.execute_query(explain_query)
