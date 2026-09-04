@@ -382,7 +382,7 @@ class CastExpression(SqlExpression):
     Raises
     ------
     ValueError
-        If the `target_type` is empty.
+        If `expression` or `target_type` is empty.
     """
 
     def __init__(
@@ -533,11 +533,8 @@ class MathExpression(SqlExpression):
     def create_binary(lhs: Any, operator: MathOperator | str, rhs: Any) -> MathExpression:
         """Shortcut method to create a new math expression.
 
-        Lhs and rhs are processed depending on their actual types:
-
-        - `SqlExpression` instances are left as-is
-        - `ColumnReference` instances are mapped to `ColumnExpression`s
-        - Anything else is wrapped in a `StaticValueExpression`
+        Lhs and rhs are converted to expressions using `as_expression`, see there for the exact transformation rules
+        applied to each of them.
         """
         if isinstance(operator, str):
             operator = MathOperator(operator)
@@ -949,7 +946,8 @@ class FunctionExpression(SqlExpression):
     def is_aggregate(self) -> bool:
         """Checks, whether the function is a well-known SQL aggregation function.
 
-        Only standard functions are considered (e.g. no CORR for computing correlations).
+        Both standard SQL aggregates (e.g. *COUNT*, *SUM* or *CORR* for computing correlations) as well as Postgres-specific
+        aggregates (e.g. *ARRAY_AGG* or *BOOL_AND*) are considered - see `AggregateFunctions` for the full list.
 
         Returns
         -------
@@ -1781,7 +1779,7 @@ def as_expression(
 
     - All instances of `SqlExpression` are left unmodified.
     - `ColumnReference` becomes `ColumnExpression`
-    - `SqlQuery` becomes `SubqueryExpression`
+    - `SelectStatement` becomes `SubqueryExpression` (this does not apply to other `SqlQuery` subclasses, e.g. `SetQuery`)
     - The star-string ``*`` becomes a `StarExpression` if `allow_star` is enabled, otherwise
       it becomes a static value of the literal "star-string" ('\\*')
 
@@ -1838,9 +1836,9 @@ def as_func_expr(func_name: str, *args, **kwargs) -> FunctionExpression:
     --------
 
     >>> as_func_expr("sum", ColumnReference("a"))
-    sum(a)
+    SUM(a)
     >>> as_func_expr("substring", ColumnReference("a"), {"from": 1, "for": 3})
-    substring(a FROM 1 FOR 3)
+    SUBSTRING(a FROM 1 FOR 3)
     """
     positional_args: list[SqlExpression] = []
     keyword_args: dict[str, SqlExpression] = {}
@@ -2461,11 +2459,11 @@ class BinaryPredicate(BasePredicate):
 
     Parameters
     ----------
-    operation : SqlOperator
+    operation : BinaryOperator
         The operation that combines the input arguments
-    first_argument : SqlExpression
+    lhs : SqlExpression
         The first comparison value
-    second_argument : SqlExpression
+    rhs : SqlExpression
         The second comparison value
     """
 
@@ -2921,11 +2919,11 @@ class UnaryPredicate(BasePredicate):
 
     Parameters
     ----------
-    column : SqlExpression
+    expression : SqlExpression
         The expression that is tested. This can also be a user-defined function that produces a boolen value.
-    operation : Optional[SqlOperator], optional
+    operation : Optional[UnaryOperator], optional
         The operation that is used to generate the unary predicate. Only a small subset of operators can actually be used in
-        this context (e.g. *EXISTS* or *MISSING*). If the predicate does not require an operator (e.g. in the case of
+        this context (e.g. *EXISTS* or *IS NULL*). If the predicate does not require an operator (e.g. in the case of
         filtering UDFs), the operation can be *None*. Notice however, that PostBOUND has no knowledge of the semantics of
         UDFs and can therefore not enforce, whether UDFs is actually valid in this context. This has to be done at runtime by
         the actual database system.
@@ -3085,11 +3083,11 @@ class CompoundPredicate(AbstractPredicate, ABC):
 
     Parameters
     ----------
-    operation : LogicalSqlCompoundOperators
+    operation : CompoundOperator
         The operation that glues together the individual child predicates.
-    children : AbstractPredicate | Sequence[AbstractPredicate]
+    children : Sequence[AbstractPredicate]
         The predicates that are combined by this composite. For conjunctions and disjunctions, at least two children are
-        required. For negations, exactly one child is permitted (either directly or in the sequence).
+        required. For negations, exactly one child is permitted.
 
     Raises
     ------
@@ -3108,7 +3106,7 @@ class CompoundPredicate(AbstractPredicate, ABC):
 
         Parameters
         ----------
-        operation : LogicalSqlCompoundOperators
+        operation : CompoundOperator
             The logical operator to combine the child predicates.
         parts : Sequence[AbstractPredicate]
             The child predicates
@@ -3246,7 +3244,7 @@ class CompoundPredicate(AbstractPredicate, ABC):
 
         Returns
         -------
-        LogicalSqlCompoundOperators
+        CompoundOperator
             The operation
         """
         return self._operation
@@ -3517,7 +3515,15 @@ def as_predicate(
 
 
 @overload
-def as_predicate(column: ColumnReference, operation: UnaryOperator) -> UnaryPredicate: ...
+def as_predicate(
+    column: ColumnReference,
+    operation: Literal[
+        UnaryOperator.IsTrue,
+        UnaryOperator.IsNotTrue,
+        UnaryOperator.IsFalse,
+        UnaryOperator.IsNotFalse,
+    ],
+) -> UnaryPredicate: ...
 
 
 @overload
@@ -3531,6 +3537,9 @@ def as_predicate(column: ColumnReference, operation: BinaryOperator | UnaryOpera
 
     The specific type of generated predicate is determined by the given operation. The following rules are applied:
 
+    - for a `UnaryOperator` (e.g. *IS NULL* or *IS TRUE*), a `UnaryPredicate` on the given column is created and no
+      further arguments are expected. Notice that `UnaryOperator.Exists` cannot be constructed this way, since it
+      requires a subquery rather than a plain column - use `UnaryPredicate.create_exists` for that instead.
     - for *BETWEEN* predicates, the arguments can be either two values, or a tuple of values
       (additional arguments are ignored)
     - for *IN* predicates, the arguments can be either a number of arguments, or a (nested) iterable of arguments
@@ -3541,12 +3550,13 @@ def as_predicate(column: ColumnReference, operation: BinaryOperator | UnaryOpera
     ----------
     column : ColumnReference
         The column that should become the first operand of the predicate
-    operation : LogicalSqlOperators | str
+    operation : BinaryOperator | UnaryOperator | str
         The operation that should be used to build the predicate. The actual return type depends on this value.
-        As an alternative to `LogicalOperator`, the operation can also be provided as a string (e.g. `"="` for `LogicalOperator.Equal`).
+        As an alternative to a `BinaryOperator`/`UnaryOperator` value, the operation can also be provided as a string
+        (e.g. `"="` for `BinaryOperator.Equal`).
     *arguments
         Further operands for the predicate. The allowed values and their structure depend on the precise predicate (see rules
-        above).
+        above). Unary predicates do not accept any additional arguments.
 
     Returns
     -------
@@ -3557,6 +3567,8 @@ def as_predicate(column: ColumnReference, operation: BinaryOperator | UnaryOpera
     ------
     ValueError
         If a binary predicate is requested, but `*arguments` does not contain a single value
+    ValueError
+        If a unary predicate is requested, but `*arguments` is not empty, or if `operation` is `UnaryOperator.Exists`
     """
     if isinstance(operation, str):
         operation = operation.upper()
@@ -3701,7 +3713,7 @@ def _unwrap_expression(expression: SqlExpression) -> ColumnReference | object:
             raise ValueError("Cannot unwrap expression " + str(expression))
 
 
-UnwrappedFilter = tuple[ColumnReference, BinaryOperator, object]
+UnwrappedFilter = tuple[ColumnReference, BinaryOperator | UnaryOperator, object]
 """Type that captures the main components of a filter predicate."""
 
 
@@ -3721,7 +3733,7 @@ def _attempt_filter_unwrap(
 
     Returns
     -------
-    tuple[ColumnReference, LogicalOperator, Any] | None
+    UnwrappedFilter | None
         A triple consisting of column, operator and value(s) if the `predicate` could be unwrapped,
         or *None* otherwise.
 
@@ -3804,10 +3816,9 @@ class SimpleFilter(AbstractPredicate):
         components will be automatically unwrapped and used as attribute values for the simplified
         version. The introduction of the `attempt_wrap` method has made this mode unnecessary. It is
         only available to keep backwards compatibility.
-    operation : LogicalOperator | UnaryOperator | None
-        The filter operation (e.g. *IN* or ``<>``). This cannot be *EXISTS* or *MISSING*, since
-        subqueries cannot be represented in simplified form. Passing *None* only works in legacy
-        mode.
+    operation : BinaryOperator | UnaryOperator | None
+        The filter operation (e.g. *IN* or ``<>``). This cannot be *EXISTS*, since subqueries cannot be represented in
+        simplified form. Passing *None* only works in legacy mode.
     value : Any
         The filter value. Passing *None* is interpreted as SQL NULL.
     predicate : AbstractPredicate | None
@@ -3822,7 +3833,7 @@ class SimpleFilter(AbstractPredicate):
     --------
     The best way to construct simplified views is to start with the `QueryPredicates` and extract
     the filter predicates, e.g., by using ``views = SimpleFilter.wrap_all(query.predicates())`` or
-    ``filters = SimpleFilter.wrap_all(query.predicates().joins())``. Notice that especially the
+    ``filters = SimpleFilter.wrap_all(query.predicates().filters())``. Notice that especially the
     first conversion can be "lossy": all join predicates are dropped. Likewise, all filters that are
     more complex such as disjunctions are ignored. Alternatively, the `QueryPredicates` also
     provides a `simplify()` method that can be used to convert all predicates (filters and joins)
@@ -3962,9 +3973,8 @@ class SimpleFilter(AbstractPredicate):
 
         Returns
         -------
-        LogicalSqlOperators
-            the operator. This cannot be *EXISTS* or *MISSING*, since subqueries cannot be
-            represented in simplified views.
+        BinaryOperator | UnaryOperator
+            the operator. This cannot be *EXISTS*, since subqueries cannot be represented in simplified views.
         """
         return self._operation
 
@@ -4066,7 +4076,7 @@ class SimpleJoin(AbstractPredicate):
     partner columns that are joined.
 
     Note that not all binary joins can be represented in a simplified view. In order for the view to
-    work, the join must be an equi-join, i.e. using `LogicalOperator.Equal`. Furthermore, both sides
+    work, the join must be an equi-join, i.e. using `BinaryOperator.Equal`. Furthermore, both sides
     of the join have to cannot be modified by other expressions such as function calls or
     mathematical expressions. However, cast expressions are tolerated and will simply be dropped. As
     a rule of thumb, if an expression modifies a value (such as a function call), this cannot be
@@ -4667,11 +4677,6 @@ class QueryPredicates:
         Optional[AbstractPredicate]
             A conjunction of all the individual join predicates between the two sets of candidate tables. If there is no join
             predicate between any of the tables, *None* is returned.
-
-        Raises
-        ------
-        ValueError
-            If the `_computation` strategy is none of the allowed values
         """
         if self._root is None:
             return None
@@ -4732,7 +4737,7 @@ class QueryPredicates:
 
             >>> predicates.joins_tables([table1, table2, table3])
             >>> predicates.joins_tables(table1, table2, table3)
-            >>> predicates.joins_table([table1, table2], table3)
+            >>> predicates.joins_tables([table1, table2], table3)
 
         """
         if self._root is None:
@@ -5179,7 +5184,7 @@ class Explain(ModifierClause):
 
     See Also
     --------
-    postbound.db.db.HintService.format_query
+    postbound.db.HintService.format_query
 
     References
     ----------
@@ -5296,7 +5301,7 @@ class WithQuery:
 
     Parameters
     ----------
-    query : SqlQuery
+    query : SelectStatement
         The query that should be used to construct the temporary common table.
     target_name : str | TableReference
         The name under which the table should be made available. If a table reference is provided, its identifier will be used.
@@ -5344,7 +5349,7 @@ class WithQuery:
 
         Returns
         -------
-        SqlQuery
+        SelectStatement
             The query
         """
         return self._query
@@ -5530,7 +5535,7 @@ class ValuesWithQuery(WithQuery):
 
         Returns
         -------
-        Sequence[ColumnExpression]
+        Sequence[ColumnReference]
             The columns. If no columns were provided, generic column names are used.
         """
         if self._columns:
@@ -5967,7 +5972,8 @@ class Select(BaseClause):
     ) -> Select:
         """Full factory method to accompany `star` and `count_star` factory methods.
 
-        This is basically the same as calling the `__init__` method directly.
+        Unlike calling `__init__` directly, this method also accepts bare `ColumnReference` instances and wraps them
+        into the appropriate `BaseProjection` automatically.
 
         Parameters
         ----------
@@ -6530,7 +6536,8 @@ class ValuesTableSource(TableSource):
     columns : Optional[Iterable[str | ColumnReference]], optional
         The names of the columns that are available in the virtual table. The length of this list must match the length
         of the tuples in the `values` list. Alternatively, an empty list can be provided, in which case the columns will
-        be named automatically.
+        be named automatically. Notice that `columns` is only applied if `alias` is also given - if no `alias` is provided,
+        `columns` is silently ignored and the virtual table has no declared columns.
     """
 
     def __init__(
@@ -7594,15 +7601,15 @@ class UnionClause(SetOpClause):
 
     Parameters
     ----------
-    left_query: SelectStatement
+    left_query: SqlQuery
         The left input to the UNION operation. Since UNIONs are commutative, the assignment of left and right does not really
         matter.
-    right_query: SelectStatement
+    right_query: SqlQuery
         The right input to the UNION operation. Since UNIONs are commutative, the assignment of left and right does not really
         matter.
     union_all : bool, optional
-        Whether the *UNION* operation should eliminate duplicates or not. Defaults to *False* which indicates that
-        duplicates should be kept.
+        Whether the *UNION* operation should keep duplicates or not. Defaults to *False* which indicates that duplicates
+        should be eliminated (i.e. a plain *UNION* rather than a *UNION ALL*).
     """
 
     def __init__(
@@ -7627,7 +7634,7 @@ class UnionClause(SetOpClause):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The left query. Since UNIONs are commutative, the assignment of left and right does not really matter.
 
         See Also
@@ -7642,7 +7649,7 @@ class UnionClause(SetOpClause):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The right query. Since UNIONs are commutative, the assignment of left and right does not really matter.
 
         See Also
@@ -7677,7 +7684,7 @@ class UnionClause(SetOpClause):
 
         Returns
         -------
-        set[SelectStatement]
+        set[SqlQuery]
             The left and right queries. Since UNIONs are commutative, the assignment of left and right does not really
             matter.
         """
@@ -7720,9 +7727,9 @@ class ExceptClause(SetOpClause):
 
     Parameters
     ----------
-    left_query: SelectStatement
+    left_query: SqlQuery
         The left query that is part of the *EXCEPT* operation. This is the result set from which tuples are removed.
-    right_query: SelectStatement
+    right_query: SqlQuery
         The right query that is part of the *EXCEPT* operation. This is the result set of the tuples that should be removed.
     """
 
@@ -7742,7 +7749,7 @@ class ExceptClause(SetOpClause):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The left query.
         """
         return self._lhs
@@ -7755,7 +7762,7 @@ class ExceptClause(SetOpClause):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The right query.
         """
         return self._rhs
@@ -7791,10 +7798,10 @@ class IntersectClause(SetOpClause):
 
     Parameters
     ----------
-    left_query: SelectStatement
+    left_query: SqlQuery
         The left query that is part of the *INTERSECT* operation. Since set intersection is commutative, the assignment
         of left and right does not really matter.
-    right_query: SelectStatement
+    right_query: SqlQuery
         The right query that is part of the *INTERSECT*. Since set intersection is commutative, the assignment of left
         and right does not really matter.
     """
@@ -7813,7 +7820,7 @@ class IntersectClause(SetOpClause):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The left query. Since set intersection is commutative, the assignment of left and right does not really matter.
 
         See Also
@@ -7828,7 +7835,7 @@ class IntersectClause(SetOpClause):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The right query. Since set intersection is commutative, the assignment of left and right does not really matter.
 
         See Also
@@ -7956,8 +7963,11 @@ class SqlQuery(ABC):
 
     @property
     @abstractmethod
-    def from_clause(self) -> From:
+    def from_clause(self) -> From | None:
         """Get the *FROM* clause of the query.
+
+        Unlike most other clauses, this can be *None* even for plain select queries, since some database systems allow
+        queries without a *FROM* clause (e.g. ``SELECT 1``).
 
         Warnings
         --------
@@ -8363,7 +8373,7 @@ class SqlQuery(ABC):
         Parameters
         ----------
         trailing_delimiter : bool, optional
-            Whether a delimiter should be appended to the query. Defaults to *True*.
+            Whether a delimiter should be appended to the query. Defaults to *False*.
 
         Returns
         -------
@@ -8725,18 +8735,13 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
 class SelectStatement(SqlQuery):
     """Represents a plain *SELECT* query, providing direct access to the different clauses in the query.
 
-    At a basic level, PostBOUND differentiates between two types of queries:
-
-    - implicit SQL queries specify all referenced tables in the *FROM* clause and the join predicates in the *WHERE*
-      clause, e.g. ``SELECT * FROM R, S WHERE R.a = S.b AND R.c = 42``. This is the traditional way of writing SQL queries.
-    - explicit SQL queries use the *JOIN ON* syntax to reference tables, e.g.
-      ``SELECT * FROM R JOIN S ON R.a = S.b WHERE R.c = 42``. This is the more "modern" way of writing SQL queries.
-
-    There is also a third possibility of mixing the implicit and explicit syntax. For each of these cases, designated
-    subclasses exist. They all provide the same functionality and only differ in the (sub-)types of their *FROM* clauses.
-    Therefore, these classes can be considered as "marker" types to indicate that at a certain point of a computation, a
-    specific kind of query is required. The `SqlQuery` class acts as a superclass that specifies the general behaviour of all
-    query instances and can act as the most general type of query.
+    A query can reference its tables either implicitly, by listing all tables in the *FROM* clause and expressing the join
+    predicates in the *WHERE* clause (e.g. ``SELECT * FROM R, S WHERE R.a = S.b AND R.c = 42``), or explicitly, using the
+    *JOIN ON* syntax (e.g. ``SELECT * FROM R JOIN S ON R.a = S.b WHERE R.c = 42``), or through any mixture of both styles.
+    Unlike in earlier versions of PostBOUND, there are no separate classes for these styles anymore - `SelectStatement` is the
+    single concrete class for all of them, and the actual style is simply a matter of which `TableSource` instances make up
+    its `From` clause. The `SqlQuery` class acts as a superclass that specifies the general behaviour of all query instances
+    and can act as the most general type of query.
 
     To represent other types of SQL statements (e.g. DML statements), different classes have to be used. Notably, this also
     applies to set queries, i.e. queries containing *UNION*, *INTERSECT*, or *EXCEPT* clauses. These are represented by
@@ -8750,7 +8755,7 @@ class SelectStatement(SqlQuery):
     re-visit all other method definitions to update the their signatures.
 
     If you want to explicitly communicate that some method accepts both plain SQL queries as well as set queries, you can use
-    the `SelectStatement` super type.
+    the `SqlQuery` super type.
 
     The clauses of each query can be accessed via properties. If a clause is optional, the absence of the clause is indicated
     through a *None* value. All additional behaviour of the queries is provided by the different methods. These are mostly
@@ -9071,9 +9076,9 @@ class SetQuery(SqlQuery):
 
     Parameters
     ----------
-    left_query : SelectStatement
+    left_query : SqlQuery
         The left-hand side of the set operation
-    right_query : SelectStatement
+    right_query : SqlQuery
         The right-hand side of the set operation
     set_operation : SetOperator
         The actual operation to combine the two result sets.
@@ -9172,7 +9177,7 @@ class SetQuery(SqlQuery):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The left-hand side of the set operation
         """
         return self._lhs
@@ -9183,7 +9188,7 @@ class SetQuery(SqlQuery):
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The right-hand side of the set operation
         """
         return self._rhs
@@ -9433,7 +9438,7 @@ def all_binary_predicates(predicates):
 
 
 class QueryTypeError(RuntimeError):
-    """Error to indicate that a different type of query was expected (e.g. an `ExplicitSqlQuery` instead of a `SetQuery`)."""
+    """Error to indicate that a different type of query was expected (e.g. a `SelectStatement` instead of a `SetQuery`)."""
 
     @staticmethod
     def expected_select(query: SqlQuery) -> QueryTypeError:
@@ -9464,10 +9469,10 @@ def build_query(query_clauses: Iterable[SqlClause | None]) -> SqlQuery: ...
 def build_query(query_clauses):
     """Constructs an SQL query based on specific clauses.
 
-    No validation is performed. If clauses appear multiple times, later clauses overwrite former ones. The specific
-    type of query (i.e. implicit, explicit or mixed) is inferred from the clauses (i.e. occurrence of an implicit *FROM*
-    clause enforces an `ImplicitSqlQuery` and vice-versa). The overwriting rules apply here as well: a later `From` clause
-    overwrites a former one and can change the type of the produced query.
+    No validation is performed. If clauses appear multiple times, later clauses overwrite former ones. Whether a
+    `SelectStatement` or a `SetQuery` is produced is inferred from the clauses: if one of the set-operation clauses
+    (`UnionClause`, `IntersectClause` or `ExceptClause`) is supplied, a `SetQuery` is built, otherwise a `SelectStatement`
+    is built from the remaining clauses.
 
     This method can also be used to contruct `SetQuery` objects by passing one of the set clauses (`UnionClause`,
     `IntersectClause` or `ExceptClause`). In this case, the user must ensure that no clauses that are illegal in the context of
@@ -9475,7 +9480,7 @@ def build_query(query_clauses):
 
     Parameters
     ----------
-    query_clauses : Iterable[BaseClause]
+    query_clauses : Iterable[SqlClause]
         The clauses that should be used to construct the query. If any of the clauses are **None**, they will simply be
         skipped.
 
@@ -9591,13 +9596,13 @@ def build_query(query_clauses):
     )
 
 
-def as_query(clauses: SqlClause | Iterable[SqlClause], *args) -> SelectStatement:
+def as_query(clauses: SqlClause | Iterable[SqlClause], *args) -> SqlQuery:
     """Transforms the given clauses into a full query.
 
     This is just a slightly more convenient alias for `build_query` and the same rules apply:
     if clauses of the same type appear multiple times (e.g., multiple `Select` clauses), later
-    occurrences overwrite earlier ones. The type of query is inferred from the clauses, e.g., if an
-    `ImplicitFromClause` is present, an `ImplicitSqlQuery` will be created.
+    occurrences overwrite earlier ones. Whether a `SelectStatement` or a `SetQuery` is produced is
+    inferred from the clauses - see `build_query` for the exact rules.
     """
     all_clauses = list(util.enlist(clauses))
     all_clauses.extend(args)

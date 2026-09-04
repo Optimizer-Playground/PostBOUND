@@ -3153,6 +3153,7 @@ class _ImplicitRelalgParser:
         # TODO: since the implementation of JOIN statements is currently undergoing a major rework, we don't process such
         # statements at all
 
+        assert self._query.from_clause is not None
         util.collections.foreach(self._query.from_clause.items, self._add_table_source)
 
         if self._query.where_clause:
@@ -3300,6 +3301,7 @@ class _ImplicitRelalgParser:
         # TODO: figure out the interaction between implicit and explicit joins, especially regarding their timing
 
         joined_tables: set[TableReference] = set()
+        assert self._query.from_clause is not None
         for table_source in self._query.from_clause.items:
             # TODO: determine correct join partners for explicit JOINs
             joined_tables |= table_source.tables()

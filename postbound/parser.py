@@ -218,9 +218,9 @@ class QueryNamespace:
     - While parsing the different clauses of the query, `lookup_column` and `resolve_table` can be used to determine the
       correct table references based on the sources that are currently available in the namespace.
 
-    Each namespace can be connected to a parent namespace, which in turn can provide additional CTEs, physical tables or
-    subqueries (if the current namespace is for a LATERAL subquery). This allows the current namespace to check whether some
-    column is actually provided by an outer scope if the namespace does not provide the column itself.
+    Each nested namespace is connected to its parent namespace, which in turn can provide additional CTEs, physical tables
+    or subqueries. This allows the current namespace to check whether some column is actually provided by an outer scope
+    (as is the case for correlated/LATERAL subqueries) if the namespace does not provide the column itself.
     """
 
     _schema_cache: SchemaCache = SchemaCache()
@@ -2112,8 +2112,9 @@ def parse_query(
 ) -> SqlQuery:
     """Parses a query string into a proper `SqlQuery` object.
 
-    During parsing, the appropriate type of SQL query (i.e. with implicit, explicit or mixed *FROM* clause) will be
-    inferred automatically. Therefore, this method can potentially return a subclass of `SqlQuery`.
+    The concrete result type is inferred automatically: plain *SELECT* queries are parsed into a `SelectStatement`,
+    while queries combined via *UNION*/*INTERSECT*/*EXCEPT* are parsed into a `SetQuery` (unless `accept_set_query` is
+    *False*, in which case such queries raise an error instead).
 
     Once the query has been transformed, a text-based binding process is executed. During this process, the referenced
     tables are normalized such that column references using the table alias are linked to the correct tables that are
@@ -2257,7 +2258,9 @@ def load_table_json(json_data):
     Returns
     -------
     Optional[TableReference]
-        The actual table. If the dictionary is empty or otherwise invalid, *None* is returned.
+        The actual table. If `json_data` is empty (or *None*), *None* is returned. Notice that malformed but non-empty
+        data is not rejected - missing keys are silently defaulted (e.g. to an empty name or alias) rather than raising
+        an error or returning *None*.
     """
     if not json_data:
         return None
@@ -2290,7 +2293,8 @@ def load_column_json(json_data):
     Returns
     -------
     Optional[ColumnReference]
-        The actual column. It the dictionary is empty or otherwise invalid, *None* is returned.
+        The actual column. If `json_data` is empty (or *None*), *None* is returned. Notice that malformed but non-empty
+        data is not rejected - missing keys are silently defaulted rather than raising an error or returning *None*.
     """
     if not json_data:
         return None
@@ -2363,7 +2367,10 @@ def load_predicate_json(json_data):
     ParserError
         If the encoding does not specify the tables that are referenced in the predicate
     ParserError
-        If the encoding does not contain the actual predicate
+        If re-parsing the encoded predicate does not yield a *WHERE* clause (should not normally happen for well-formed
+        input)
+    KeyError
+        If the encoding does not contain the actual predicate (i.e. is missing the ``"predicate"`` key)
     """
     if not json_data:
         return None

@@ -30,10 +30,10 @@ new query has to be constructed. The `transform` module provides some functions 
 parts of a query can be done using specific visitor implementations.
 
 In order to generate query instances, the `parser` module can be used to read them from strings. Finally, the
-`formatter` module can be used to create pretty representations of queries. The `transform`, and `formatter` modules are
-available directly from the qal and do not need to be imported explicitly. The same holds for a simple relational algebra
-representation in the `relalg` module. The parser provides means for reading an entire query from text, or reading parts of it
-from JSON. A `parse_query` helper function is directly available from the qal module.
+`formatter` module can be used to create pretty representations of queries. The `parser`, `transform`, `relalg` and
+`formatter` modules live alongside the qal package (i.e. `postbound.parser`, `postbound.transform`, `postbound.relalg`,
+`postbound.qal._formatter`) and have to be imported explicitly - only `format_quick` is re-exported directly from the qal
+module for convenience. The parser provides means for reading an entire query from text, or reading parts of it from JSON.
 
 
 SQL queries
@@ -44,10 +44,9 @@ important concepts. Notice that the focus here really in on modelling - nearly n
 capabilities and no modification tools are provided. These are handled by dedicated modules (e.g. the `parser` module for
 reading queries from text, or the `transform` module for changing existing query objects).
 
-In addition to the pure `SqlQuery`, a number of subclasses exist. These model queries with specific *FROM* clauses. For
-example, the `ImplicitSqlQuery` provides an `ImplicitFromClause` that restricts how tables can be referenced in this clause.
-For some use-cases, these might be easier to work with than the more general `SqlQuery` class, where much more diverse *FROM*
-clauses are permitted.
+`SqlQuery` is an abstract base class with two concrete subclasses: `SelectStatement` models a plain *SELECT* query
+(with an arbitrary *FROM* clause, built from the `TableSource` hierarchy), while `SetQuery` models queries that combine two
+input queries via a set operation (*UNION*, *INTERSECT* or *EXCEPT*).
 
 
 Predicates

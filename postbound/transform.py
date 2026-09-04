@@ -316,9 +316,9 @@ def extract_query_fragment(
 
     Parameters
     ----------
-    query : ImplicitSqlQuery | SetQuery
-        The query that should be transformed. Note that the current implementation only supports implicit queries and set
-        queries.
+    query : SelectStatement | SetQuery
+        The query that should be transformed. `SelectStatement` instances with an explicit *FROM* clause are automatically
+        converted to their implicit equivalent via `explicit_to_implicit` first.
     referenced_tables : TableReference | Iterable[TableReference]
         The tables that should be extracted
     projection : Literal["keep", "star", "*", "count_star"], optional
@@ -328,14 +328,14 @@ def extract_query_fragment(
 
     Returns
     -------
-    Optional[ImplicitSqlQuery | SetQuery]
+    Optional[SelectStatement | SetQuery]
         A query that only consists of those parts of the `source_query`, that reference (a subset of) the `referenced_tables`.
         If there is no such subset, ``None`` is returned.
 
     Warnings
     --------
-    The current implementation only works for `SetQuery` and `ImplicitSqlQuery` instances. If the `source_query` is not of one
-    of these types (or contains subqueries that are not of these types), a `ValueError` is raised.
+    `explicit_to_implicit` cannot rewrite queries that use outer joins or natural joins - a `ValueError` is raised for
+    `query` (or any of its subqueries) that require such a rewrite.
 
     See Also
     --------
@@ -510,7 +510,7 @@ def expand_to_query(
 
     Returns
     -------
-    ImplicitSqlQuery
+    SelectStatement
         An SQL query of the form ``SELECT * FROM <predicate tables> WHERE <predicate>``.
     """
     select_clause = Select.star() if projection == "star" else Select.count_star()
@@ -535,7 +535,7 @@ def move_into_subquery(
 
     Parameters
     ----------
-    query : SqlQuery
+    query : SelectStatement
         The query to transform
     tables : Iterable[TableReference]
         The tables that should be placed into a subquery
@@ -545,7 +545,7 @@ def move_into_subquery(
 
     Returns
     -------
-    SqlQuery
+    SelectStatement
         The transformed query
 
     Raises
@@ -631,12 +631,12 @@ def add_ec_predicates(query: SelectStatement) -> SelectStatement:
 
     Parameters
     ----------
-    query : ImplicitSqlQuery
+    query : SelectStatement
         The query to analyze
 
     Returns
     -------
-    ImplicitSqlQuery
+    SelectStatement
         An equivalent query that explicitly contains all predicates from join equivalence classes.
 
     See Also
@@ -779,6 +779,10 @@ def as_star_query(query):
     Notice that this can break certain queries where a renamed column from the ``SELECT`` clause is used in other parts of
     the query, such as ``ORDER BY`` clauses (e.g. ``SELECT SUM(foo) AS f FROM bar ORDER BY f``). We currently do not undo such
     a renaming.
+
+    `SetQuery` instances are currently not supported and are returned unmodified, since a ``SELECT *`` projection cannot
+    generally be pushed into both sides of a set operation without changing its result. Use `as_count_star_query` if you need
+    set-query support for a similarly reduced projection.
 
     Parameters
     ----------
@@ -962,7 +966,7 @@ def add_clause[T: SqlQuery](query: T, clauses_to_add: SqlClause | Iterable[SqlCl
     ----------
     query : SqlQuery
         The query to which the clause(s) should be added
-    clauses_to_add : BaseClause | Iterable[BaseClause]
+    clauses_to_add : SqlClause | Iterable[SqlClause]
         The new clauses
 
     Returns
@@ -1065,8 +1069,10 @@ def replace_clause(query, replacements):
     ----------
     query : SelectQueryType
         The query to update
-    replacements : BaseClause | Iterable[BaseClause]
-        The new clause instances that should be used instead of the old ones.
+    replacements : SqlClause | Iterable[SqlClause]
+        The new clause instances that should be used instead of the old ones. For a `SelectStatement`, these must be
+        `BaseClause`/`ModifierClause` instances; for a `SetQuery`, `SetOpClause`/`ModifierClause` instances - see the
+        overloads for the exact types accepted for each query type.
 
     Returns
     -------
@@ -1436,16 +1442,15 @@ def replace_predicate(
 def replace_predicate(query, predicate_to_replace: AbstractPredicate, new_predicate: AbstractPredicate):
     """Rewrites a specific query to use a new predicate in place of an old one.
 
-    In the current implementation this does only work for top-level predicates, i.e. subqueries and CTEs are not considered.
-    Furthermore, only the ``WHERE`` clause and the ``HAVING`` clause are modified, since these should be the only ones that
-    contain predicates.
+    This is implemented on top of `replace_expressions`, so predicates within subqueries (both in the *FROM* clause and in
+    CTEs) are also considered, not just the top-level ``WHERE``/``HAVING`` predicates.
 
     If the predicate to replace is not found, nothing happens. In the same vein, no sanity checks are performed on the updated
     query.
 
     Parameters
     ----------
-    query : ImplicitSqlQuery
+    query : SqlQuery
         The query update
     predicate_to_replace : AbstractPredicate
         The old predicate that should be dropped
@@ -1455,7 +1460,7 @@ def replace_predicate(query, predicate_to_replace: AbstractPredicate, new_predic
 
     Returns
     -------
-    ImplicitSqlQuery
+    SqlQuery
         The updated query
     """
     return replace_expressions(query, lambda pred: new_predicate if pred == predicate_to_replace else pred)
@@ -1493,12 +1498,6 @@ def rename_columns_in_query(query, available_renamings: Mapping[ColumnReference,
     -------
     SelectQueryType
         The updated query
-
-    Raises
-    ------
-    TypeError
-        If the query is of no known type. This indicates that this method is missing a handler for a specific query type that
-        was added later on.
     """
     renamed_cte = rename_columns_in_clause(query.cte_clause, available_renamings)
     renamed_having = rename_columns_in_clause(query.having_clause, available_renamings)
@@ -1736,15 +1735,15 @@ def rename_columns_in_predicate(predicate, available_renamings: Mapping[ColumnRe
     Raises
     ------
     ValueError
-        If the query is of no known type. This indicates that this method is missing a handler for a specific query type that
-        was added later on.
+        If the predicate is of no known type. This indicates that this method is missing a handler for a specific predicate
+        type that was added later on.
     """
     if not predicate:
         return None
 
     if isinstance(predicate, BinaryPredicate):
-        renamed_first_arg = rename_columns_in_expression(predicate.first_argument, available_renamings)
-        renamed_second_arg = rename_columns_in_expression(predicate.second_argument, available_renamings)
+        renamed_first_arg = rename_columns_in_expression(predicate.lhs, available_renamings)
+        renamed_second_arg = rename_columns_in_expression(predicate.rhs, available_renamings)
         return BinaryPredicate(predicate.operator, renamed_first_arg, renamed_second_arg)
     elif isinstance(predicate, BetweenPredicate):
         renamed_col = rename_columns_in_expression(predicate.column, available_renamings)
@@ -2007,14 +2006,8 @@ class _TableReferenceRenamer(
 
     Parameters
     ----------
-    renamings : Optional[dict[TableReference, TableReference]], optional
-        Map from old table name to new name. If this is given, `source_table` and `target_table` are ignored.
-    source_table : Optional[TableReference], optional
-        Create a visitor for a single renaming operation. This parameter specifies the old table name that should be replaced.
-        This parameter is ignored if `renamings` is given.
-    target_table : Optional[TableReference], optional
-        Create a visitor for a single renaming operation. This parameter specifies the new table name that should be used
-        instead of `source_table`. This parameter is ignored if `renamings` is given.
+    renamings : dict[TableReference, TableReference]
+        Map from old table name to new name.
     """
 
     def __init__(
@@ -2368,10 +2361,11 @@ def rename_table(
     ----------
     source_query : SelectQueryType
         The query that should be updated
-    from_table : TableReference
-        The table that should be replaced
-    target_table : TableReference
-        The table that should be used instead
+    from_table : TableReference | dict[TableReference, TableReference]
+        The table that should be replaced. Alternatively, a dictionary can be supplied to rename multiple tables at once,
+        mapping each old table to its new table. In this case, `target_table` must not be given.
+    target_table : Optional[TableReference], optional
+        The table that should be used instead. Required (and only allowed) if `from_table` is a single `TableReference`.
     prefix_column_names : bool, optional
         Whether a prefix should be added to column names. If this is ``True``, column references will be changed in two ways:
 
@@ -2400,7 +2394,7 @@ def rename_table(
         if not column.table or column.table not in tabs_to_rename:
             continue
         new_column_name = f"{column.table.identifier()}_{column.name}" if prefix_column_names else column.name
-        necessary_renamings[column] = ColumnReference(new_column_name, target_table)
+        necessary_renamings[column] = ColumnReference(new_column_name, renamings[column.table])
 
     renamed_cols = rename_columns_in_query(source_query, necessary_renamings)
 

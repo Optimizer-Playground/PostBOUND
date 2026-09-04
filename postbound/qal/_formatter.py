@@ -99,7 +99,7 @@ class FormattingSubqueryExpression(SubqueryExpression):
         The SQL dialect to emit
     inline_hint_block : bool
         Whether potential hint blocks of the subquery should be printed as preceding blocks or as inline blocks (see
-        `legacy_format_quick` for details)
+        `format_quick` for details)
     indentation : int
         The current amount of indentation that should be used for the subquery. While pretty-printing, additional
         indentation levels can be inserted for specific parts of the query.
@@ -1070,16 +1070,16 @@ def format_quick(
     The query will be structured as follows:
 
     - all clauses start at a new line
-    - long clauses with multiple parts (e.g. *SELECT* clause, *FROM* clause) are split along multiple intended
-      lines
+    - long clauses with multiple parts (e.g. *SELECT* clause, *FROM* clause, or *GROUP BY* clause) are split along
+      multiple indented lines
     - the predicate in the *WHERE* clause is split on multiple lines along the different parts of a conjunctive
       predicate
 
-    All other clauses are written on a single line (e.g. *GROUP BY* clause).
+    All other clauses are written on a single line.
 
     Parameters
     ----------
-    query : SelectStatement
+    query : SqlQuery
         The query to format
     inline_hint_block : bool, optional
         Whether to insert a potential hint block in the *SELECT* clause (i.e. *inline* it), or leave it as a
