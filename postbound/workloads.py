@@ -27,10 +27,9 @@ import shutil
 import urllib.request
 import warnings
 import zipfile
-from collections import UserDict
-from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, cast, overload
+from typing import Literal, TypeVar, cast, overload
 
 import natsort
 import pandas as pd
@@ -81,13 +80,17 @@ def _fetch_workload(name: str) -> Path:
     return workload_dir
 
 
-class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
+L = TypeVar("L", bound=Hashable)
+Q = TypeVar("Q", bound=SqlQuery, covariant=True)
+
+
+class Workload(Mapping[L, Q]):
     """A workload collects a number of queries (read: benchmark) and provides utilities to operate on them conveniently.
 
     In addition to the actual queries, each query is annotated by a label that can be used to retrieve the query more
     nicely. E.g. for queries in the Join Order Benchmark, access by their index is supported - such as ``job["1a"]``. Labels
-    can be arbitrary types as long as they are hashable. Since the workload inherits from dict, the label can be used directly
-    to fetch the associated query (and will raise ``KeyError`` instances for unknown labels).
+    can be arbitrary types as long as they are hashable. Since the workload implements a read-only ``Mapping``, the label can be
+    used directly to fetch the associated query (and will raise ``KeyError`` instances for unknown labels).
 
     Each workload can be given a name, which is mainly intended for readability in ``__str__`` methods and does not serve
     a functional purpose. However, it may be good practice to use a normalized name that can be used in different contexts
@@ -111,9 +114,11 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
 
     Notes
     -----
-    Workloads support many of the Python builtin-methods thanks to inheriting from ``UserDict``. Namely, the *len*, *iter* and
-    *in* methods work as expected on the labels. Furthermore, multiple workload objects can be added, subtracted and
-    intersected using set semantics. Subtraction and intersection also work based on individual labels.
+    Workloads support many of the Python builtin-methods thanks to implementing the ``Mapping`` protocol. Namely, the *len*,
+    *iter* and *in* methods work as expected on the labels. Furthermore, multiple workload objects can be added, subtracted
+    and intersected using set semantics. Subtraction and intersection also work based on individual labels. The mapping is
+    read-only (as befits an immutable object): queries are covariant in the query type, so a ``Workload[str, SelectStatement]``
+    can be used wherever a ``Workload[str, SqlQuery]`` is expected.
     """
 
     @staticmethod
@@ -215,7 +220,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         name: str = "",
         root: Path | None = None,
     ) -> None:
-        super().__init__(queries)
+        self._entries: dict[L, Q] = dict(queries)
         self._name = name
         self._root = root
 
@@ -223,7 +228,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         self._sorted_queries: list[Q] = []
         self._update_query_order()
 
-        self._label_mapping = util.dicts.invert(self.data)
+        self._label_mapping: dict[Q, L] = util.dicts.invert(self._entries)
 
     @property
     def name(self) -> str:
@@ -289,7 +294,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             return None
         return self._sorted_labels[0], self._sorted_queries[0]
 
-    def label_of(self, query: Q) -> L:
+    def label_of(self, query: SqlQuery) -> L:
         """Provides the label of the given query.
 
         Parameters
@@ -307,7 +312,10 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         KeyError
             If the query is not part of the workload
         """
-        return self._label_mapping[query]
+        key = self._label_mapping.get(query)
+        if key is None:
+            raise KeyError(f"Query {query} is not part of the workload")
+        return key
 
     def with_labels(self, labels: Iterable[L]) -> Workload[L, Q]:
         """Provides a new workload that contains only the queries with the specified labels.
@@ -323,7 +331,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             A workload that contains only the queries with the specified labels
         """
         labels = set(labels)
-        selected_queries = {label: query for label, query in self.data.items() if label in labels}
+        selected_queries = {label: query for label, query in self._entries.items() if label in labels}
         return Workload(selected_queries, name=self._name, root=self._root)
 
     def first(self, n: int) -> Workload[L, Q]:
@@ -344,7 +352,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             A workload consisting of the first `n` queries of the current workload
         """
         first_n_labels = self._sorted_labels[:n]
-        sub_workload = {label: self.data[label] for label in first_n_labels}
+        sub_workload = {label: self._entries[label] for label in first_n_labels}
         return Workload(sub_workload, self._name, self._root)
 
     def last(self, n: int) -> Workload[L, Q]:
@@ -365,7 +373,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             A workload consisting of the last `n` queries of the current workload
         """
         last_n_labels = self._sorted_labels[-n:]
-        sub_workload = {label: self.data[label] for label in last_n_labels}
+        sub_workload = {label: self._entries[label] for label in last_n_labels}
         return Workload(sub_workload, self._name, self._root)
 
     def pick_random(self, n: int) -> Workload[L, Q]:
@@ -385,7 +393,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         """
         n = min(n, len(self._sorted_queries))
         selected_labels = random.sample(self._sorted_labels, n)
-        sub_workload = {label: self.data[label] for label in selected_labels}
+        sub_workload = {label: self._entries[label] for label in selected_labels}
         return Workload(sub_workload, self._name, self._root)
 
     def with_prefix(self, label_prefix: L) -> Workload[L, Q]:
@@ -420,7 +428,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             raise ValueError("label_prefix must have startswith() method")
         prefix_queries = {
             label: query
-            for label, query in self.data.items()
+            for label, query in self._entries.items()
             if label.startswith(label_prefix)  # type: ignore - this is guarded by the check above
         }
         return Workload(prefix_queries, name=self._name, root=self._root)
@@ -440,7 +448,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             All queries that passed the filter condition check. Queries will be sorted according to the natural order of their
             labels again.
         """
-        matching_queries = {label: query for label, query in self.data.items() if predicate(label, query)}
+        matching_queries = {label: query for label, query in self._entries.items() if predicate(label, query)}
         return Workload(matching_queries, name=self._name, root=self._root)
 
     def relabel[NewLabelType: Hashable](
@@ -462,7 +470,9 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         Workload[NewLabelType]
             All queries of the current workload, but with new labels
         """
-        relabeled_queries = {label_provider(current_label, query): query for current_label, query in self.data.items()}
+        relabeled_queries = {
+            label_provider(current_label, query): query for current_label, query in self._entries.items()
+        }
         return Workload(relabeled_queries, self._name, self._root)
 
     def map[NQ: SqlQuery](self, transformation: Callable[[Q], NQ] | Callable, *args, **kwargs) -> Workload[L, NQ]:
@@ -491,7 +501,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         --------
         transform : if the transformation also needs access to the query labels, or if labels should be updated as well
         """
-        transformed_queries = {label: transformation(query, *args, **kwargs) for label, query in self.data.items()}
+        transformed_queries = {label: transformation(query, *args, **kwargs) for label, query in self._entries.items()}
         return Workload(transformed_queries, self._name, self._root)
 
     def transform[NL: Hashable, NQ: SqlQuery](
@@ -525,7 +535,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         --------
         map : if the transformation is purely query-based and does not need access to the labels
         """
-        transformed_queries = [transformation(label, query, *args, **kwargs) for label, query in self.data.items()]
+        transformed_queries = [transformation(label, query, *args, **kwargs) for label, query in self._entries.items()]
         return Workload(dict(transformed_queries), self._name, self._root)
 
     def shuffle(self) -> Workload[L, Q]:
@@ -536,7 +546,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         Workload[LabelType]
             All queries of the current workload, but with the queries in a different order
         """
-        shuffled_workload = Workload(self.data, self._name, self._root)
+        shuffled_workload = Workload(self._entries, self._name, self._root)
         shuffled_workload._sorted_labels = random.sample(self._sorted_labels, k=len(self))
         shuffled_workload._update_query_order()
         return shuffled_workload
@@ -549,49 +559,52 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         Workload[LabelType]
             All queries of the current workload, but in their natural order.
         """
-        return Workload(self.data, self._name, self._root)
+        return Workload(self._entries, self._name, self._root)
 
     def _update_query_order(self) -> None:
         """Enforces that the order of the queries matches the order of the labels."""
-        self._sorted_queries = [self.data[label] for label in self._sorted_labels]
+        self._sorted_queries = [self._entries[label] for label in self._sorted_labels]
 
-    def __add__(self, other: Workload[L, Q]) -> Workload[L, Q]:
+    def __add__[Q2: SqlQuery](self, other: Workload[L, Q2]) -> Workload[L, Q | Q2]:
         if not isinstance(other, Workload):
             raise TypeError("Can only add workloads together")
         return Workload(
-            other.data | self.data, name=self._name, root=self._root
+            other._entries | self._entries, name=self._name, root=self._root
         )  # retain own labels in case of conflict
 
-    def __sub__(self, other: Workload[L, Q]) -> Workload[L, Q]:
+    def __sub__(self, other: Workload[L, SqlQuery] | Iterable[L]) -> Workload[L, Q]:
         if not isinstance(other, Workload) and isinstance(other, Iterable):
             labels_to_remove = set(other)
-            reduced_workload = {label: query for label, query in self.data.items() if label not in labels_to_remove}
+            reduced_workload = {label: query for label, query in self._entries.items() if label not in labels_to_remove}
             return Workload(reduced_workload, name=self._name, root=self._root)
         elif not isinstance(other, Workload):
             raise TypeError("Expected workload or labels to subtract")
-        return Workload(
-            util.dicts.difference(self.data, other.data),
-            name=self._name,
-            root=self._root,
-        )
+        reduced_workload = {label: query for label, query in self._entries.items() if label not in other._entries}
+        return Workload(reduced_workload, name=self._name, root=self._root)
 
-    def __and__(self, other: Workload[L, Q]) -> Workload[L, Q]:
+    def __and__(self, other: Workload[L, SqlQuery] | Iterable[L]) -> Workload[L, Q]:
         if not isinstance(other, Workload) and isinstance(other, Iterable):
             labels_to_include = set(other)
-            reduced_workload = {label: query for label, query in self.data.items() if label in labels_to_include}
+            reduced_workload = {label: query for label, query in self._entries.items() if label in labels_to_include}
             return Workload(reduced_workload, name=self._name, root=self._root)
         elif not isinstance(other, Workload):
             raise TypeError("Expected workload or labels to compute union")
-        return Workload(
-            util.dicts.intersection(self.data, other.data),
-            name=self._name,
-            root=self._root,
-        )
+        reduced_workload = {label: query for label, query in self._entries.items() if label in other._entries}
+        return Workload(reduced_workload, name=self._name, root=self._root)
 
-    def __or__(self, other: Mapping[L, Q]) -> Workload[L, Q]:
-        merged = dict(self.data)
+    def __or__[Q2: SqlQuery](self, other: Mapping[L, Q2]) -> Workload[L, Q | Q2]:
+        merged: dict[L, Q | Q2] = cast("dict[L, Q | Q2]", dict(self._entries))
         merged.update(other)
         return Workload(merged, name=self._name, root=self._root)  # retain own labels in case of conflict
+
+    def __getitem__(self, key: L) -> Q:
+        return self._entries[key]
+
+    def __iter__(self) -> Iterator[L]:
+        return iter(self._entries)
+
+    def __len__(self) -> int:
+        return len(self._entries)
 
     def __repr__(self) -> str:
         return str(self)
@@ -716,7 +729,7 @@ def read_workload(
             on_error=on_error,
             verbose=verbose,
         )
-        queries |= subdir_workload.data
+        queries |= subdir_workload._entries
     return Workload(queries, name, root)
 
 
