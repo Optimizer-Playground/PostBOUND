@@ -22,6 +22,7 @@ else
 fi
 
 if [ -z "$SETUP_DUCKDB" ] ; then
+    echo "[setup] SETUP_DUCKDB is not set, defaulting to false"
     SETUP_DUCKDB="false"
 fi
 
