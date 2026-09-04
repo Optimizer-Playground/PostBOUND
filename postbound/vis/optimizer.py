@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Sequence
-from typing import Literal, Optional, overload
+from typing import Literal, overload
 
 import graphviz as gv
 import networkx as nx
@@ -64,7 +64,7 @@ def _render_pk_fk_join_edge(
     if len(join_columns) != 1:
         return _fallback_default_join_edge(graph, join_table, partner_table)
 
-    join_col, partner_col = list(join_columns)[0]
+    join_col, partner_col = next(iter(join_columns))
     if db_schema.is_primary_key(join_col) and db_schema.has_secondary_index(partner_col):
         graph.edge(str(partner_col.table), str(join_col.table))
     elif db_schema.is_primary_key(partner_col) and db_schema.has_secondary_index(join_col):
@@ -75,7 +75,7 @@ def _render_pk_fk_join_edge(
 
 def _plot_join_graph_from_query(
     query: SelectStatement,
-    table_annotations: Optional[Callable[[TableReference], str]] = None,
+    table_annotations: Callable[[TableReference], str] | None = None,
     include_pk_fk_joins: bool = False,
 ) -> gv.Graph:
     if not query.predicates():
@@ -96,7 +96,7 @@ def _plot_join_graph_from_query(
 
 def _plot_join_graph_directly(
     join_graph: JoinGraph,
-    table_annotations: Optional[Callable[[TableReference], str]] = None,
+    table_annotations: Callable[[TableReference], str] | None = None,
 ) -> gv.Digraph:
     gv_graph = gv.Digraph()
     for table in join_graph:
@@ -116,7 +116,7 @@ def _plot_join_graph_directly(
 
 def plot_join_graph(
     query_or_join_graph: SelectStatement | JoinGraph,
-    table_annotations: Optional[Callable[[TableReference], str]] = None,
+    table_annotations: Callable[[TableReference], str] | None = None,
     *,
     include_pk_fk_joins: bool = False,
     out_path: str = "",
@@ -154,7 +154,7 @@ def plot_join_graph(
     return graph
 
 
-def estimated_cards(table: TableReference, *, query: SelectStatement, database: Optional[Database] = None) -> str:
+def estimated_cards(table: TableReference, *, query: SelectStatement, database: Database | None = None) -> str:
     """Annotates the nodes of a join graph with estimated cardinalities.
 
     Estimated cardinalities are obtained by asking the actual query optimizer from the `database`. Usually, they are calculated
@@ -181,7 +181,7 @@ def estimated_cards(table: TableReference, *, query: SelectStatement, database: 
     return f"[{card_est} rows estimated]"
 
 
-def annotate_filter_cards(table: TableReference, *, query: SelectStatement, database: Optional[Database] = None) -> str:
+def annotate_filter_cards(table: TableReference, *, query: SelectStatement, database: Database | None = None) -> str:
     """Annotates the nodes of a join graph with true cardinalities *after* filters.
 
     Cardinalities are calculated by issuing actual *count(\\*)* queries to the `database`. All applicable filter
@@ -207,7 +207,7 @@ def annotate_filter_cards(table: TableReference, *, query: SelectStatement, data
     return f"[{card} rows]"
 
 
-def annotate_cards(table: TableReference, *, query: SelectStatement, database: Optional[Database] = None) -> str:
+def annotate_cards(table: TableReference, *, query: SelectStatement, database: Database | None = None) -> str:
     """Annotates the nodes of a join graph with true cardinalities before and after filters.
 
     Cardinalities are calculated by issuing actual *count(\\*)* queries to the database. Two values are reported: the total
@@ -264,7 +264,7 @@ def merged_annotation(
 def setup_annotations(
     *annotations: Literal["estimated-cards", "filter-cards", "true-cards"],
     query: SelectStatement,
-    database: Optional[Database] = None,
+    database: Database | None = None,
 ) -> Callable[[TableReference], str]:
     """Annotates the nodes of a join graph with different cardinality estimates."""
     annotation_fns = {
@@ -288,7 +288,7 @@ def setup_annotations(
 def _query_plan_labels(
     node: QueryPlan,
     *,
-    annotation_generator: Optional[Callable[[QueryPlan], str]],
+    annotation_generator: Callable[[QueryPlan], str] | None,
     subplan_target: str = "",
 ) -> tuple[str, dict]:
     if node.subplan:
@@ -340,7 +340,7 @@ def annotate_estimates(node: QueryPlan) -> str:
 
 def plot_query_plan(
     plan: QueryPlan,
-    annotation_generator: Optional[Callable[[QueryPlan], str]] = None,
+    annotation_generator: Callable[[QueryPlan], str] | None = None,
     *,
     skip_intermediates: bool = False,
     **kwargs,

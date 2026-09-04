@@ -15,7 +15,6 @@ from __future__ import annotations
 import math
 import warnings
 from collections.abc import Iterable
-from typing import Optional
 
 from .. import transform, util
 from .._core import (
@@ -70,7 +69,7 @@ class NativeCostModel(CostModel):
 
     def __init__(self, *, raise_on_error: bool = False, verbose: bool = False) -> None:
         super().__init__()
-        self.target_db: Optional[Database] = None
+        self.target_db: Database | None = None
         self._raise_on_error = raise_on_error
         self._verbose = verbose
 
@@ -195,6 +194,7 @@ class NativeCostModel(CostModel):
         if not isinstance(self.target_db, PostgresInterface):
             warnings.warn(
                 "Can only estimate the cost of materialize operators for Postgres.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -206,6 +206,7 @@ class NativeCostModel(CostModel):
         if not candidate_joins:
             warnings.warn(
                 "Could not find a suitable consumer of the materialized table. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -228,6 +229,7 @@ class NativeCostModel(CostModel):
         except (DatabaseServerError, DatabaseUserError):
             warnings.warn(
                 f"Could not estimate the cost of materialize plan {plan}. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -239,6 +241,7 @@ class NativeCostModel(CostModel):
         if not intermediate_node:
             warnings.warn(
                 f"Could not estimate cost of materialize plan {plan}. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -280,6 +283,7 @@ class NativeCostModel(CostModel):
         if not isinstance(self.target_db, PostgresInterface):
             warnings.warn(
                 "Can only estimate the cost of memoize operators for Postgres. Returning infinte costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -290,6 +294,7 @@ class NativeCostModel(CostModel):
         if not isinstance(cache_key, ColumnExpression):
             warnings.warn(
                 "Can only estimate the cost of memoize for single column cache keys. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -298,6 +303,7 @@ class NativeCostModel(CostModel):
         if not ColumnReference.assert_bound(column):
             warnings.warn(
                 "Can only estimate the cost of memoize for cache keys that are bound to a table. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -309,6 +315,7 @@ class NativeCostModel(CostModel):
         if not candidate_joins:
             warnings.warn(
                 "Could not find a suitable consumer of the materialized table. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -331,6 +338,7 @@ class NativeCostModel(CostModel):
         except (DatabaseServerError, DatabaseUserError):
             warnings.warn(
                 f"Could not estimate the cost of memoize plan {plan}. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -342,6 +350,7 @@ class NativeCostModel(CostModel):
         if not intermediate_node:
             warnings.warn(
                 f"Could not estimate cost of memoize plan {plan}. Returning infinite costs.",
+                stacklevel=2,
                 category=CostEstimationWarning,
             )
             return math.inf
@@ -374,11 +383,9 @@ class NativeCostModel(CostModel):
         orderby_cols: list[ColumnReference] = []
         for sort_key in plan.sort_keys:
             col = next(
-                (
-                    col.column
-                    for col in sort_key.equivalence_class
-                    if isinstance(col, ColumnExpression) and col.column in target_columns
-                )
+                col.column
+                for col in sort_key.equivalence_class
+                if isinstance(col, ColumnExpression) and col.column in target_columns
             )
             orderby_cols.append(col)
         orderby_clause = OrderBy.create_for(orderby_cols)
@@ -390,15 +397,15 @@ class NativeCostModel(CostModel):
     def _warn(self, msg: str) -> None:
         if not self._verbose:
             return
-        warnings.warn(msg, category=CostEstimationWarning)
+        warnings.warn(msg, stacklevel=2, category=CostEstimationWarning)
 
 
 class NativeCardinalityEstimator(CardinalityEstimator):
     """Obtains the cardinality of a query plan by using the cardinality estimator of an actual database system."""
 
-    def __init__(self, target_db: Optional[Database] = None) -> None:
+    def __init__(self, target_db: Database | None = None) -> None:
         super().__init__(allow_cross_products=True)
-        self._target_db: Optional[Database] = target_db
+        self._target_db: Database | None = target_db
 
     def calculate_estimate(
         self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
@@ -433,7 +440,7 @@ class NativeJoinOrderOptimizer(JoinOrderOptimization):
         super().__init__()
         self.db_instance = db_instance
 
-    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SqlQuery) -> JoinTree | None:
         query_plan = self.db_instance.optimizer().query_plan(query)
         return jointree_from_plan(query_plan)
 
@@ -457,7 +464,7 @@ class NativePhysicalOperatorSelection(PhysicalOperatorSelection):
         super().__init__()
         self.db_instance = db_instance
 
-    def select_physical_operators(self, query: SqlQuery, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SqlQuery, join_order: JoinTree | None) -> PhysicalOperatorAssignment:
         if join_order:
             query = self.db_instance.hinting().generate_hints(query, join_order=join_order)
         query_plan = self.db_instance.optimizer().query_plan(query)
@@ -486,8 +493,8 @@ class NativePlanParameterization(ParameterGeneration):
     def generate_plan_parameters(
         self,
         query: SqlQuery,
-        join_order: Optional[JoinTree],
-        operator_assignment: Optional[PhysicalOperatorAssignment],
+        join_order: JoinTree | None,
+        operator_assignment: PhysicalOperatorAssignment | None,
     ) -> PlanParameterization:
         if join_order or operator_assignment:
             query = self.db_instance.hinting().generate_hints(

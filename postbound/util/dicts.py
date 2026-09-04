@@ -7,7 +7,7 @@ import itertools
 import typing
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Optional, Protocol
+from typing import Protocol
 
 import numpy as np
 
@@ -81,7 +81,7 @@ def key(dictionary: dict[K, V]) -> K:
 
     `key({'a': 1}) = 'a'`
     """
-    if not len(dictionary) == 1:
+    if len(dictionary) != 1:
         nvals = len(dictionary)
         raise ValueError(f"Dictionary must contain exactly 1 entry, not {nvals}: {dictionary}")
     return next(iter(dictionary.keys()))
@@ -133,7 +133,7 @@ def intersection(a: dict[K, V], b: dict[K, V]) -> dict[K, V]:
     return {k: v for k, v in a.items() if k in b}
 
 
-def merge(a: dict[K, V], b: dict[K, V], *, updater: Optional[Callable[[K, V, V], V]] = None) -> dict[K, V]:
+def merge(a: dict[K, V], b: dict[K, V], *, updater: Callable[[K, V, V], V] | None = None) -> dict[K, V]:
     """Creates a new dict containing all key/values pairs from both argument dictionaries.
 
     If keys overlap, entries from dictionary `b` will take priority, unless an `update` method is given.
@@ -145,7 +145,7 @@ def merge(a: dict[K, V], b: dict[K, V], *, updater: Optional[Callable[[K, V, V],
     input data.
     """
     if not updater:
-        return dict([*a.items()] + [*b.items()])
+        return dict([*a.items(), *b.items()])
     else:
         merged = dict(a)
         for k, v in b.items():
@@ -176,7 +176,7 @@ def hash_dict(dictionary: dict[K, V]) -> int:
     for val in dictionary.values():
         if isinstance(val, collections.abc.Hashable):
             values.append(hash(val))
-        elif isinstance(val, list) or isinstance(val, set):
+        elif isinstance(val, (list, set)):
             values.append(hash(tuple(val)))
         elif isinstance(val, dict):
             values.append(hash_dict(val))
@@ -367,7 +367,6 @@ class frozendict(collections.UserDict[K, V]):
         self.clear = None
         self.pop = None
         self.popitem = None
-        self.update
         self._frozen = True
 
     def __setitem__(self, key: K, item: V) -> None:

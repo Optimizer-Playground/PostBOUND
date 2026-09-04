@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 import math
 from collections.abc import Generator, Iterable
-from typing import Optional, Self, Type
+from typing import Self
 
 from . import util
 from ._core import Cardinality, Cost, TableReference, TimeMs
@@ -17,7 +17,7 @@ from .validation import EmptyPreCheck, OptimizationPreCheck
 from .workloads import Workload
 
 
-def _missing_method_impls(child_cls: Type, base_cls: Type, *, methods: list[str]) -> list[str]:
+def _missing_method_impls(child_cls: type, base_cls: type, *, methods: list[str]) -> list[str]:
     """Scan the `child_cls` for methods that are implemented in the `base_cls` but not overridden in the `child_cls`.
 
     This check fails gracefully if none of the methods are implemented. This behavior is used to simulate our "poor man's
@@ -407,7 +407,7 @@ class JoinOrderOptimization(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SqlQuery) -> JoinTree | None:
         """Performs the actual join ordering process.
 
         The join tree can be further annotated with an initial operator assignment, if that is an inherent part of
@@ -445,7 +445,7 @@ class JoinOrderOptimizationError(RuntimeError):
     """
 
     def __init__(self, query: SqlQuery, message: str = "") -> None:
-        super().__init__(f"Join order optimization failed for query {query}" if not message else message)
+        super().__init__(message if message else f"Join order optimization failed for query {query}")
         self.query = query
 
 
@@ -473,7 +473,7 @@ class PhysicalOperatorSelection(OptimizationStage, abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def select_physical_operators(self, query: SqlQuery, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SqlQuery, join_order: JoinTree | None) -> PhysicalOperatorAssignment:
         """Performs the operator assignment.
 
         Parameters
@@ -526,8 +526,8 @@ class ParameterGeneration(OptimizationStage, abc.ABC):
     def generate_plan_parameters(
         self,
         query: SqlQuery,
-        join_order: Optional[JoinTree],
-        operator_assignment: Optional[PhysicalOperatorAssignment],
+        join_order: JoinTree | None,
+        operator_assignment: PhysicalOperatorAssignment | None,
     ) -> PlanParameterization:
         """Executes the actual parameterization.
 
@@ -711,8 +711,8 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
     def generate_plan_parameters(
         self,
         query: SqlQuery,
-        join_order: Optional[JoinTree],
-        operator_assignment: Optional[PhysicalOperatorAssignment],
+        join_order: JoinTree | None,
+        operator_assignment: PhysicalOperatorAssignment | None,
     ) -> PlanParameterization:
         if join_order is None:
             return self.estimate_cardinalities(query)
@@ -938,11 +938,11 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
 
     def __init__(
         self,
-        database: Optional[Database] = None,
+        database: Database | None = None,
         *,
-        join_order_optimizer: Optional[JoinOrderOptimization] = None,
-        operator_selection: Optional[PhysicalOperatorSelection] = None,
-        plan_parameterization: Optional[ParameterGeneration] = None,
+        join_order_optimizer: JoinOrderOptimization | None = None,
+        operator_selection: PhysicalOperatorSelection | None = None,
+        plan_parameterization: ParameterGeneration | None = None,
     ) -> None:
         super().__init__()
         self.database = database if database is not None else DatabasePool.get_instance().current_database()
@@ -1010,7 +1010,7 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
 def as_complete_algorithm(
     stage: JoinOrderOptimization | PhysicalOperatorSelection | ParameterGeneration,
     *,
-    database: Optional[Database] = None,
+    database: Database | None = None,
 ) -> CompleteOptimizationAlgorithm:
     """Enables using a partial optimization stage in situations where a complete optimizer is expected.
 

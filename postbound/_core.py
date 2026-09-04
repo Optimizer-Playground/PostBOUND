@@ -7,7 +7,6 @@ from enum import Enum
 from numbers import Number
 from typing import (
     Literal,
-    Optional,
     SupportsFloat,
     SupportsIndex,
     TypeGuard,
@@ -89,7 +88,7 @@ class Cardinality(Number):
         self._valid = not self._nan and not self._inf
         self._value = round(value) if self._valid else -1
 
-    __slots__ = ("_nan", "_inf", "_valid", "_value")
+    __slots__ = ("_inf", "_nan", "_valid", "_value")
     __match_args__ = ("_valid", "_value")
 
     @property
@@ -769,19 +768,19 @@ class TableReference:
             raise ValueError("Full name or alias required")
 
     __slots__ = (
-        "_catalog",
-        "_schema",
-        "_full_name",
         "_alias",
-        "_virtual",
-        "_identifier",
-        "_normalized_catalog",
-        "_normalized_schema",
-        "_normalized_full_name",
-        "_normalized_alias",
-        "_normalized_identifier",
+        "_catalog",
+        "_full_name",
         "_hash_val",
+        "_identifier",
+        "_normalized_alias",
+        "_normalized_catalog",
+        "_normalized_full_name",
+        "_normalized_identifier",
+        "_normalized_schema",
+        "_schema",
         "_sql_repr",
+        "_virtual",
     )
     __match_args__ = ("full_name", "alias", "virtual", "schema", "catalog")
 
@@ -993,11 +992,11 @@ class TableReference:
     def update(
         self,
         *,
-        full_name: Optional[str] = None,
-        alias: Optional[str] = None,
-        virtual: Optional[bool] = None,
-        schema: Optional[str] = None,
-        catalog: Optional[str] = None,
+        full_name: str | None = None,
+        alias: str | None = None,
+        virtual: bool | None = None,
+        schema: str | None = None,
+        catalog: str | None = None,
     ) -> TableReference:
         full_name = self._full_name if full_name is None else full_name
         alias = self._alias if alias is None else alias
@@ -1122,7 +1121,7 @@ class ColumnReference:
         """
         return col.is_bound()
 
-    def __init__(self, name: str, table: Optional[TableReference] = None) -> None:
+    def __init__(self, name: str, table: TableReference | None = None) -> None:
         if not name:
             raise ValueError("Column name is required")
         self._name = name
@@ -1144,17 +1143,17 @@ class ColumnReference:
     @overload
     def __new__(cls, name: str, table: Literal[None]) -> ColumnReference: ...
 
-    def __new__(cls, name: str, table: Optional[TableReference] = None) -> ColumnReference:
+    def __new__(cls, name: str, table: TableReference | None = None) -> ColumnReference:
         if cls is not ColumnReference or table is None:
             return super().__new__(cls)
         return BoundColumnReference(name, table)
 
     __slots__ = (
-        "_name",
-        "_table",
-        "_normalized_name",
         "_hash_val",
+        "_name",
+        "_normalized_name",
         "_sql_repr",
+        "_table",
     )
     __match_args__ = ("name", "table")
 
@@ -1170,7 +1169,7 @@ class ColumnReference:
         return self._name
 
     @property
-    def table(self) -> Optional[TableReference]:
+    def table(self) -> TableReference | None:
         """Get the table to which this column belongs, if specified.
 
         Returns
@@ -1287,7 +1286,7 @@ class ColumnReference:
         return (self.__class__, (self._name, self._table))
 
     def __repr__(self) -> str:
-        return f"ColumnReference(name='{self.name}', table={repr(self.table)})"
+        return f"ColumnReference(name='{self.name}', table={self.table!r})"
 
     def __str__(self) -> str:
         return self._sql_repr

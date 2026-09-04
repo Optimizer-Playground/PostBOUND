@@ -145,7 +145,7 @@ class PlanTestCase(unittest.TestCase, abc.ABC):
             default_msg = f"Different number of child nodes at level {_cur_level}: {first_plan} vs. {second_plan}"
             raise AssertionError(default_msg if not message else f"{message} :: {default_msg}")
 
-        for left_child, right_child in zip(first_plan.children, second_plan.children):
+        for left_child, right_child in zip(first_plan.children, second_plan.children, strict=False):
             self.assertQueryExecutionPlansEqual(left_child, right_child, message=message, _cur_level=_cur_level + 1)
 
 

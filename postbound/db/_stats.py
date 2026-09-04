@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional
 
 from .._core import Cardinality, ColumnReference, TableReference, UnboundColumnError, VirtualTableError
 from ..qal import (
@@ -47,7 +46,7 @@ def _infer_histogram_bounds[T](
 
 class PreciseStatistics(DatabaseStatistics):
     @staticmethod
-    def create_cached(db: Database, *, offline_cache: Optional[Path] = None) -> PreciseStatistics:
+    def create_cached(db: Database, *, offline_cache: Path | None = None) -> PreciseStatistics:
         cached = ResultCache.create_cache(db, offline_cache=offline_cache)
         return PreciseStatistics(cached)
 

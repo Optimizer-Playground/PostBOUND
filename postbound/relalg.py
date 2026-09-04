@@ -40,7 +40,6 @@ import functools
 import operator
 import typing
 from collections.abc import Generator, Iterable, Mapping, Sequence
-from typing import Optional
 
 from . import transform, util
 from ._core import ColumnReference, TableReference
@@ -66,12 +65,12 @@ from .qal import (
     OrPredicate,
     PredicateVisitor,
     QuantifierExpression,
-    SqlQuery,
+    SelectStatement,
     SetOperator,
     SetQuery,
     SqlExpression,
     SqlExpressionVisitor,
-    SelectStatement,
+    SqlQuery,
     StarExpression,
     StaticValueExpression,
     SubqueryExpression,
@@ -100,7 +99,7 @@ class RelNode(abc.ABC):
     parse_relalg
     """
 
-    def __init__(self, parent_node: Optional[RelNode]) -> None:
+    def __init__(self, parent_node: RelNode | None) -> None:
         self._parent = parent_node
         self._sideways_pass: set[RelNode] = set()
         self._node_type = type(self).__name__
@@ -119,7 +118,7 @@ class RelNode(abc.ABC):
         return self._node_type
 
     @property
-    def parent_node(self) -> Optional[RelNode]:
+    def parent_node(self) -> RelNode | None:
         """Get the parent node of the current operator, if it exists.
 
         Returns
@@ -153,7 +152,7 @@ class RelNode(abc.ABC):
             return self
         return self._parent.root()
 
-    def leaf(self) -> Optional[RelNode]:
+    def leaf(self) -> RelNode | None:
         """Traverses the algebra tree downwards until a unique leaf node is found.
 
         Returns
@@ -467,7 +466,7 @@ class Selection(RelNode):
         input_node: RelNode,
         predicate: AbstractPredicate,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._input_node = input_node
         self._predicate = predicate
@@ -504,8 +503,8 @@ class Selection(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        predicate: Optional[AbstractPredicate] = None,
+        input_node: RelNode | None = None,
+        predicate: AbstractPredicate | None = None,
         as_root: bool = False,
     ) -> Selection:
         """Creates a new selection with modified attributes.
@@ -573,7 +572,7 @@ class CrossProduct(RelNode):
         left_input: RelNode,
         right_input: RelNode,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._left_input = left_input
         self._right_input = right_input
@@ -610,8 +609,8 @@ class CrossProduct(RelNode):
     def mutate(
         self,
         *,
-        left_input: Optional[RelNode] = None,
-        right_input: Optional[RelNode] = None,
+        left_input: RelNode | None = None,
+        right_input: RelNode | None = None,
         as_root: bool = False,
     ) -> CrossProduct:
         """Creates a new cross product with modified attributes.
@@ -681,7 +680,7 @@ class Union(RelNode):
         left_input: RelNode,
         right_input: RelNode,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._left_input = left_input
         self._right_input = right_input
@@ -718,8 +717,8 @@ class Union(RelNode):
     def mutate(
         self,
         *,
-        left_input: Optional[RelNode] = None,
-        right_input: Optional[RelNode] = None,
+        left_input: RelNode | None = None,
+        right_input: RelNode | None = None,
         as_root: bool = False,
     ) -> Union:
         """Creates a new union with modified attributes.
@@ -788,7 +787,7 @@ class Intersection(RelNode):
         left_input: RelNode,
         right_input: RelNode,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._left_input = left_input
         self._right_input = right_input
@@ -825,8 +824,8 @@ class Intersection(RelNode):
     def mutate(
         self,
         *,
-        left_input: Optional[RelNode] = None,
-        right_input: Optional[RelNode] = None,
+        left_input: RelNode | None = None,
+        right_input: RelNode | None = None,
         as_root: bool = False,
     ) -> Intersection:
         """Creates a new intersection with modified attributes.
@@ -896,7 +895,7 @@ class Difference(RelNode):
         left_input: RelNode,
         right_input: RelNode,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._left_input = left_input
         self._right_input = right_input
@@ -933,8 +932,8 @@ class Difference(RelNode):
     def mutate(
         self,
         *,
-        left_input: Optional[RelNode] = None,
-        right_input: Optional[RelNode] = None,
+        left_input: RelNode | None = None,
+        right_input: RelNode | None = None,
         as_root: bool = False,
     ) -> Difference:
         """Creates a new difference with modified attributes.
@@ -1002,8 +1001,8 @@ class Relation(RelNode):
         table: TableReference,
         provided_columns: Iterable[ColumnReference | ColumnExpression],
         *,
-        subquery_input: Optional[RelNode] = None,
-        parent_node: Optional[RelNode] = None,
+        subquery_input: RelNode | None = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._table = table
         self._provided_cols = frozenset(
@@ -1030,7 +1029,7 @@ class Relation(RelNode):
         return self._table
 
     @property
-    def subquery_input(self) -> Optional[RelNode]:
+    def subquery_input(self) -> RelNode | None:
         """Get the root node of the subquery that produces the input tuples for this relation.
 
         Returns
@@ -1057,9 +1056,9 @@ class Relation(RelNode):
     def mutate(
         self,
         *,
-        table: Optional[TableReference] = None,
-        provided_columns: Optional[Iterable[ColumnReference | ColumnExpression]] = None,
-        subquery_input: Optional[RelNode] = None,
+        table: TableReference | None = None,
+        provided_columns: Iterable[ColumnReference | ColumnExpression] | None = None,
+        subquery_input: RelNode | None = None,
         as_root: bool = False,
     ) -> Relation:
         """Creates a new relation with modified attributes.
@@ -1135,7 +1134,7 @@ class ThetaJoin(RelNode):
         right_input: RelNode,
         predicate: AbstractPredicate,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._left_input = left_input
         self._right_input = right_input
@@ -1184,9 +1183,9 @@ class ThetaJoin(RelNode):
     def mutate(
         self,
         *,
-        left_input: Optional[RelNode] = None,
-        right_input: Optional[RelNode] = None,
-        predicate: Optional[AbstractPredicate] = None,
+        left_input: RelNode | None = None,
+        right_input: RelNode | None = None,
+        predicate: AbstractPredicate | None = None,
         as_root: bool = False,
     ) -> ThetaJoin:
         """Creates a new theta join with modified attributes.
@@ -1254,7 +1253,7 @@ class Projection(RelNode):
         input_node: RelNode,
         targets: Sequence[SqlExpression],
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._input_node = input_node
         self._targets = tuple(targets)
@@ -1291,8 +1290,8 @@ class Projection(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        targets: Optional[Sequence[SqlExpression]] = None,
+        input_node: RelNode | None = None,
+        targets: Sequence[SqlExpression] | None = None,
         as_root: bool = False,
     ) -> Projection:
         """Creates a new projection with modified attributes.
@@ -1357,8 +1356,8 @@ class Grouping(RelNode):
         input_node: RelNode,
         group_columns: Sequence[SqlExpression],
         *,
-        aggregates: Optional[dict[frozenset[SqlExpression], frozenset[FunctionExpression]]] = None,
-        parent_node: Optional[RelNode] = None,
+        aggregates: dict[frozenset[SqlExpression], frozenset[FunctionExpression]] | None = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         if not group_columns and not aggregates:
             raise ValueError("Either group columns or aggregation functions must be specified!")
@@ -1417,10 +1416,10 @@ class Grouping(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        group_columns: Optional[Sequence[SqlExpression]] = None,
-        aggregates: Optional[dict[frozenset[SqlExpression], frozenset[FunctionExpression]]] = None,
-        parent: Optional[RelNode] = None,
+        input_node: RelNode | None = None,
+        group_columns: Sequence[SqlExpression] | None = None,
+        aggregates: dict[frozenset[SqlExpression], frozenset[FunctionExpression]] | None = None,
+        parent: RelNode | None = None,
         as_root: bool = False,
     ) -> Grouping:
         """Creates a new group by with modified attributes.
@@ -1504,7 +1503,7 @@ class Rename(RelNode):
         input_node: RelNode,
         mapping: dict[ColumnReference, ColumnReference],
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         # TODO: check types + add provided / required expressions method
         self._input_node = input_node
@@ -1548,8 +1547,8 @@ class Rename(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        mapping: Optional[dict[ColumnReference, ColumnReference]] = None,
+        input_node: RelNode | None = None,
+        mapping: dict[ColumnReference, ColumnReference] | None = None,
         as_root: bool = False,
     ) -> Rename:
         """Creates a new rename with modified attributes.
@@ -1623,7 +1622,7 @@ class Sort(RelNode):
         input_node: RelNode,
         sorting: Sequence[tuple[SqlExpression, SortDirection] | SqlExpression],
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._input_node = input_node
         self._sorting = tuple(
@@ -1665,8 +1664,8 @@ class Sort(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        sorting: Optional[Sequence[tuple[SqlExpression, SortDirection] | SqlExpression]] = None,
+        input_node: RelNode | None = None,
+        sorting: Sequence[tuple[SqlExpression, SortDirection] | SqlExpression] | None = None,
         as_root: bool = False,
     ) -> Sort:
         """Creates a new sort with modified attributes.
@@ -1732,7 +1731,7 @@ class Map(RelNode):
         input_node: RelNode,
         mapping: Mapping[frozenset[SqlExpression | ColumnReference], frozenset[SqlExpression]],
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._input_node = input_node
         self._mapping = util.frozendict(
@@ -1782,8 +1781,8 @@ class Map(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        mapping: Optional[dict[frozenset[SqlExpression | ColumnReference], frozenset[SqlExpression]]] = None,
+        input_node: RelNode | None = None,
+        mapping: dict[frozenset[SqlExpression | ColumnReference], frozenset[SqlExpression]] | None = None,
         as_root: bool = False,
     ) -> Map:
         """Creates a new map with modified attributes.
@@ -1856,7 +1855,7 @@ class DuplicateElimination(RelNode):
     relational algebra dialects support ordering nevertheless.
     """
 
-    def __init__(self, input_node: RelNode, *, parent_node: Optional[RelNode] = None) -> None:
+    def __init__(self, input_node: RelNode, *, parent_node: RelNode | None = None) -> None:
         self._input_node = input_node
         super().__init__(parent_node)
 
@@ -1870,7 +1869,7 @@ class DuplicateElimination(RelNode):
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_duplicate_elim(self)
 
-    def mutate(self, *, input_node: Optional[RelNode] = None, as_root: bool = False) -> DuplicateElimination:
+    def mutate(self, *, input_node: RelNode | None = None, as_root: bool = False) -> DuplicateElimination:
         """Creates a new duplicate elimination with modified attributes.
 
         Parameters
@@ -1931,9 +1930,9 @@ class SemiJoin(RelNode):
         self,
         input_node: RelNode,
         subquery_node: SubqueryScan,
-        predicate: Optional[AbstractPredicate] = None,
+        predicate: AbstractPredicate | None = None,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         # TODO: dependent iff predicate is None
         self._input_node = input_node
@@ -1968,7 +1967,7 @@ class SemiJoin(RelNode):
         return self._subquery_node
 
     @property
-    def predicate(self) -> Optional[AbstractPredicate]:
+    def predicate(self) -> AbstractPredicate | None:
         """Get the match condition to determine the join partners.
 
         If there is no dedicated predicate, tuples from the `input_node` match, if any tuple is emitted by the
@@ -2004,9 +2003,9 @@ class SemiJoin(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        subquery_node: Optional[SubqueryScan] = None,
-        predicate: Optional[AbstractPredicate] = None,
+        input_node: RelNode | None = None,
+        subquery_node: SubqueryScan | None = None,
+        predicate: AbstractPredicate | None = None,
         as_root: bool = False,
     ) -> SemiJoin:
         """Creates a new semi join with modified attributes.
@@ -2084,9 +2083,9 @@ class AntiJoin(RelNode):
         self,
         input_node: RelNode,
         subquery_node: SubqueryScan,
-        predicate: Optional[AbstractPredicate] = None,
+        predicate: AbstractPredicate | None = None,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         # TODO: dependent iff predicate is None
         self._input_node = input_node
@@ -2121,7 +2120,7 @@ class AntiJoin(RelNode):
         return self._subquery_node
 
     @property
-    def predicate(self) -> Optional[AbstractPredicate]:
+    def predicate(self) -> AbstractPredicate | None:
         """Get the match condition to determine the join partners.
 
         If there is no dedicated predicate, tuples from the `input_node` match, if any tuple is emitted by the
@@ -2157,9 +2156,9 @@ class AntiJoin(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        subquery_node: Optional[SubqueryScan] = None,
-        predicate: Optional[AbstractPredicate] = None,
+        input_node: RelNode | None = None,
+        subquery_node: SubqueryScan | None = None,
+        predicate: AbstractPredicate | None = None,
         as_root: bool = False,
     ) -> AntiJoin:
         """Creates a new anti join with modified attributes.
@@ -2235,7 +2234,7 @@ class SubqueryScan(RelNode):
         input_node: RelNode,
         subquery: SelectStatement,
         *,
-        parent_node: Optional[RelNode] = None,
+        parent_node: RelNode | None = None,
     ) -> None:
         self._input_node = input_node
         self._subquery = subquery
@@ -2278,8 +2277,8 @@ class SubqueryScan(RelNode):
     def mutate(
         self,
         *,
-        input_node: Optional[RelNode] = None,
-        subquery: Optional[SelectStatement] = None,
+        input_node: RelNode | None = None,
+        subquery: SelectStatement | None = None,
         as_root: bool = False,
     ) -> SubqueryScan:
         """Creates a new subquery scan with modified attributes.
@@ -2571,7 +2570,7 @@ class _RelNodeUpdateManager:
         assert updated_child is not None
         return updated_child
 
-    def _update_node_working_set(self, node: RelNode, *, working_set: Optional[list[RelNode]] = None) -> None:
+    def _update_node_working_set(self, node: RelNode, *, working_set: list[RelNode] | None = None) -> None:
         """Utility method to quickly include all relevant parent nodes into a node working set.
 
         Parameters
@@ -2804,7 +2803,7 @@ class _SubqueryDetector(SqlExpressionVisitor[_SubquerySet], PredicateVisitor[_Su
         )
 
 
-class _BaseTableLookup(SqlExpressionVisitor[Optional[TableReference]], PredicateVisitor[TableReference]):
+class _BaseTableLookup(SqlExpressionVisitor[TableReference | None], PredicateVisitor[TableReference]):
     """Handler to determine the base table in an arbitrarily deep predicate or expression hierarchy.
 
     This service is designed to traverse filter predicates or expressions operating on a single base table and provides exactly
@@ -2854,45 +2853,45 @@ class _BaseTableLookup(SqlExpressionVisitor[Optional[TableReference]], Predicate
     def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> TableReference:
         return predicate.expression.accept_visitor(self)
 
-    def visit_static_value_expr(self, expression: StaticValueExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_static_value_expr(self, expression: StaticValueExpression, *args, **kwargs) -> TableReference | None:
         return None
 
-    def visit_column_expr(self, expression: ColumnExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_column_expr(self, expression: ColumnExpression, *args, **kwargs) -> TableReference | None:
         return expression.column.table
 
-    def visit_cast_expr(self, expression: CastExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_cast_expr(self, expression: CastExpression, *args, **kwargs) -> TableReference | None:
         return expression.casted_expression.accept_visitor(self)
 
-    def visit_function_expr(self, expression: FunctionExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_function_expr(self, expression: FunctionExpression, *args, **kwargs) -> TableReference | None:
         referenced_tables = {argument.accept_visitor(self) for argument in expression.arguments}
         return self._fetch_valid_base_tables(referenced_tables, accept_empty=True)
 
-    def visit_math_expr(self, expression: MathExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_math_expr(self, expression: MathExpression, *args, **kwargs) -> TableReference | None:
         base_tables = {child.accept_visitor(self) for child in expression.iterchildren()}
         return self._fetch_valid_base_tables(base_tables)
 
-    def visit_star_expr(self, expression: StarExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_star_expr(self, expression: StarExpression, *args, **kwargs) -> TableReference | None:
         return expression.from_table
 
-    def visit_subquery_expr(self, expression: SubqueryExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_subquery_expr(self, expression: SubqueryExpression, *args, **kwargs) -> TableReference | None:
         subquery = expression.query
         if not subquery.is_dependent():
             return None
         dependent_tables = subquery.unbound_tables()
         return self._fetch_valid_base_tables(dependent_tables, accept_empty=True)
 
-    def visit_window_expr(self, expression: WindowExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_window_expr(self, expression: WindowExpression, *args, **kwargs) -> TableReference | None:
         # base tables can only appear in predicates and window functions are limited to SELECT statements
         return None
 
-    def visit_case_expr(self, expression: CaseExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_case_expr(self, expression: CaseExpression, *args, **kwargs) -> TableReference | None:
         referenced_tables = {child.accept_visitor(self) for child in expression.iterchildren()}
         return self._fetch_valid_base_tables(referenced_tables, accept_empty=True)
 
-    def visit_quantifier_expr(self, expr: QuantifierExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_quantifier_expr(self, expr: QuantifierExpression, *args, **kwargs) -> TableReference | None:
         return expr.expression.accept_visitor(self)
 
-    def visit_array_expr(self, expression: ArrayExpression, *args, **kwargs) -> Optional[TableReference]:
+    def visit_array_expr(self, expression: ArrayExpression, *args, **kwargs) -> TableReference | None:
         referenced_tables = {element.accept_visitor(self) for element in expression.elements}
         return self._fetch_valid_base_tables(referenced_tables, accept_empty=True)
 
@@ -2901,7 +2900,7 @@ class _BaseTableLookup(SqlExpressionVisitor[Optional[TableReference]], Predicate
 
     def _fetch_valid_base_tables(
         self, base_tables: set[TableReference | None], *, accept_empty: bool = False
-    ) -> Optional[TableReference]:
+    ) -> TableReference | None:
         """Handler to extract the actual base table from a set of candidate tables.
 
         Parameters
@@ -3028,9 +3027,7 @@ def _determine_predicate_phase(predicate: AbstractPredicate) -> EvaluationPhase:
     return EvaluationPhase.Join if isinstance(predicate, BinaryPredicate) else EvaluationPhase.PostJoin
 
 
-def _filter_eval_phase(
-    predicate: AbstractPredicate, expected_eval_phase: EvaluationPhase
-) -> Optional[AbstractPredicate]:
+def _filter_eval_phase(predicate: AbstractPredicate, expected_eval_phase: EvaluationPhase) -> AbstractPredicate | None:
     """Provides all parts of predicate that can be evaluated during a specific logical query execution phase.
 
     The following rules are used to determine matching (sub-)predicates:
@@ -3121,7 +3118,7 @@ class _ImplicitRelalgParser:
         self,
         query: SelectStatement,
         *,
-        provided_base_tables: Optional[dict[TableReference, RelNode]] = None,
+        provided_base_tables: dict[TableReference, RelNode] | None = None,
     ) -> None:
         self._query = query
         self._base_table_fragments: dict[TableReference, RelNode] = {}
@@ -3244,7 +3241,7 @@ class _ImplicitRelalgParser:
             return self._base_table_fragments[table]
         return self._provided_base_tables[table]
 
-    def _add_table(self, table: TableReference, *, input_node: Optional[RelNode] = None) -> RelNode:
+    def _add_table(self, table: TableReference, *, input_node: RelNode | None = None) -> RelNode:
         """Generates and stores a new base table relation node for a specific table.
 
         The relation will be stored in `self._base_table_fragments`.
@@ -3415,7 +3412,7 @@ class _ImplicitRelalgParser:
         self,
         predicate: AbstractPredicate,
         *,
-        input_node: Optional[RelNode] = None,
+        input_node: RelNode | None = None,
         eval_phase: EvaluationPhase = EvaluationPhase.BaseTable,
     ) -> RelNode:
         """Inserts a selection into the corresponding relational algebra fragment.
@@ -3553,7 +3550,7 @@ class _ImplicitRelalgParser:
             if pure_in_values:
                 reduced_predicate = InPredicate(predicate.column, pure_in_values)
                 final_fragment = Selection(final_fragment, reduced_predicate)
-            for subquery_value, detected_subqueries in subquery_in_values:
+            for subquery_value, _detected_subqueries in subquery_in_values:
                 final_fragment = self._add_expression(
                     subquery_value,
                     input_node=final_fragment,
@@ -3717,7 +3714,7 @@ class _ImplicitRelalgParser:
         *,
         input_node: RelNode,
         subquery_target: typing.Literal["semijoin", "antijoin", "scalar", "in"] = "scalar",
-        in_column: Optional[SqlExpression] = None,
+        in_column: SqlExpression | None = None,
     ) -> RelNode:
         """Generates the appropriate algebra fragment to execute a specific expression.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import json
 import math
 import textwrap
@@ -10,7 +11,7 @@ from collections import UserString
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, overload
+from typing import Any, overload
 
 import quacklab
 
@@ -95,7 +96,7 @@ class DuckDBInterface(Database):
         query: SqlQuery | str,
         *,
         raw: bool = False,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> Any:
         if isinstance(query, SqlQuery) and query.hints and query.hints.preparatory_statements:
             for preparatory_statement in query.hints.preparatory_statements:
@@ -120,7 +121,7 @@ class DuckDBInterface(Database):
 
         return raw_result if raw else simplify_result_set(raw_result)
 
-    def execute_with_timeout(self, query: SqlQuery | str, *, timeout: float = 60.0) -> Optional[ResultSet]:
+    def execute_with_timeout(self, query: SqlQuery | str, *, timeout: float = 60.0) -> ResultSet | None:
         if isinstance(query, SqlQuery):
             query = self._hinting.format_query(query)
 
@@ -141,7 +142,7 @@ class DuckDBInterface(Database):
     def last_query_runtime(self) -> float:
         return self._last_query_runtime
 
-    def time_query(self, query: SqlQuery, *, timeout: Optional[float] = None) -> float:
+    def time_query(self, query: SqlQuery, *, timeout: float | None = None) -> float:
         self.execute_query(query, raw=True, timeout=timeout)
         return self.last_query_runtime()
 
@@ -173,10 +174,8 @@ class DuckDBInterface(Database):
         self._cur = quacklab.connect(self._dbfile, read_only=self._read_only)
 
     def reset_connection(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:
-            pass
 
         self._cur = quacklab.connect(self._dbfile, read_only=self._read_only)
 
@@ -389,7 +388,7 @@ class DuckDBStatistics(DatabaseStatistics):
         super().__init__()
         self._db = db
 
-    def total_rows(self, table: TableReference) -> Optional[Cardinality]:
+    def total_rows(self, table: TableReference) -> Cardinality | None:
         catalog_placeholder = "?" if table.catalog else "current_database()"
         schema_placeholder = "?" if table.schema else "current_schema()"
 
@@ -452,7 +451,7 @@ class DuckDBStatistics(DatabaseStatistics):
         return PreciseStatistics(self._db).histogram(column, n_bins=100, interpolation=interpolation)
 
 
-def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> Optional[TableReference]:
+def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> TableReference | None:
     tables = query.tables()
     relname = scan_node.get("extra_info", {}).get("Table", "")
     if not relname:
@@ -485,6 +484,7 @@ def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> Optional[TableRe
     if 0.99 * score_ranking[0] <= score_ranking[1]:
         warnings.warn(
             f"Could not unambiguously bind scan node to a table. Candidates are {scores}.",
+            stacklevel=2,
         )
         return None
 
@@ -492,7 +492,7 @@ def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> Optional[TableRe
     return best_match
 
 
-def parse_duckdb_plan(raw_plan: dict | str, *, query: Optional[SqlQuery] = None) -> QueryPlan:
+def parse_duckdb_plan(raw_plan: dict | str, *, query: SqlQuery | None = None) -> QueryPlan:
     """Parses a DuckDB query plan from its JSON representation.
 
     The query can be supplied to help with binding scan nodes to their corresponding tables (see Notes).
@@ -531,7 +531,7 @@ def parse_duckdb_plan(raw_plan: dict | str, *, query: Optional[SqlQuery] = None)
         case "PROJECTION" | "FILTER" | "UNGROUPED_AGGREGATE" | "PERFECT_HASH_GROUP_BY":
             pass
         case _:
-            warnings.warn(f"Unknown node type: {node_type}, ({extras})")
+            warnings.warn(f"Unknown node type: {node_type}, ({extras})", stacklevel=2)
             pass
 
     if node_type in ScanOperator:
@@ -585,9 +585,9 @@ class DuckDBOptimizer(OptimizerInterface):
     def analyze_plan(self, query: SqlQuery) -> QueryPlan: ...
 
     @overload
-    def analyze_plan(self, query: SqlQuery, *, timeout: float) -> Optional[QueryPlan]: ...
+    def analyze_plan(self, query: SqlQuery, *, timeout: float) -> QueryPlan | None: ...
 
-    def analyze_plan(self, query: SqlQuery, *, timeout: Optional[float] = None) -> Optional[QueryPlan]:
+    def analyze_plan(self, query: SqlQuery, *, timeout: float | None = None) -> QueryPlan | None:
         query = transform.as_explain_analyze(query)
 
         try:
@@ -600,7 +600,7 @@ class DuckDBOptimizer(OptimizerInterface):
         parsed = json.loads(raw_explain)
         return parse_duckdb_plan(parsed[0], query=query)
 
-    def parse_plan(self, plan: Any, *, query: Optional[SqlQuery] = None) -> QueryPlan:
+    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
         # Similar to the Postgres implementation of parse_plan(), we try to be gracefull
         # and accept both simplified and raw versions of the execute_query() output.
         # In essence, we always try to break the input down to a plain dictionary and
@@ -703,11 +703,11 @@ class DuckDBHintService(HintService):
     def generate_hints(
         self,
         query: SqlQuery,
-        plan: Optional[QueryPlan] = None,
+        plan: QueryPlan | None = None,
         *,
-        join_order: Optional[JoinTree] = None,
-        physical_operators: Optional[PhysicalOperatorAssignment] = None,
-        plan_parameters: Optional[PlanParameterization] = None,
+        join_order: JoinTree | None = None,
+        physical_operators: PhysicalOperatorAssignment | None = None,
+        plan_parameters: PlanParameterization | None = None,
     ) -> SqlQuery:
         adapted_query = query
 

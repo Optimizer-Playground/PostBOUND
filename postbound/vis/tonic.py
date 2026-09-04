@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-from typing import Optional
 
 import graphviz as gv
 
@@ -34,8 +33,8 @@ def _make_node_label(identifier: tonic.QepsIdentifier, node: tonic.QEPsNode) -> 
 def plot_tonic_qeps(
     qeps: tonic.QEPsNode | tonic.QEPSynopsis,
     *,
-    _current_node: Optional[str] = None,
-    _current_graph: Optional[gv.Digraph] = None,
+    _current_node: str | None = None,
+    _current_graph: gv.Digraph | None = None,
 ) -> gv.Digraph:
     if not _current_graph:
         _current_graph = gv.Digraph()

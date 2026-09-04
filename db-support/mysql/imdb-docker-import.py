@@ -74,7 +74,7 @@ def main():
             col_name, nullable_col = raw_column_info.split()
             column_info[col_name] = nullable_col == "YES"
 
-        virtual_cols = ", ".join(f"@v{col_name}" for col_name in column_info.keys())
+        virtual_cols = ", ".join(f"@v{col_name}" for col_name in column_info)
         col_wrapping = ",\n".join(
             f"{col_name} = NULLIF(@v{col_name}, '')" if nullable_col else f"{col_name} = @v{col_name}"
             for col_name, nullable_col in column_info.items()

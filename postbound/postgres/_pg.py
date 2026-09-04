@@ -20,7 +20,7 @@ from collections.abc import Iterable, Sized
 from dataclasses import dataclass
 from multiprocessing import connection as mp_conn
 from pathlib import Path
-from typing import Any, Literal, Optional, TextIO, overload
+from typing import Any, Literal, TextIO, overload
 
 import psycopg
 import psycopg.rows
@@ -182,9 +182,9 @@ class _PsycopgTimestampTzDumper(psycopg_datetime.DatetimeDumper):
 class _PsycopgTimestampTzLoader(psycopg_datetime.TimestamptzLoader):
     def load(self, data):
         if data == b"infinity":
-            return datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+            return datetime.datetime.max.replace(tzinfo=datetime.UTC)
         elif data == b"-infinity":
-            return datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+            return datetime.datetime.min.replace(tzinfo=datetime.UTC)
 
         try:
             return super().load(data)
@@ -194,7 +194,7 @@ class _PsycopgTimestampTzLoader(psycopg_datetime.TimestamptzLoader):
             msg = e.args[0]
             if not isinstance(msg, str) or not msg.startswith("timestamp too large"):
                 raise e
-            return datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+            return datetime.datetime.max.replace(tzinfo=datetime.UTC)
 
 
 class _PsycopgIntervalLoader(psycopg_datetime.IntervalLoader):
@@ -275,12 +275,12 @@ class PostgresInterface(Database):
         self,
         query: SqlQuery | str,
         *,
-        plan: Optional[QueryPlan] = None,
-        join_order: Optional[JoinTree] = None,
-        physical_operators: Optional[PhysicalOperatorAssignment] = None,
-        plan_parameters: Optional[PlanParameterization] = None,
+        plan: QueryPlan | None = None,
+        join_order: JoinTree | None = None,
+        physical_operators: PhysicalOperatorAssignment | None = None,
+        plan_parameters: PlanParameterization | None = None,
         raw: bool = False,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> Any:
         # NB: some of the execution logic is duplicated in TimeoutQueryExecutor.execute_query.
         # Make sure to keep both implementations in sync.
@@ -328,7 +328,7 @@ class PostgresInterface(Database):
                     str(e),
                 ]
             )
-            raise DatabaseServerError(msg, e)
+            raise DatabaseServerError(msg, e) from e
         except psycopg.Error as e:
             msg = "\n".join(
                 [
@@ -339,11 +339,11 @@ class PostgresInterface(Database):
                     str(e),
                 ]
             )
-            raise DatabaseUserError(msg, e)
+            raise DatabaseUserError(msg, e) from e
 
         return query_result if raw else simplify_result_set(query_result)
 
-    def execute_with_timeout(self, query: SqlQuery | str, timeout: float = 60.0) -> Optional[ResultSet]:
+    def execute_with_timeout(self, query: SqlQuery | str, timeout: float = 60.0) -> ResultSet | None:
         try:
             result = self.execute_query(query, timeout=timeout, raw=True)
             return result
@@ -353,7 +353,7 @@ class PostgresInterface(Database):
     def last_query_runtime(self) -> float:
         return self._last_query_runtime
 
-    def time_query(self, query: SqlQuery, *, timeout: Optional[float] = None) -> float:
+    def time_query(self, query: SqlQuery, *, timeout: float | None = None) -> float:
         self.execute_query(query, raw=True, timeout=timeout)
         return self.last_query_runtime()
 
@@ -396,7 +396,7 @@ class PostgresInterface(Database):
         data_dir = self._cursor.fetchone()[0]  # type: ignore
         return Path(data_dir)
 
-    def logfile(self) -> Optional[Path]:
+    def logfile(self) -> Path | None:
         """Get the log file of the (local) Postgres server."""
         proc_path = Path(f"/proc/{self.backend_pid()}/fd/1")
         if not proc_path.exists() or not proc_path.is_symlink():
@@ -498,7 +498,7 @@ class PostgresInterface(Database):
 
     def prewarm_tables(
         self,
-        tables: Optional[TableReference | Iterable[TableReference]] = None,
+        tables: TableReference | Iterable[TableReference] | None = None,
         *more_tables: TableReference,
         exclude_table_pages: bool = False,
         include_primary_index: bool = True,
@@ -576,7 +576,7 @@ class PostgresInterface(Database):
 
     def cooldown_tables(
         self,
-        tables: Optional[TableReference | Iterable[TableReference]] = None,
+        tables: TableReference | Iterable[TableReference] | None = None,
         *more_tables: TableReference,
         exclude_table_pages: bool = False,
         include_primary_index: bool = True,
@@ -779,11 +779,11 @@ class PostgresInterface(Database):
     def _apply_query_hints(
         self,
         query: str | SqlQuery,
-        plan: Optional[QueryPlan],
+        plan: QueryPlan | None,
         *,
-        join_order: Optional[JoinTree],
-        physical_operators: Optional[PhysicalOperatorAssignment],
-        plan_parameters: Optional[PlanParameterization],
+        join_order: JoinTree | None,
+        physical_operators: PhysicalOperatorAssignment | None,
+        plan_parameters: PlanParameterization | None,
     ) -> str | SqlQuery:
         if isinstance(query, str):
             # XXX: should we rather parse the query here?
@@ -893,7 +893,7 @@ class PostgresSchemaInterface(DatabaseSchema):
         candidate_tables: Iterable[TableReference],
         *,
         expect_match: bool = False,
-    ) -> Optional[TableReference]:
+    ) -> TableReference | None:
         if not isinstance(candidate_tables, Sized):
             candidate_tables = list(candidate_tables)
         candidate_tables = set(candidate_tables) if len(candidate_tables) > 5 else list(candidate_tables)
@@ -956,7 +956,7 @@ class PostgresSchemaInterface(DatabaseSchema):
 
         return {row[0] for row in result_set}
 
-    def indexed_column(self, index: str, *, schema: str = "public") -> Optional[BoundColumnReference]:
+    def indexed_column(self, index: str, *, schema: str = "public") -> BoundColumnReference | None:
         """Retrieves the column that is indexed by a specific index.
 
         Returns
@@ -1249,9 +1249,9 @@ class PostgresStatisticsInterface(DatabaseStatistics):
 
     def update_statistics(
         self,
-        columns: Optional[ColumnReference | Iterable[ColumnReference]] = None,
+        columns: ColumnReference | Iterable[ColumnReference] | None = None,
         *,
-        tables: Optional[TableReference | Iterable[TableReference]] = None,
+        tables: TableReference | Iterable[TableReference] | None = None,
         perfect_mcv: bool = False,
         perfect_n_distinct: bool = False,
         verbose: bool = False,
@@ -1346,7 +1346,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
                                                     """)
             self._db.cursor().execute(distinct_update_query)  # type: ignore - weird psycopg stuff
 
-    def total_rows(self, table: TableReference) -> Optional[Cardinality]:
+    def total_rows(self, table: TableReference) -> Cardinality | None:
         schema = table.schema or "public"
         count_query = "SELECT reltuples FROM pg_class WHERE oid = %s::regclass AND relnamespace = %s::regnamespace"
         self._db.cursor().execute(count_query, (table.full_name, schema))
@@ -1356,7 +1356,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         count = result_set[0]
         return Cardinality.of(count)
 
-    def num_distinct(self, column: ColumnReference) -> Optional[int]:
+    def num_distinct(self, column: ColumnReference) -> int | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
         elif column.table.virtual:
@@ -1395,7 +1395,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
 
         return int(-1 * n_rows * dist_values) + null_correction
 
-    def null_frac(self, column: ColumnReference) -> Optional[float]:
+    def null_frac(self, column: ColumnReference) -> float | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
         elif column.table.virtual:
@@ -1424,7 +1424,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
             )
         return PreciseStatistics(self._db).min_max(column)
 
-    def most_common_values(self, column: ColumnReference) -> Optional[MostCommonValues]:
+    def most_common_values(self, column: ColumnReference) -> MostCommonValues | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
         elif column.table.virtual:
@@ -1488,7 +1488,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
 
     def histogram(
         self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni"
-    ) -> Optional[Histogram]:
+    ) -> Histogram | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
         elif column.table.virtual:
@@ -1497,11 +1497,11 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         attribute_converter = self._array_cast(column)
         schema = column.table.schema or "public"
 
-        query_template = """
-            SELECT UNNEST(histogram_bounds::text::{conv})
+        query_template = f"""
+            SELECT UNNEST(histogram_bounds::text::{attribute_converter})
             FROM pg_stats
             WHERE schemaname = %s AND tablename = %s AND attname = %s
-            """.format(conv=attribute_converter)
+            """
 
         self._db.cursor().execute(
             query_template,  # type: ignore - weird psycopg stuff
@@ -1712,9 +1712,9 @@ def _walk_join_order(node: JoinTree) -> str:
 
 def _generate_pghintplan_hints(
     query: SqlQuery,
-    join_order: Optional[JoinTree],
-    phys_ops: Optional[PhysicalOperatorAssignment],
-    plan_params: Optional[PlanParameterization],
+    join_order: JoinTree | None,
+    phys_ops: PhysicalOperatorAssignment | None,
+    plan_params: PlanParameterization | None,
     *,
     pg_instance: PostgresInterface,
 ) -> Hint:
@@ -1820,9 +1820,9 @@ def _generate_pghintplan_hints(
 
 
 def _generate_pglab_hints(
-    join_order: Optional[JoinTree],
-    phys_ops: Optional[PhysicalOperatorAssignment],
-    plan_params: Optional[PlanParameterization],
+    join_order: JoinTree | None,
+    phys_ops: PhysicalOperatorAssignment | None,
+    plan_params: PlanParameterization | None,
 ) -> Hint:
     hints: list[str] = []
     prep_statements: list[str] = []
@@ -2119,11 +2119,11 @@ class PostgresHintService(HintService):
     def generate_hints(
         self,
         query: SqlQuery,
-        plan: Optional[QueryPlan] = None,
+        plan: QueryPlan | None = None,
         *,
-        join_order: Optional[JoinTree] = None,
-        physical_operators: Optional[PhysicalOperatorAssignment] = None,
-        plan_parameters: Optional[PlanParameterization] = None,
+        join_order: JoinTree | None = None,
+        physical_operators: PhysicalOperatorAssignment | None = None,
+        plan_parameters: PlanParameterization | None = None,
     ) -> SqlQuery:
         self._assert_active_backend()
 
@@ -2354,12 +2354,12 @@ class PostgresOptimizer(OptimizerInterface):
     def analyze_plan(self, query: SqlQuery) -> QueryPlan: ...
 
     @overload
-    def analyze_plan(self, query: SqlQuery, *, timeout: float) -> Optional[QueryPlan]: ...
+    def analyze_plan(self, query: SqlQuery, *, timeout: float) -> QueryPlan | None: ...
 
     @overload
     def analyze_plan(self, query: SqlQuery, *, timeout: Literal[None]) -> QueryPlan: ...
 
-    def analyze_plan(self, query: SqlQuery, *, timeout: Optional[float] = None) -> Optional[QueryPlan]:
+    def analyze_plan(self, query: SqlQuery, *, timeout: float | None = None) -> QueryPlan | None:
         query = transform.as_explain_analyze(query)
 
         try:
@@ -2370,7 +2370,7 @@ class PostgresOptimizer(OptimizerInterface):
         query_plan = PostgresExplainPlan(raw_query_plan)
         return query_plan.as_qep()
 
-    def parse_plan(self, plan: Any, *, query: Optional[SqlQuery] = None) -> QueryPlan:
+    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
         # We should be graceful and handle both simplified and unsimplified
         # versions of the execute_query() output. This only works because PostgresExplainPlan
         # is also cooperative and excepts a dictionary and a list-of-dictionary input as well
@@ -2627,7 +2627,7 @@ def _timeout_query_worker(
                     str(e),
                 ]
             )
-            raise DatabaseServerError(msg, e)
+            raise DatabaseServerError(msg, e) from e
         except psycopg.Error as e:
             msg = "\n".join(
                 [
@@ -2638,7 +2638,7 @@ def _timeout_query_worker(
                     str(e),
                 ]
             )
-            raise DatabaseUserError(msg, e)
+            raise DatabaseUserError(msg, e) from e
 
         runtime = (end_time - start_time) / 10**9
         pg_instance._last_query_runtime = runtime
@@ -2685,7 +2685,7 @@ class _TimeoutQueryExecutor:
     refreshed. Any direct references to these instances should no longer be used.
     """
 
-    def __init__(self, postgres_instance: Optional[PostgresInterface] = None) -> None:
+    def __init__(self, postgres_instance: PostgresInterface | None = None) -> None:
         self._pg_instance: PostgresInterface
         if postgres_instance is not None:
             self._pg_instance = postgres_instance
@@ -2879,7 +2879,7 @@ def _ini_config_reader(file: TextIO, *, path: Path) -> dict[str, str]:
 def _read_connection_from_file(config_file: Path) -> str:
     extension = config_file.suffix.lower()
     if extension == "":
-        with open(config_file, "r") as f:
+        with open(config_file) as f:
             return f.readline().strip()
 
     match extension:
@@ -3002,7 +3002,7 @@ def connect(
             )
         connect_string = _read_connection_from_file(config_file)
     elif Path(".psycopg_connection").is_file():
-        with open(".psycopg_connection", "r") as f:
+        with open(".psycopg_connection") as f:
             connect_string = f.readline().strip()
     elif os.getenv("PGDATABASE"):
         warnings.warn(

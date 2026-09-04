@@ -6,7 +6,7 @@ import os
 import pathlib
 import subprocess
 from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any
 
 
 class ProcResult(str):
@@ -52,7 +52,7 @@ class ProcResult(str):
         return self.exit_code == 0
 
     def __repr__(self) -> str:
-        return f"ProcResult(exit_code={self.exit_code}, stdout={repr(self.out_data)}, stderr={repr(self.err_data)})"
+        return f"ProcResult(exit_code={self.exit_code}, stdout={self.out_data!r}, stderr={self.err_data!r})"
 
     def __str__(self) -> str:
         return self.out_data
@@ -61,7 +61,7 @@ class ProcResult(str):
 def run_cmd(
     cmd: str | Iterable[Any],
     *args,
-    work_dir: Optional[str | pathlib.Path] = None,
+    work_dir: str | pathlib.Path | None = None,
     **kwargs,
 ) -> ProcResult:
     """Executes an arbitrary external command.

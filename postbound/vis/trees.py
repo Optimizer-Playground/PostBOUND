@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Optional
 
 import graphviz as gv
 
@@ -35,7 +34,7 @@ def plot_tree(
     out_path: str = "",
     out_format: str = "svg",
     node_id_generator: Callable[[T], int] = hash,
-    _graph: Optional[gv.Graph] = None,
+    _graph: gv.Graph | None = None,
     **kwargs,
 ) -> gv.Graph:
     """Transforms an arbitrary tree into a Graphviz graph. The tree traversal is achieved via callback functions.

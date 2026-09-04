@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import natsort
 import numpy as np
@@ -199,11 +199,11 @@ class QueryPreparation:
         *,
         projection: Literal["none", "star", "count_star", "*", "count(*)"] = "none",
         output: Literal["default", "explain", "analyze", "explain_analyze"] = "default",
-        explain: Optional[bool] = None,
-        count_star: Optional[bool] = None,
-        analyze: Optional[bool] = None,
+        explain: bool | None = None,
+        count_star: bool | None = None,
+        analyze: bool | None = None,
         prewarm: bool = False,
-        preparatory_statements: Optional[list[str]] = None,
+        preparatory_statements: list[str] | None = None,
     ) -> None:
         if explain is not None:
             warnings.warn(
@@ -247,7 +247,7 @@ class QueryPreparation:
 
         self.preparatory_stmts = preparatory_statements or []
 
-    def prepare_query(self, query: SelectStatement, *, on: Optional[Database] = None) -> SelectStatement:
+    def prepare_query(self, query: SelectStatement, *, on: Database | None = None) -> SelectStatement:
         """Applies the selected transformations to the given input query and executes the preparatory statements
 
         Parameters
@@ -353,8 +353,8 @@ class _BenchmarkConfig:
     shuffled: bool
     query_prep: QueryPreparation | None
     timeout: float | None
-    pre_exec_callback: Callable[[SelectStatement], None | dict] | None
-    post_exec_callback: Callable[[ExecutionResult], None | dict] | None
+    pre_exec_callback: Callable[[SelectStatement], dict | None] | None
+    post_exec_callback: Callable[[ExecutionResult], dict | None] | None
     log: _LoggerImpl
     error_action: ErrorHandling
     start_time: datetime | None = None
@@ -397,7 +397,7 @@ def _init_benchmark_log(experiment: str, *, cfg: _BenchmarkConfig) -> None:
 
     with open(log_file, "r+", encoding="utf-8") as f:
         existing_logs = json.load(f)
-        complete_log = existing_logs + [log_data]
+        complete_log = [*existing_logs, log_data]
         f.seek(0)
         util.to_json_dump(complete_log, f, indent=2)
 
@@ -476,7 +476,7 @@ class _NoOptimization:
 _InternalOptResult = _SuccessfullOptimization | _FailedOptimization | _NoOptimization
 
 
-def _optimize_query(query: SelectStatement, *, pipeline: Optional[OptimizationPipeline] = None) -> _InternalOptResult:
+def _optimize_query(query: SelectStatement, *, pipeline: OptimizationPipeline | None = None) -> _InternalOptResult:
     """Tries to run a query through the optimization pipeline while gracefully handling errors."""
     if pipeline is None:
         return _NoOptimization()
@@ -514,8 +514,8 @@ def _execute_query(
     query: SelectStatement,
     *,
     on: Database,
-    timeout: Optional[float] = None,
-    query_prep: Optional[QueryPreparation] = None,
+    timeout: float | None = None,
+    query_prep: QueryPreparation | None = None,
 ) -> _InternalExecResult:
     """Prepares and executes a query on an actual database system while gracefully handling timeouts and errors.
 
@@ -704,7 +704,7 @@ class _ResultSample:
             return
         self._post_exec_data.append(data)
 
-    def failed_optimization(self) -> Optional[Exception]:
+    def failed_optimization(self) -> Exception | None:
         return self._optimization_failure
 
     def num_executions(self) -> int:
@@ -713,7 +713,7 @@ class _ResultSample:
     def last_successful(self) -> bool:
         return bool(self.status and self.status[-1] in ("ok", "timeout"))
 
-    def last_result(self) -> Optional[ExecutionResult]:
+    def last_result(self) -> ExecutionResult | None:
         if self._optimization_failure or not self.result_sets:
             return None
 
@@ -780,13 +780,13 @@ class _ResultSample:
             }
 
             if self._pre_exec_data:
-                for key in self._pre_exec_data[0].keys():
+                for key in self._pre_exec_data[0]:
                     rows[key] = []
                 for pre_exec in self._pre_exec_data:
                     for key, val in pre_exec.items():
                         rows[key].append(val)
             if self._post_exec_data:
-                for key in self._post_exec_data[0].keys():
+                for key in self._post_exec_data[0]:
                     rows[key] = []
                 for post_exec in self._post_exec_data:
                     for key, val in post_exec.items():
@@ -1034,16 +1034,16 @@ def execute_workload(
     workload_repetitions: int = 1,
     per_query_repetitions: int = 1,
     shuffled: bool = False,
-    query_preparation: Optional[QueryPreparation | dict[str, Any]] = None,
-    training_data: Optional[TrainingData | TrainingDataRepository] = None,
-    timeout: Optional[float] = None,
-    exec_callback: Optional[Callable[[ExecutionResult], None]] = None,
-    pre_exec_callback: Optional[Callable[[SelectStatement], None | dict]] = None,
-    post_exec_callback: Optional[Callable[[ExecutionResult], None | dict]] = None,
-    repetition_callback: Optional[Callable[[int], None]] = None,
-    progressive_output: Optional[str | Path] = None,
-    output_args: Optional[dict] = None,
-    logger: Optional[Callable[[str], None] | PredefLogger] = None,
+    query_preparation: QueryPreparation | dict[str, Any] | None = None,
+    training_data: TrainingData | TrainingDataRepository | None = None,
+    timeout: float | None = None,
+    exec_callback: Callable[[ExecutionResult], None] | None = None,
+    pre_exec_callback: Callable[[SelectStatement], dict | None] | None = None,
+    post_exec_callback: Callable[[ExecutionResult], dict | None] | None = None,
+    repetition_callback: Callable[[int], None] | None = None,
+    progressive_output: str | Path | None = None,
+    output_args: dict | None = None,
+    logger: Callable[[str], None] | PredefLogger | None = None,
     error_action: ErrorHandling = "log",
 ) -> pd.DataFrame:
     """Simple benchmarking interface.
@@ -1211,6 +1211,7 @@ def execute_workload(
     if exec_callback is not None:
         warnings.warn(
             "exec_callback is deprecated. Use the functionally equivalent post_exec_callback instead.",
+            stacklevel=2,
             category=DeprecationWarning,
         )
         if post_exec_callback is not None:

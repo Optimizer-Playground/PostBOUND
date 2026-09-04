@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Generator, Iterable
-from typing import Literal, Optional
+from typing import Literal
 
 import networkx as nx
 
@@ -81,7 +81,7 @@ def _enumerate_join_graph(query: SelectStatement, join_graph: nx.Graph) -> Gener
     this algorithm guarantees that all possible orders are selected.
     """
     if len(join_graph.nodes) == 1:
-        node = list(join_graph.nodes)[0]
+        node = next(iter(join_graph.nodes))
         yield node
         return
 
@@ -151,7 +151,7 @@ class ExhaustiveJoinOrderEnumerator:
         if len(join_graph.nodes) == 0:
             return
         elif len(join_graph.nodes) == 1:
-            base_table = list(join_graph.nodes)[0]
+            base_table = next(iter(join_graph.nodes))
             join_tree = JoinTree.create_scan(base_table)
             yield join_tree
             return
@@ -231,12 +231,12 @@ class ExhaustiveOperatorEnumerator:
 
     def __init__(
         self,
-        scan_operators: Optional[Iterable[ScanOperator]] = None,
-        join_operators: Optional[Iterable[JoinOperator]] = None,
+        scan_operators: Iterable[ScanOperator] | None = None,
+        join_operators: Iterable[JoinOperator] | None = None,
         *,
         include_scans: bool = True,
         include_joins: bool = True,
-        database: Optional[Database] = None,
+        database: Database | None = None,
     ) -> None:
         if not include_joins and not include_scans:
             raise ValueError("Cannot exclude both join hints and scan hints")
@@ -284,13 +284,13 @@ class ExhaustiveOperatorEnumerator:
         join_ops = [list(self.allowed_join_ops)] * len(joins)
 
         for scan_selection in itertools.product(*scan_ops):
-            current_scan_pairs = zip(tables, scan_selection)
+            current_scan_pairs = zip(tables, scan_selection, strict=False)
             current_scan_assignment = PhysicalOperatorAssignment()
             for table, operator in current_scan_pairs:
                 current_scan_assignment.set_scan_operator(ScanOperatorAssignment(operator, table))
 
             for join_selection in itertools.product(*join_ops):
-                current_join_pairs = zip(joins, join_selection)
+                current_join_pairs = zip(joins, join_selection, strict=False)
                 current_total_assignment = current_scan_assignment.clone()
                 for join, operator in current_join_pairs:
                     current_total_assignment.set_join_operator(JoinOperatorAssignment(operator, join))
@@ -318,7 +318,7 @@ class ExhaustiveOperatorEnumerator:
         joins = [join.tables() for join in join_order.iterjoins()]
         join_ops = [list(self.allowed_join_ops)] * len(joins)
         for join_selection in itertools.product(*join_ops):
-            current_join_pairs = zip(joins, join_selection)
+            current_join_pairs = zip(joins, join_selection, strict=False)
             assignment = PhysicalOperatorAssignment()
             for join, operator in current_join_pairs:
                 assignment.set_join_operator(JoinOperatorAssignment(operator, join))
@@ -344,7 +344,7 @@ class ExhaustiveOperatorEnumerator:
         tables = list(query.tables())
         scans = [list(self.allowed_scan_ops)] * len(tables)
         for scan_selection in itertools.product(*scans):
-            current_scan_pairs = zip(tables, scan_selection)
+            current_scan_pairs = zip(tables, scan_selection, strict=False)
             assignment = PhysicalOperatorAssignment()
             for table, operator in current_scan_pairs:
                 assignment.set_scan_operator(ScanOperatorAssignment(operator, table))
@@ -375,8 +375,8 @@ class ExhaustivePlanEnumerator:
     def __init__(
         self,
         *,
-        join_order_args: Optional[dict] = None,
-        operator_args: Optional[dict] = None,
+        join_order_args: dict | None = None,
+        operator_args: dict | None = None,
     ) -> None:
         join_order_args = join_order_args if join_order_args else {}
         operator_args = operator_args if operator_args else {}

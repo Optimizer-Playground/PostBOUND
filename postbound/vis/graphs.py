@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import typing
-from typing import Optional
 
 import graphviz as gv
 import matplotlib as mpl
@@ -18,9 +17,7 @@ def plot_graph(graph: nx.DiGraph) -> gv.Digraph:
     pass
 
 
-def plot_graph(
-    graph: nx.Graph | nx.DiGraph, *, directed: Optional[bool] = None, color: str = ""
-) -> gv.Graph | gv.Digraph:
+def plot_graph(graph: nx.Graph | nx.DiGraph, *, directed: bool | None = None, color: str = "") -> gv.Graph | gv.Digraph:
     if directed is None:
         gv_graph = gv.Digraph() if isinstance(graph, nx.DiGraph) else gv.Graph()
     else:
@@ -29,7 +26,7 @@ def plot_graph(
     unique_color_labels = set()
     color_mapping: dict = {}
     if color:
-        for n, d in graph.nodes.data():
+        for _node, d in graph.nodes.data():
             unique_color_labels.add(d[color])
         viridis = mpl.cm.viridis
         normalized_colors = mpl.colors.Normalize(vmin=0, vmax=len(unique_color_labels) - 1)

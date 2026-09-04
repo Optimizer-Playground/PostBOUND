@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import numbers
 import threading
-from typing import Any, Union
+from typing import Any
 
 
 def represents_number(val: str) -> bool:
@@ -171,7 +171,7 @@ class AtomicInt(numbers.Integral):
         with self._lock:
             return other | self._value
 
-    def __round__(self, ndigits: Union[int, None] = None) -> int:
+    def __round__(self, ndigits: int | None = None) -> int:
         with self._lock:
             return self._value
 
@@ -235,15 +235,15 @@ class BoundedInt(numbers.Integral):
     """
 
     @staticmethod
-    def non_neg(value: int, *, allowed_max: Union[int, None] = None) -> BoundedInt:
+    def non_neg(value: int, *, allowed_max: int | None = None) -> BoundedInt:
         return BoundedInt(value, allowed_min=0, allowed_max=allowed_max)
 
     def __init__(
         self,
         value: int,
         *,
-        allowed_min: Union[int, None] = None,
-        allowed_max: Union[int, None] = None,
+        allowed_min: int | None = None,
+        allowed_max: int | None = None,
     ):
         if not isinstance(value, int):
             raise TypeError(f"Only integer values allowed, but {type(value)} given!")
@@ -346,7 +346,7 @@ class BoundedInt(numbers.Integral):
     def __pos__(self) -> Any:
         return +self._value
 
-    def __pow__(self, exponent: Any, modulus: Union[Any, None] = ...) -> BoundedInt:
+    def __pow__(self, exponent: Any, modulus: Any | None = ...) -> BoundedInt:
         res = self._value**exponent
         if res != int(res):
             raise ValueError(f"Power not support for type BoundedInt with argument {exponent}")
@@ -380,7 +380,7 @@ class BoundedInt(numbers.Integral):
         other_value = self._unwrap_atomic(other)
         return other_value | self._value
 
-    def __round__(self, ndigits: Union[int, None] = None) -> int:
+    def __round__(self, ndigits: int | None = None) -> int:
         return self._value
 
     def __rpow__(self, base: Any) -> Any:

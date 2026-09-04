@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import warnings
 from collections.abc import Sequence
-from typing import Any, Literal, Optional, get_args
+from typing import Any, Literal, get_args
 
 from .._core import Cardinality, IntermediateOperator, JoinOperator, ScanOperator, TableReference
 from .._qep import QueryPlan, SortKey
@@ -185,18 +185,18 @@ class PostgresExplainNode:
 
         self.loops: float = explain_data.get("Actual Loops", 1)
 
-        self.relation_name: str | None = explain_data.get("Relation Name", None)
-        self.relation_alias: str | None = explain_data.get("Alias", None)
-        self.index_name: str | None = explain_data.get("Index Name", None)
-        self.subplan_name: str | None = explain_data.get("Subplan Name", None)
-        self.cte_name: str | None = explain_data.get("CTE Name", None)
+        self.relation_name: str | None = explain_data.get("Relation Name")
+        self.relation_alias: str | None = explain_data.get("Alias")
+        self.index_name: str | None = explain_data.get("Index Name")
+        self.subplan_name: str | None = explain_data.get("Subplan Name")
+        self.cte_name: str | None = explain_data.get("CTE Name")
 
-        self.filter_condition: str | None = explain_data.get("Filter", None)
-        self.index_condition: str | None = explain_data.get("Index Cond", None)
-        self.join_filter: str | None = explain_data.get("Join Filter", None)
-        self.hash_condition: str | None = explain_data.get("Hash Cond", None)
-        self.recheck_condition: str | None = explain_data.get("Recheck Cond", None)
-        self.parent_relationship: str | None = explain_data.get("Parent Relationship", None)
+        self.filter_condition: str | None = explain_data.get("Filter")
+        self.index_condition: str | None = explain_data.get("Index Cond")
+        self.join_filter: str | None = explain_data.get("Join Filter")
+        self.hash_condition: str | None = explain_data.get("Hash Cond")
+        self.recheck_condition: str | None = explain_data.get("Recheck Cond")
+        self.parent_relationship: str | None = explain_data.get("Parent Relationship")
         self.launched_workers: int = explain_data.get("Workers Launched", 0)
         self.planned_workers: int = explain_data.get("Workers Planned", 0)
         self.sort_keys: str = explain_data.get("Sort Key", "")
@@ -319,7 +319,7 @@ class PostgresExplainNode:
         outer_child = first_child if second_child == inner_child else second_child
         return (inner_child, outer_child)
 
-    def parse_table(self) -> Optional[TableReference]:
+    def parse_table(self) -> TableReference | None:
         """Provides the table that is processed by this node.
 
         Returns
@@ -382,7 +382,7 @@ class PostgresExplainNode:
                     raise ValueError(f"Unknown parent relationship '{parent_rel}' for child {child}")
 
         if inner_child and outer_child:
-            child_nodes = [outer_child, inner_child] + child_nodes
+            child_nodes = [outer_child, inner_child, *child_nodes]
         elif outer_child:
             child_nodes.insert(0, outer_child)
         elif inner_child:
@@ -395,11 +395,11 @@ class PostgresExplainNode:
         estimated_card = self.cardinality_estimate * card_adjustment
 
         if self.is_scan():
-            operator = PostgresExplainScanNodes.get(self.node_type, None)
+            operator = PostgresExplainScanNodes.get(self.node_type)
         elif self.is_join():
-            operator = PostgresExplainJoinNodes.get(self.node_type, None)
+            operator = PostgresExplainJoinNodes.get(self.node_type)
         else:
-            operator = PostgresExplainIntermediateNodes.get(self.node_type, None)
+            operator = PostgresExplainIntermediateNodes.get(self.node_type)
 
         sort_keys = self._parse_sort_keys() if self.sort_keys else self._infer_sorting_from_children()
         shared_hits = None if math.isnan(self.shared_blocks_cached) else self.shared_blocks_cached

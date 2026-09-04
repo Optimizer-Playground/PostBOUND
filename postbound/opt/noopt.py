@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from .._hints import JoinTree, PhysicalOperatorAssignment, PlanParameterization
 from .._stages import (
     JoinOrderOptimization,
@@ -19,7 +17,7 @@ class EmptyJoinOrderOptimizer(JoinOrderOptimization):
     def __init__(self) -> None:
         super().__init__()
 
-    def optimize_join_order(self, query: SqlQuery) -> Optional[JoinTree]:
+    def optimize_join_order(self, query: SqlQuery) -> JoinTree | None:
         return None
 
     def describe(self) -> dict:
@@ -29,7 +27,7 @@ class EmptyJoinOrderOptimizer(JoinOrderOptimization):
 class EmptyPhysicalOperatorSelection(PhysicalOperatorSelection):
     """Dummy implementation of operator optimization that does not actually optimize anything."""
 
-    def select_physical_operators(self, query: SqlQuery, join_order: Optional[JoinTree]) -> PhysicalOperatorAssignment:
+    def select_physical_operators(self, query: SqlQuery, join_order: JoinTree | None) -> PhysicalOperatorAssignment:
         return PhysicalOperatorAssignment()
 
     def describe(self) -> dict:
@@ -42,8 +40,8 @@ class EmptyParameterization(ParameterGeneration):
     def generate_plan_parameters(
         self,
         query: SqlQuery,
-        join_order: Optional[JoinTree],
-        operator_assignment: Optional[PhysicalOperatorAssignment],
+        join_order: JoinTree | None,
+        operator_assignment: PhysicalOperatorAssignment | None,
     ) -> PlanParameterization:
         return PlanParameterization()
 

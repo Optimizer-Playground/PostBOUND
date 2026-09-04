@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import warnings
-from typing import Literal, Optional
+from typing import Literal
 
 from .. import Cardinality, parser
 from .._core import (
@@ -25,12 +25,12 @@ from .._hints import (
     parameters_from_plan,
 )
 from .._qep import PlanEstimates, PlanMeasures, PlanParams, QueryPlan, SortKey, Subplan
-from ..qal import SqlExpression, SelectStatement
+from ..qal import SelectStatement, SqlExpression
 
 
 def read_operator_json(
     json_data: dict | str,
-) -> Optional[PhysicalOperator | ScanOperatorAssignment | JoinOperatorAssignment]:
+) -> PhysicalOperator | ScanOperatorAssignment | JoinOperatorAssignment | None:
     """Reads a physical operator assignment from a JSON dictionary.
 
     Parameters
@@ -152,8 +152,8 @@ def read_plan_params_json(json_data: dict | str) -> PlanParameterization:
 def update_plan(
     query_plan: QueryPlan,
     *,
-    operators: Optional[PhysicalOperatorAssignment] = None,
-    params: Optional[PlanParameterization] = None,
+    operators: PhysicalOperatorAssignment | None = None,
+    params: PlanParameterization | None = None,
     simplify: bool = True,
 ) -> QueryPlan:
     """Assigns new operators and/or new estimates to a query plan, leaving the join order intact.
@@ -234,8 +234,8 @@ def _make_simple_plan(
     *,
     scan_op: ScanOperator,
     join_op: JoinOperator,
-    query: Optional[SelectStatement] = None,
-    plan_params: Optional[PlanParameterization] = None,
+    query: SelectStatement | None = None,
+    plan_params: PlanParameterization | None = None,
 ) -> QueryPlan:
     """Handler function to create a query plan with default operators.
 
@@ -291,10 +291,10 @@ def _make_custom_plan(
     join_tree: JoinTree,
     *,
     physical_ops: PhysicalOperatorAssignment,
-    query: Optional[SelectStatement] = None,
-    plan_params: Optional[PlanParameterization] = None,
-    fallback_scan_op: Optional[ScanOperator] = None,
-    fallback_join_op: Optional[JoinOperator] = None,
+    query: SelectStatement | None = None,
+    plan_params: PlanParameterization | None = None,
+    fallback_scan_op: ScanOperator | None = None,
+    fallback_join_op: JoinOperator | None = None,
 ) -> QueryPlan:
     """Handler function to create a query plan with a dynamic assignment of physical operators.
 
@@ -376,7 +376,8 @@ def _make_custom_plan(
         return plan
     if intermediate_op in {IntermediateOperator.Sort, IntermediateOperator.Memoize}:
         warnings.warn(
-            "Ignoring intermediate operator for sort/memoize. These require additional information to be inserted."
+            "Ignoring intermediate operator for sort/memoize. These require additional information to be inserted.",
+            stacklevel=2,
         )
         return plan
 
@@ -387,11 +388,11 @@ def _make_custom_plan(
 def to_query_plan(
     join_tree: JoinTree,
     *,
-    query: Optional[SelectStatement] = None,
-    physical_ops: Optional[PhysicalOperatorAssignment] = None,
-    plan_params: Optional[PlanParameterization] = None,
-    scan_op: Optional[ScanOperator] = None,
-    join_op: Optional[JoinOperator] = None,
+    query: SelectStatement | None = None,
+    physical_ops: PhysicalOperatorAssignment | None = None,
+    plan_params: PlanParameterization | None = None,
+    scan_op: ScanOperator | None = None,
+    join_op: JoinOperator | None = None,
 ) -> QueryPlan:
     """Creates a query plan from a join tree.
 

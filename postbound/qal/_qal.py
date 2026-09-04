@@ -15,7 +15,7 @@ from collections.abc import (
     Sequence,
 )
 from enum import Enum
-from typing import Any, Generic, Literal, Optional, Type, TypeGuard, assert_never, overload
+from typing import Any, Generic, Literal, TypeGuard, assert_never, overload
 
 import networkx as nx
 
@@ -313,7 +313,7 @@ class StarExpression(SqlExpression):
         selected.
     """
 
-    def __init__(self, *, from_table: Optional[TableReference] = None) -> None:
+    def __init__(self, *, from_table: TableReference | None = None) -> None:
         self._table = from_table
         super().__init__(hash(("*", self._table)))
 
@@ -321,7 +321,7 @@ class StarExpression(SqlExpression):
     __match_args__ = ("from_table",)
 
     @property
-    def from_table(self) -> Optional[TableReference]:
+    def from_table(self) -> TableReference | None:
         """Get the table from which to select all columns.
 
         If no such table was selected, all columns of all tables are being selected.
@@ -391,7 +391,7 @@ class CastExpression(SqlExpression):
         expression: SqlExpression,
         target_type: str,
         *,
-        type_params: Optional[Sequence[SqlExpression]] = None,
+        type_params: Sequence[SqlExpression] | None = None,
         array_type: bool = False,
     ) -> None:
         if not expression or not target_type:
@@ -412,10 +412,10 @@ class CastExpression(SqlExpression):
         super().__init__(hash_val)
 
     __slots__ = (
+        "_array_type",
         "_casted_expression",
         "_target_type",
         "_type_params",
-        "_array_type",
     )
     __match_args__ = (
         "casted_expression",
@@ -477,7 +477,7 @@ class CastExpression(SqlExpression):
         return casted_cols + param_cols
 
     def iterchildren(self) -> Iterable[SqlExpression]:
-        return [self.casted_expression] + list(self.type_params)
+        return [self.casted_expression, *list(self.type_params)]
 
     def accept_visitor(self, visitor: SqlExpressionVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_cast_expr(self, *args, **kwargs)
@@ -558,7 +558,7 @@ class MathExpression(SqlExpression):
         hash_val = hash((self._operator, self._lhs, self._rhs))
         super().__init__(hash_val)
 
-    __slots__ = ("_operator", "_lhs", "_rhs")
+    __slots__ = ("_lhs", "_operator", "_rhs")
     __match_args__ = ("operator", "lhs", "rhs")
 
     @property
@@ -578,7 +578,7 @@ class MathExpression(SqlExpression):
         return self._lhs
 
     @property
-    def rhs(self) -> Optional[SqlExpression]:
+    def rhs(self) -> SqlExpression | None:
         """Get the right-hand side argument to the operator.
 
         This can be *None* for unary expressions, such as negation.
@@ -841,11 +841,11 @@ class FunctionExpression(SqlExpression):
     def __init__(
         self,
         function: str,
-        arguments: Optional[Sequence[SqlExpression]] = None,
+        arguments: Sequence[SqlExpression] | None = None,
         *,
-        keyword_args: Optional[Mapping[str, SqlExpression]] = None,
+        keyword_args: Mapping[str, SqlExpression] | None = None,
         distinct: bool = False,
-        filter_where: Optional[AbstractPredicate] = None,
+        filter_where: AbstractPredicate | None = None,
     ) -> None:
         if not function:
             raise ValueError("Function is required")
@@ -873,11 +873,11 @@ class FunctionExpression(SqlExpression):
         super().__init__(hash_val)
 
     __slots__ = (
-        "_function",
         "_arguments",
-        "_kw_args",
         "_distinct",
         "_filter_expr",
+        "_function",
+        "_kw_args",
     )
     __match_args__ = (
         "function",
@@ -935,7 +935,7 @@ class FunctionExpression(SqlExpression):
         return self._distinct
 
     @property
-    def filter_where(self) -> Optional[AbstractPredicate]:
+    def filter_where(self) -> AbstractPredicate | None:
         """Get the filter expression for an aggregate function.
 
         Filters restrict the values that are actually included in the aggregate.
@@ -1110,9 +1110,9 @@ class ArrayAccessExpression(FunctionExpression):
         self,
         array_expr: SqlExpression,
         *,
-        idx: Optional[SqlExpression] = None,
-        lower_idx: Optional[SqlExpression] = None,
-        upper_idx: Optional[SqlExpression] = None,
+        idx: SqlExpression | None = None,
+        lower_idx: SqlExpression | None = None,
+        upper_idx: SqlExpression | None = None,
     ) -> None:
         if idx is None and lower_idx is None and upper_idx is None:
             raise ValueError("At least one index has to be specified")
@@ -1128,7 +1128,7 @@ class ArrayAccessExpression(FunctionExpression):
         args = [StaticValueExpression.null() if arg is None else arg for arg in (array_expr, idx, lower_idx, upper_idx)]
         super().__init__("ARRAY_GET", args)
 
-    __slots__ = ("_array", "_idx", "_lower_idx", "_upper_idx", "_hash_val")
+    __slots__ = ("_array", "_hash_val", "_idx", "_lower_idx", "_upper_idx")
     __match_args__ = ("array", "index", "lower_index", "upper_index")
 
     @property
@@ -1143,7 +1143,7 @@ class ArrayAccessExpression(FunctionExpression):
         return self._array
 
     @property
-    def index(self) -> Optional[SqlExpression]:
+    def index(self) -> SqlExpression | None:
         """Get the index of the element to access.
 
         Returns
@@ -1154,7 +1154,7 @@ class ArrayAccessExpression(FunctionExpression):
         return self._idx
 
     @property
-    def lower_index(self) -> Optional[SqlExpression]:
+    def lower_index(self) -> SqlExpression | None:
         """Get the lower boundary of the slice.
 
         Returns
@@ -1165,7 +1165,7 @@ class ArrayAccessExpression(FunctionExpression):
         return self._lower_idx
 
     @property
-    def upper_index(self) -> Optional[SqlExpression]:
+    def upper_index(self) -> SqlExpression | None:
         """Get the upper boundary of the slice.
 
         Returns
@@ -1178,7 +1178,7 @@ class ArrayAccessExpression(FunctionExpression):
     @property
     def index_slice(
         self,
-    ) -> Optional[tuple[Optional[SqlExpression], Optional[SqlExpression]]]:
+    ) -> tuple[SqlExpression | None, SqlExpression | None] | None:
         """Get the boundaries of the slice.
 
         Returns
@@ -1300,9 +1300,9 @@ class WindowExpression(SqlExpression):
         self,
         window_function: FunctionExpression | str,
         *,
-        partitioning: Optional[Sequence[SqlExpression | ColumnReference]] = None,
-        ordering: Optional[OrderBy] = None,
-        filter_condition: Optional[AbstractPredicate] = None,
+        partitioning: Sequence[SqlExpression | ColumnReference] | None = None,
+        ordering: OrderBy | None = None,
+        filter_condition: AbstractPredicate | None = None,
     ) -> None:
         if isinstance(window_function, str):
             window_function = FunctionExpression(window_function)
@@ -1325,10 +1325,10 @@ class WindowExpression(SqlExpression):
         super().__init__(hash_val)
 
     __slots__ = (
-        "_window_function",
-        "_partitioning",
-        "_ordering",
         "_filter_condition",
+        "_ordering",
+        "_partitioning",
+        "_window_function",
     )
     __match_args__ = (
         "window_function",
@@ -1360,7 +1360,7 @@ class WindowExpression(SqlExpression):
         return self._partitioning
 
     @property
-    def ordering(self) -> Optional[OrderBy]:
+    def ordering(self) -> OrderBy | None:
         """Get the ordering of tuples in the current window.
 
         Returns
@@ -1371,7 +1371,7 @@ class WindowExpression(SqlExpression):
         return self._ordering
 
     @property
-    def filter_condition(self) -> Optional[AbstractPredicate]:
+    def filter_condition(self) -> AbstractPredicate | None:
         """Get the filter condition for tuples in the current window.
 
         Returns:
@@ -1452,8 +1452,8 @@ class CaseExpression(SqlExpression):
         self,
         cases: Sequence[tuple[SqlExpression, SqlExpression]],
         *,
-        simple_expr: Optional[SqlExpression] = None,
-        else_expr: Optional[SqlExpression] = None,
+        simple_expr: SqlExpression | None = None,
+        else_expr: SqlExpression | None = None,
     ) -> None:
         if not cases:
             raise ValueError("At least one case is required")
@@ -1464,7 +1464,7 @@ class CaseExpression(SqlExpression):
         hash_val = hash((self._cases, self._simple_expr, self._else_expr))
         super().__init__(hash_val)
 
-    __slots__ = ("_cases", "_simple_expr", "_else_expr")
+    __slots__ = ("_cases", "_else_expr", "_simple_expr")
     __match_args__ = ("cases", "simple_expression", "else_expression")
 
     @property
@@ -1479,7 +1479,7 @@ class CaseExpression(SqlExpression):
         return self._cases
 
     @property
-    def simple_expression(self) -> Optional[SqlExpression]:
+    def simple_expression(self) -> SqlExpression | None:
         """Get the expression to evaluate against the cases.
 
         This is only set for the "simple form" of the case expression, where the expression is compared directly against
@@ -1499,7 +1499,7 @@ class CaseExpression(SqlExpression):
         return self._simple_expr
 
     @property
-    def else_expression(self) -> Optional[SqlExpression]:
+    def else_expression(self) -> SqlExpression | None:
         """Get the expression to use if none of the cases match.
 
         Returns
@@ -2493,7 +2493,7 @@ class BinaryPredicate(BasePredicate):
         hash_val = hash((operation, lhs, rhs))
         super().__init__(hash_val)
 
-    __slots__ = ("_operator", "_lhs", "_rhs")
+    __slots__ = ("_lhs", "_operator", "_rhs")
     __match_args__ = ("operator", "lhs", "rhs")
 
     @property
@@ -2797,7 +2797,7 @@ class InPredicate(BasePredicate):
         hash_val = hash((BinaryOperator.In, self._column, self._values))
         super().__init__(hash_val=hash_val)
 
-    __slots__ = ("_operator", "_column", "_values")
+    __slots__ = ("_column", "_operator", "_values")
     __match_args__ = ("column", "values", "operator")
 
     @property
@@ -2871,7 +2871,7 @@ class InPredicate(BasePredicate):
         return list(self.column.itercolumns()) + util.flatten(val.itercolumns() for val in self.values)
 
     def iterexpressions(self) -> Iterable[SqlExpression]:
-        return [self.column] + list(self.values)
+        return [self.column, *list(self.values)]
 
     def join_partners(self) -> set[tuple[ColumnReference, ColumnReference]]:
         self._assert_join_predicate()
@@ -2959,7 +2959,7 @@ class UnaryPredicate(BasePredicate):
         """Creates an *IS NULL* predicate for an expression."""
         return UnaryPredicate(expression, UnaryOperator.IsNull)
 
-    def __init__(self, expression: SqlExpression, operation: Optional[UnaryOperator] = None):
+    def __init__(self, expression: SqlExpression, operation: UnaryOperator | None = None):
         if isinstance(expression, SubqueryExpression) and operation != UnaryOperator.Exists:
             raise ValueError("Subquery expressions can only be used with the EXISTS operator")
         elif operation == UnaryOperator.Exists and not isinstance(expression, SubqueryExpression):
@@ -2969,11 +2969,11 @@ class UnaryPredicate(BasePredicate):
         self._column = expression
         super().__init__(hash((operation, expression)))
 
-    __slots__ = ("_operation", "_column")
+    __slots__ = ("_column", "_operation")
     __match_args__ = ("expression", "operator")
 
     @property
-    def operator(self) -> Optional[UnaryOperator]:
+    def operator(self) -> UnaryOperator | None:
         """Get the operation of this predicate."""
         return self._operation
 
@@ -3238,7 +3238,7 @@ class CompoundPredicate(AbstractPredicate, ABC):
         hash_val = hash((self._operation, self._children))
         super().__init__(hash_val)
 
-    __slots__ = ("_operation", "_children")
+    __slots__ = ("_children", "_operation")
     __match_args__ = ("operation", "children")
 
     @property
@@ -3622,7 +3622,7 @@ def determine_join_equivalence_classes(
     equivalence_graph = nx.Graph()
     for predicate in join_predicates:
         columns = predicate.columns()
-        if not len(columns) == 2:
+        if len(columns) != 2:
             continue
         col_a, col_b = columns
         equivalence_graph.add_edge(col_a, col_b)
@@ -3835,7 +3835,7 @@ class SimpleFilter(AbstractPredicate):
     """
 
     @staticmethod
-    def attempt_wrap(predicate: AbstractPredicate) -> Optional[SimpleFilter]:
+    def attempt_wrap(predicate: AbstractPredicate) -> SimpleFilter | None:
         """Transforms a predicate into a simplified view. Returns *None* if that is not possible."""
         unwrapped = _attempt_filter_unwrap(predicate)
         if unwrapped is None:
@@ -3933,7 +3933,7 @@ class SimpleFilter(AbstractPredicate):
         hash_val = hash((column, operation, value))
         super().__init__(hash_val)
 
-    __slots__ = ("_column", "_operation", "_value", "_predicate")
+    __slots__ = ("_column", "_operation", "_predicate", "_value")
     __match_args__ = ("column", "operation", "value")
 
     @property
@@ -4028,7 +4028,7 @@ def _unwrap_simple_join(
 ) -> tuple[ColumnReference, ColumnReference] | None:
     if not isinstance(predicate, BinaryPredicate) or not predicate.is_join():
         return None
-    if not predicate.operator == BinaryOperator.Equal:
+    if predicate.operator != BinaryOperator.Equal:
         return None
 
     lhs, rhs = (
@@ -4104,7 +4104,7 @@ class SimpleJoin(AbstractPredicate):
     """
 
     @staticmethod
-    def attempt_wrap(predicate: AbstractPredicate) -> Optional[SimpleJoin]:
+    def attempt_wrap(predicate: AbstractPredicate) -> SimpleJoin | None:
         """Transforms a predicate into a simplified view. Returns *None* if that is not possible."""
         unwrapped = _unwrap_simple_join(predicate)
         if unwrapped is None:
@@ -4199,7 +4199,7 @@ class SimpleJoin(AbstractPredicate):
         hash_val = hash((lhs, rhs))
         super().__init__(hash_val)
 
-    __slots__ = ("_lhs", "_rhs", "_predicate")
+    __slots__ = ("_lhs", "_predicate", "_rhs")
     __match_args__ = ("lhs", "rhs")
 
     @property
@@ -4226,7 +4226,7 @@ class SimpleJoin(AbstractPredicate):
             raise TypeError("Unexpected join partner type: " + str(type(partner)))
 
     @overload
-    def partner_of(self, other: TableReference) -> Optional[TableReference]:
+    def partner_of(self, other: TableReference) -> TableReference | None:
         """Provides the join partner of the given table.
 
         If the table is not joined, *None* is returned.
@@ -4234,14 +4234,14 @@ class SimpleJoin(AbstractPredicate):
         ...
 
     @overload
-    def partner_of(self, other: ColumnReference) -> Optional[ColumnReference]:
+    def partner_of(self, other: ColumnReference) -> ColumnReference | None:
         """Provides the join partner of the given column.
 
         If the column is not joined, *None* is returned.
         """
         ...
 
-    def partner_of(self, other: TableReference | ColumnReference) -> Optional[TableReference | ColumnReference]:
+    def partner_of(self, other: TableReference | ColumnReference) -> TableReference | ColumnReference | None:
         """Provides the join partner of the given column or table.
 
         If the column or table is not joined, *None* is returned.
@@ -4452,7 +4452,7 @@ class QueryPredicates:
         """
         return self._root is None
 
-    @functools.cache
+    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
     def filters(self) -> Collection[AbstractPredicate]:
         """Provides all filter predicates that are contained in the predicate hierarchy.
 
@@ -4475,7 +4475,7 @@ class QueryPredicates:
             return []
         return _collect_filter_predicates(self._root)
 
-    @functools.cache
+    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
     def joins(self) -> Collection[AbstractPredicate]:
         """Provides all join predicates that are contained in the predicate hierarchy.
 
@@ -4498,7 +4498,7 @@ class QueryPredicates:
             return []
         return _collect_join_predicates(self._root)
 
-    @functools.cache
+    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
     def join_graph(self, *, merge_aliases: bool = False) -> nx.Graph:
         """Provides the join graph for the predicates.
 
@@ -4567,8 +4567,8 @@ class QueryPredicates:
 
         return join_graph
 
-    @functools.cache
-    def filters_for(self, table: TableReference) -> Optional[AbstractPredicate]:
+    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
+    def filters_for(self, table: TableReference) -> AbstractPredicate | None:
         """Provides all filter predicates that reference a specific table.
 
         If multiple individual filter predicates are specified in the query, they will be combined in one large
@@ -4591,7 +4591,7 @@ class QueryPredicates:
         applicable_filters = [filter_pred for filter_pred in self.filters() if filter_pred.contains_table(table)]
         return CompoundPredicate.create_and(applicable_filters) if applicable_filters else None
 
-    @functools.cache
+    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
     def joins_for(self, table: TableReference) -> Collection[AbstractPredicate]:
         """Provides all join predicates that reference a specific table.
 
@@ -4636,7 +4636,7 @@ class QueryPredicates:
         self,
         first_table: TableReference | Iterable[TableReference],
         second_table: TableReference | Iterable[TableReference],
-    ) -> Optional[AbstractPredicate]:
+    ) -> AbstractPredicate | None:
         """Provides the (conjunctive) join predicate that joins specific tables.
 
         The precise behaviour of this method depends on the provided parameters: If `first_table` or `second_table` contain
@@ -4785,9 +4785,7 @@ class QueryPredicates:
         other_predicate = (
             QueryPredicates(other_predicate) if isinstance(other_predicate, AbstractPredicate) else other_predicate
         )
-        if self.is_empty() and other_predicate.is_empty():
-            return self
-        elif other_predicate.is_empty():
+        if (self.is_empty() and other_predicate.is_empty()) or other_predicate.is_empty():
             return self
         elif self.is_empty():
             return other_predicate
@@ -4796,7 +4794,7 @@ class QueryPredicates:
         merged = CompoundPredicate.create_and([own_root, other_root])
         return QueryPredicates(merged)
 
-    @functools.cache
+    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
     def _join_tables_check(self, tables: frozenset[TableReference]) -> bool:
         """Constructs the join graph for the given tables and checks, whether it is connected.
 
@@ -5160,7 +5158,7 @@ class Explain(ModifierClause):
         """
         return Explain(False, format_type)
 
-    def __init__(self, analyze: bool = False, target_format: Optional[str] = None):
+    def __init__(self, analyze: bool = False, target_format: str | None = None):
         self._analyze = analyze
         self._target_format = target_format if target_format != "" else None
 
@@ -5185,7 +5183,7 @@ class Explain(ModifierClause):
         return self._analyze
 
     @property
-    def target_format(self) -> Optional[str]:
+    def target_format(self) -> str | None:
         """Get the target format in which the *EXPLAIN* plan should be provided.
 
         Returns
@@ -5258,7 +5256,7 @@ class WithQuery:
         query: SelectStatement,
         target_name: str | TableReference,
         *,
-        materialized: Optional[bool] = None,
+        materialized: bool | None = None,
     ) -> None:
         if not target_name:
             raise ValueError("Target name is required")
@@ -5272,11 +5270,11 @@ class WithQuery:
         self._hash_val = hash((query, target_name))
 
     __slots__ = (
+        "_hash_val",
+        "_materialized",
         "_query",
         "_subquery_expression",
         "_target_name",
-        "_materialized",
-        "_hash_val",
     )
 
     @property
@@ -5327,7 +5325,7 @@ class WithQuery:
         return TableReference.create_virtual(self.target_name)
 
     @property
-    def materialized(self) -> Optional[bool]:
+    def materialized(self) -> bool | None:
         """Get whether this is materialized WITH query or not.
 
         If materialization is unknown or not supported, **None** can be used. Therefore, this property should always be checked
@@ -5410,8 +5408,8 @@ class ValuesWithQuery(WithQuery):
         values: ValuesList,
         *,
         target_name: str | TableReference,
-        columns: Optional[Iterable[str | ColumnReference]] = None,
-        materialized: Optional[bool] = None,
+        columns: Iterable[str | ColumnReference] | None = None,
+        materialized: bool | None = None,
     ) -> None:
         self._values = list(values)
         self._materialized = materialized
@@ -5436,7 +5434,7 @@ class ValuesWithQuery(WithQuery):
         )
         super().__init__(self._query, self._table, materialized=materialized)
 
-    __slots__ = ("_values", "_materialized", "_table", "_columns", "_query")
+    __slots__ = ("_columns", "_materialized", "_query", "_table", "_values")
 
     @property
     def rows(self) -> ValuesList:
@@ -5550,7 +5548,7 @@ class CommonTableExpression(ModifierClause):
         hash_val = hash((self._with_queries, self._recursive))
         super().__init__(hash_val)
 
-    __slots__ = ("_with_queries", "_recursive")
+    __slots__ = ("_recursive", "_with_queries")
     __match_args__ = ("queries", "recursive")
 
     @property
@@ -5718,9 +5716,9 @@ class BaseProjection:
     def create_window(
         fn: FunctionExpression | str,
         *,
-        partitioning: Optional[Sequence[SqlExpression | ColumnReference]] = None,
-        ordering: Optional[OrderBy] = None,
-        filter_condition: Optional[AbstractPredicate] = None,
+        partitioning: Sequence[SqlExpression | ColumnReference] | None = None,
+        ordering: OrderBy | None = None,
+        filter_condition: AbstractPredicate | None = None,
         target_name: str = "",
     ) -> BaseProjection:
         """Shorthand to create a projection with a window function."""
@@ -5736,10 +5734,10 @@ class BaseProjection:
     def create_function(
         fn: str,
         *,
-        args: Optional[Sequence[SqlExpression]] = None,
-        kwargs: Optional[Mapping[str, SqlExpression]] = None,
+        args: Sequence[SqlExpression] | None = None,
+        kwargs: Mapping[str, SqlExpression] | None = None,
         distinct: bool = False,
-        filter_where: Optional[AbstractPredicate] = None,
+        filter_where: AbstractPredicate | None = None,
         target_name: str = "",
     ) -> BaseProjection:
         """Shorthand to create a project for an (arbitrary) function.
@@ -5775,7 +5773,7 @@ class BaseProjection:
         self._target_name = target_name
         self._hash_val = hash((expression, target_name))
 
-    __slots__ = ("_expression", "_target_name", "_hash_val")
+    __slots__ = ("_expression", "_hash_val", "_target_name")
 
     @property
     def expression(self) -> SqlExpression:
@@ -5994,7 +5992,7 @@ class Select(BaseClause):
         hash_val = hash((self._distinct_type, self._distinct_cols, self._targets))
         super().__init__(hash_val)
 
-    __slots__ = ("_targets", "_distinct_type", "_distinct_cols")
+    __slots__ = ("_distinct_cols", "_distinct_type", "_targets")
     __match_args__ = ("targets", "distinct", "distinct_on")
 
     @property
@@ -6330,11 +6328,11 @@ class SubqueryTableSource(TableSource):
         self._hash_val = hash((self._subquery_expression, self._target_table, self._lateral))
 
     __slots__ = (
+        "_hash_val",
+        "_lateral",
         "_subquery_expression",
         "_target_name",
         "_target_table",
-        "_lateral",
-        "_hash_val",
     )
     __match_args__ = ("query", "target_table", "lateral")
 
@@ -6361,7 +6359,7 @@ class SubqueryTableSource(TableSource):
         return self._target_name
 
     @property
-    def target_table(self) -> Optional[TableReference]:
+    def target_table(self) -> TableReference | None:
         """Get the name under which the virtual table can be accessed in the actual query.
 
         The only difference to `target_name` this return type: this property provides the name as a proper table
@@ -6479,7 +6477,7 @@ class ValuesTableSource(TableSource):
         values: ValuesList,
         *,
         alias: str | TableReference = "",
-        columns: Optional[Iterable[str | ColumnReference]] = None,
+        columns: Iterable[str | ColumnReference] | None = None,
     ) -> None:
         self._values = tuple(values)
 
@@ -6501,7 +6499,7 @@ class ValuesTableSource(TableSource):
 
         self._hash_val = hash((self._table, self._columns, self._values))
 
-    __slots__ = ("_values", "_table", "_columns", "_hash_val")
+    __slots__ = ("_columns", "_hash_val", "_table", "_values")
     __match_args__ = ("rows", "table", "cols")
 
     @property
@@ -6516,7 +6514,7 @@ class ValuesTableSource(TableSource):
         return self._values
 
     @property
-    def table(self) -> Optional[TableReference]:
+    def table(self) -> TableReference | None:
         """Get the name under which the virtual table can be accessed in the actual query.
 
         Returns
@@ -6629,7 +6627,7 @@ class FunctionTableSource(TableSource):
 
         self._hash_val = hash((self._function, self._alias))
 
-    __slots__ = ("_function", "_alias", "_hash_val")
+    __slots__ = ("_alias", "_function", "_hash_val")
     __match_args__ = ("function", "target_table")
 
     @property
@@ -6646,7 +6644,7 @@ class FunctionTableSource(TableSource):
         return self._alias.identifier() if self._alias else ""
 
     @property
-    def target_table(self) -> Optional[TableReference]:
+    def target_table(self) -> TableReference | None:
         """Get the virtual table that contains the tuples.
 
         This will always be a virtual table, or *None* for anonymous tables.
@@ -6759,7 +6757,7 @@ class JoinTableSource(TableSource):
         left: TableSource,
         right: TableSource,
         *,
-        join_condition: Optional[AbstractPredicate] = None,
+        join_condition: AbstractPredicate | None = None,
         join_type: JoinType = JoinType.InnerJoin,
     ) -> None:
         if join_condition is None and join_type not in AutoJoins:
@@ -6772,11 +6770,11 @@ class JoinTableSource(TableSource):
         self._hash_val = hash((self._left, self._right, self._join_condition, self._join_type))
 
     __slots__ = (
-        "_left",
-        "_right",
+        "_hash_val",
         "_join_condition",
         "_join_type",
-        "_hash_val",
+        "_left",
+        "_right",
     )
     __match_args__ = ("left", "right", "join_condition", "join_type")
 
@@ -6803,7 +6801,7 @@ class JoinTableSource(TableSource):
         return self._right
 
     @property
-    def join_condition(self) -> Optional[AbstractPredicate]:
+    def join_condition(self) -> AbstractPredicate | None:
         """Get the predicate that is used to determine matching tuples from the table.
 
         This can be *None* if the specific `join_type` does not require or allow a join condition (e.g.
@@ -6827,7 +6825,7 @@ class JoinTableSource(TableSource):
         """
         return self._join_type
 
-    def base_table(self) -> Optional[TableReference]:
+    def base_table(self) -> TableReference | None:
         """Provide the table that is farthest to the left in the join chain.
 
         For subqueries or **VALUES** clauses, this will return the alias of the expression, i.e. the name of the virtual
@@ -6869,7 +6867,7 @@ class JoinTableSource(TableSource):
         condition_columns = list(self._join_condition.itercolumns()) if self._join_condition else []
         return left_columns + right_columns + condition_columns
 
-    def predicates(self) -> Optional[QueryPredicates]:
+    def predicates(self) -> QueryPredicates | None:
         all_predicates: list[AbstractPredicate] = []
 
         left_predicates = self._left.predicates()
@@ -6997,7 +6995,7 @@ class From(BaseClause):
     def itercolumns(self) -> Iterable[ColumnReference]:
         return util.flatten(src.itercolumns() for src in self._items)
 
-    def predicates(self) -> Optional[QueryPredicates]:
+    def predicates(self) -> QueryPredicates | None:
         source_predicates = [src.predicates() for src in self._items]
         if not any(source_predicates):
             return None
@@ -7116,7 +7114,7 @@ class GroupBy(BaseClause):
         hash_val = hash((self._group_columns, self._distinct))
         super().__init__(hash_val)
 
-    __slots__ = ("_group_columns", "_distinct")
+    __slots__ = ("_distinct", "_group_columns")
     __match_args__ = ("group_columns", "distinct")
 
     @property
@@ -7254,8 +7252,8 @@ class OrderByExpression:
     def create_for(
         column: ColumnReference,
         *,
-        ascending: Optional[bool] = None,
-        nulls_first: Optional[bool] = None,
+        ascending: bool | None = None,
+        nulls_first: bool | None = None,
     ) -> OrderByExpression:
         """Shorthand method to create an `OrderByExpression` for a specific column reference."""
         return OrderByExpression(
@@ -7267,8 +7265,8 @@ class OrderByExpression:
     def __init__(
         self,
         column: SqlExpression,
-        ascending: Optional[bool] = None,
-        nulls_first: Optional[bool] = None,
+        ascending: bool | None = None,
+        nulls_first: bool | None = None,
     ) -> None:
         if not column:
             raise ValueError("Column must be specified")
@@ -7277,7 +7275,7 @@ class OrderByExpression:
         self._nulls_first = nulls_first
         self._hash_val = hash((self._column, self._ascending, self._nulls_first))
 
-    __slots__ = ("_column", "_ascending", "_nulls_first", "_hash_val")
+    __slots__ = ("_ascending", "_column", "_hash_val", "_nulls_first")
 
     @property
     def column(self) -> SqlExpression:
@@ -7294,7 +7292,7 @@ class OrderByExpression:
         return self._column
 
     @property
-    def ascending(self) -> Optional[bool]:
+    def ascending(self) -> bool | None:
         """Get the desired ordering of the output rows.
 
         Returns
@@ -7306,7 +7304,7 @@ class OrderByExpression:
         return self._ascending
 
     @property
-    def nulls_first(self) -> Optional[bool]:
+    def nulls_first(self) -> bool | None:
         """Get where to place *NULL* values in the result set.
 
         Returns
@@ -7357,8 +7355,8 @@ class OrderBy(ModifierClause):
     @staticmethod
     def create_for(
         *columns: ColumnReference | Iterable[ColumnReference],
-        ascending: Optional[bool] = None,
-        nulls_first: Optional[bool] = None,
+        ascending: bool | None = None,
+        nulls_first: bool | None = None,
     ) -> OrderBy:
         """Shorthand method to create an *ORDER BY* clause for a set of column references.
 
@@ -7452,8 +7450,8 @@ class Limit(ModifierClause):
     def __init__(
         self,
         *,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
+        limit: int | None = None,
+        offset: int | None = None,
         fetch_direction: FetchDirection = "first",
     ) -> None:
         if limit is None and offset is None:
@@ -7465,11 +7463,11 @@ class Limit(ModifierClause):
         hash_val = hash((self._limit, self._offset, self._fetch_dir))
         super().__init__(hash_val)
 
-    __slots__ = ("_limit", "_offset", "_fetch_dir")
+    __slots__ = ("_fetch_dir", "_limit", "_offset")
     __match_args__ = ("limit", "offset")
 
     @property
-    def limit(self) -> Optional[int]:
+    def limit(self) -> int | None:
         """Get the maximum number of rows in the result set.
 
         Returns
@@ -7480,7 +7478,7 @@ class Limit(ModifierClause):
         return self._limit
 
     @property
-    def offset(self) -> Optional[int]:
+    def offset(self) -> int | None:
         """Get the offset within the result set (i.e. number of first rows to skip).
 
         Returns
@@ -7873,7 +7871,7 @@ class ClauseVisitor(ABC, Generic[VisitorResult]):
 class SqlQuery(ABC):
     @property
     @abstractmethod
-    def cte_clause(self) -> Optional[CommonTableExpression]:
+    def cte_clause(self) -> CommonTableExpression | None:
         """Get the *WITH* clause of the query.
 
         Returns
@@ -7909,7 +7907,7 @@ class SqlQuery(ABC):
 
     @property
     @abstractmethod
-    def where_clause(self) -> Optional[Where]:
+    def where_clause(self) -> Where | None:
         """Get the *WHERE* clause of the query.
 
         Warnings
@@ -7921,7 +7919,7 @@ class SqlQuery(ABC):
 
     @property
     @abstractmethod
-    def groupby_clause(self) -> Optional[GroupBy]:
+    def groupby_clause(self) -> GroupBy | None:
         """Get the *GROUP BY* clause of the query.
 
         Warnings
@@ -7933,7 +7931,7 @@ class SqlQuery(ABC):
 
     @property
     @abstractmethod
-    def having_clause(self) -> Optional[Having]:
+    def having_clause(self) -> Having | None:
         """Get the *HAVING* clause of the query.
 
         Warnings
@@ -7945,13 +7943,13 @@ class SqlQuery(ABC):
 
     @property
     @abstractmethod
-    def orderby_clause(self) -> Optional[OrderBy]:
+    def orderby_clause(self) -> OrderBy | None:
         """Get the *ORDER BY* clause of the query."""
         raise NotImplementedError
 
     @property
     @abstractmethod
-    def limit_clause(self) -> Optional[Limit]:
+    def limit_clause(self) -> Limit | None:
         """Get the combined *LIMIT* and *OFFSET* clauses of the query.
 
         According to the SQL standard, these clauses should use the *FETCH FIRST* syntax. However, many systems use
@@ -7961,7 +7959,7 @@ class SqlQuery(ABC):
 
     @property
     @abstractmethod
-    def hints(self) -> Optional[Hint]:
+    def hints(self) -> Hint | None:
         """Get the hint block of the query.
 
         Hints are a PostBOUND-specific extension, even though many databases systems use hints in some form.
@@ -7970,7 +7968,7 @@ class SqlQuery(ABC):
 
     @property
     @abstractmethod
-    def explain(self) -> Optional[Explain]:
+    def explain(self) -> Explain | None:
         """Get the *EXPLAIN* block of the query.
 
         EXPLAIN is not part of the SQL standard, but practically all database systems support EXPLAIN to obtain the
@@ -8158,7 +8156,7 @@ class SqlQuery(ABC):
         """
         return self.predicates().join_graph(merge_aliases=merge_aliases)
 
-    def filters_for(self, table: TableReference) -> Optional[AbstractPredicate]:
+    def filters_for(self, table: TableReference) -> AbstractPredicate | None:
         """Alias for `predicates().filters_for(table)`.
 
         See Also
@@ -8180,7 +8178,7 @@ class SqlQuery(ABC):
         self,
         table1: TableReference | Iterable[TableReference],
         table2: TableReference | Iterable[TableReference],
-    ) -> Optional[AbstractPredicate]:
+    ) -> AbstractPredicate | None:
         """Alias for `predicates().joins_between(table1, table2)`.
 
         See Also
@@ -8215,7 +8213,7 @@ class SqlQuery(ABC):
         return util.flatten(_collect_subqueries(clause) for clause in self.clauses())
 
     @abstractmethod
-    def clauses(self, *, skip: Optional[Type | Iterable[Type]] = None) -> Sequence[SqlClause]:
+    def clauses(self, *, skip: type | Iterable[type] | None = None) -> Sequence[SqlClause]:
         """Provides all the clauses that are defined (i.e. not *None*) in this query.
 
         Parameters
@@ -8751,15 +8749,15 @@ class SelectStatement(SqlQuery):
         self,
         *,
         select_clause: Select,
-        from_clause: Optional[From] = None,
-        where_clause: Optional[Where] = None,
-        groupby_clause: Optional[GroupBy] = None,
-        having_clause: Optional[Having] = None,
-        orderby_clause: Optional[OrderBy] = None,
-        limit_clause: Optional[Limit] = None,
-        cte_clause: Optional[CommonTableExpression] = None,
-        hints: Optional[Hint] = None,
-        explain: Optional[Explain] = None,
+        from_clause: From | None = None,
+        where_clause: Where | None = None,
+        groupby_clause: GroupBy | None = None,
+        having_clause: Having | None = None,
+        orderby_clause: OrderBy | None = None,
+        limit_clause: Limit | None = None,
+        cte_clause: CommonTableExpression | None = None,
+        hints: Hint | None = None,
+        explain: Explain | None = None,
     ) -> None:
         self._cte_clause = cte_clause
         self._select_clause = select_clause
@@ -8792,22 +8790,22 @@ class SelectStatement(SqlQuery):
 
     __slots__ = (
         "_cte_clause",
-        "_select_clause",
-        "_from_clause",
-        "_where_clause",
-        "_groupby_clause",
-        "_having_clause",
-        "_orderby_clause",
-        "_limit_clause",
-        "_hints",
         "_explain",
-        "_query_predicates",
-        "_tables",
+        "_from_clause",
+        "_groupby_clause",
         "_hash_val",
+        "_having_clause",
+        "_hints",
+        "_limit_clause",
+        "_orderby_clause",
+        "_query_predicates",
+        "_select_clause",
+        "_tables",
+        "_where_clause",
     )
 
     @property
-    def cte_clause(self) -> Optional[CommonTableExpression]:
+    def cte_clause(self) -> CommonTableExpression | None:
         return self._cte_clause
 
     @property
@@ -8815,35 +8813,35 @@ class SelectStatement(SqlQuery):
         return self._select_clause
 
     @property
-    def from_clause(self) -> Optional[From]:
+    def from_clause(self) -> From | None:
         return self._from_clause
 
     @property
-    def where_clause(self) -> Optional[Where]:
+    def where_clause(self) -> Where | None:
         return self._where_clause
 
     @property
-    def groupby_clause(self) -> Optional[GroupBy]:
+    def groupby_clause(self) -> GroupBy | None:
         return self._groupby_clause
 
     @property
-    def having_clause(self) -> Optional[Having]:
+    def having_clause(self) -> Having | None:
         return self._having_clause
 
     @property
-    def orderby_clause(self) -> Optional[OrderBy]:
+    def orderby_clause(self) -> OrderBy | None:
         return self._orderby_clause
 
     @property
-    def limit_clause(self) -> Optional[Limit]:
+    def limit_clause(self) -> Limit | None:
         return self._limit_clause
 
     @property
-    def hints(self) -> Optional[Hint]:
+    def hints(self) -> Hint | None:
         return self._hints
 
     @property
-    def explain(self) -> Optional[Explain]:
+    def explain(self) -> Explain | None:
         return self._explain
 
     def has_simple_from(self) -> bool:
@@ -8853,7 +8851,7 @@ class SelectStatement(SqlQuery):
         return all(isinstance(src, DirectTableSource) for src in self._from_clause.items)
 
     def is_scalar(self) -> bool:
-        if not len(self.select_clause.targets) == 1 or self.select_clause.is_distinct():
+        if len(self.select_clause.targets) != 1 or self.select_clause.is_distinct():
             return False
         target: SqlExpression = util.simplify(self.select_clause.targets).expression
         return isinstance(target, FunctionExpression) and target.is_aggregate() and not self._groupby_clause
@@ -8937,7 +8935,7 @@ class SelectStatement(SqlQuery):
         self._query_predicates = current_predicate
         return current_predicate
 
-    def clauses(self, *, skip: Optional[Type | Iterable[Type]] = None) -> Sequence[ModifierClause | BaseClause]:
+    def clauses(self, *, skip: type | Iterable[type] | None = None) -> Sequence[ModifierClause | BaseClause]:
         all_clauses = [
             self.hints,
             self.explain,
@@ -9044,11 +9042,11 @@ class SetQuery(SqlQuery):
         right_query: SqlQuery,
         *,
         set_operation: SetOperator,
-        cte_clause: Optional[CommonTableExpression] = None,
-        orderby_clause: Optional[OrderBy] = None,
-        limit_clause: Optional[Limit] = None,
-        hints: Optional[Hint] = None,
-        explain_clause: Optional[Explain] = None,
+        cte_clause: CommonTableExpression | None = None,
+        orderby_clause: OrderBy | None = None,
+        limit_clause: Limit | None = None,
+        hints: Hint | None = None,
+        explain_clause: Explain | None = None,
     ) -> None:
         if left_query.is_explain():
             warnings.warn(
@@ -9084,15 +9082,15 @@ class SetQuery(SqlQuery):
         )
 
     __slots__ = (
-        "_lhs",
-        "_rhs",
-        "_op",
         "_cte",
-        "_orderby",
-        "_limit",
-        "_hints",
         "_explain",
         "_hash_val",
+        "_hints",
+        "_lhs",
+        "_limit",
+        "_op",
+        "_orderby",
+        "_rhs",
     )
     __match_args__ = ("set_operation", "lhs", "rhs")
 
@@ -9150,23 +9148,23 @@ class SetQuery(SqlQuery):
                 )
 
     @property
-    def cte_clause(self) -> Optional[CommonTableExpression]:
+    def cte_clause(self) -> CommonTableExpression | None:
         return self._cte
 
     @property
-    def orderby_clause(self) -> Optional[OrderBy]:
+    def orderby_clause(self) -> OrderBy | None:
         return self._orderby
 
     @property
-    def limit_clause(self) -> Optional[Limit]:
+    def limit_clause(self) -> Limit | None:
         return self._limit
 
     @property
-    def hints(self) -> Optional[Hint]:
+    def hints(self) -> Hint | None:
         return self._hints
 
     @property
-    def explain(self) -> Optional[Explain]:
+    def explain(self) -> Explain | None:
         return self._explain
 
     @property
@@ -9178,7 +9176,7 @@ class SetQuery(SqlQuery):
         )
 
     @property
-    def from_clause(self) -> Optional[From]:
+    def from_clause(self) -> From | None:
         """Placeholder method to ensure compatibility with the `SqlQuery` interface. Raises a `QueryTypeError`."""
         raise QueryTypeError(
             "You are trying to access the FROM clause on a set query. "
@@ -9186,7 +9184,7 @@ class SetQuery(SqlQuery):
         )
 
     @property
-    def where_clause(self) -> Optional[Where]:
+    def where_clause(self) -> Where | None:
         """Placeholder method to ensure compatibility with the `SqlQuery` interface. Raises a `QueryTypeError`."""
         raise QueryTypeError(
             "You are trying to access the WHERE clause on a set query. "
@@ -9194,7 +9192,7 @@ class SetQuery(SqlQuery):
         )
 
     @property
-    def groupby_clause(self) -> Optional[GroupBy]:
+    def groupby_clause(self) -> GroupBy | None:
         """Placeholder method to ensure compatibility with the `SqlQuery` interface. Raises a `QueryTypeError`."""
         raise QueryTypeError(
             "You are trying to access the GROUP BY clause on a set query. "
@@ -9202,7 +9200,7 @@ class SetQuery(SqlQuery):
         )
 
     @property
-    def having_clause(self) -> Optional[Having]:
+    def having_clause(self) -> Having | None:
         """Placeholder method to ensure compatibility with the `SqlQuery` interface. Raises a `QueryTypeError`."""
         raise QueryTypeError(
             "You are trying to access the HAVING clause on a set query. "
@@ -9256,7 +9254,7 @@ class SetQuery(SqlQuery):
     def subqueries(self) -> Collection[SqlQuery]:
         return list(self._lhs.subqueries()) + list(self._rhs.subqueries())
 
-    def clauses(self, *, skip: Optional[Type | Iterable[Type]] = None) -> Sequence[ModifierClause | SetOpClause]:
+    def clauses(self, *, skip: type | Iterable[type] | None = None) -> Sequence[ModifierClause | SetOpClause]:
         clauses: list[SqlClause] = []
 
         if self._hints:

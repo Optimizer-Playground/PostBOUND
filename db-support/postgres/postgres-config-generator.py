@@ -8,7 +8,7 @@ import os
 import subprocess
 import textwrap
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 DiskType = Literal["HDD", "SSD"]
 
@@ -43,7 +43,7 @@ def determine_disk(directory: str) -> str:
     return full_path
 
 
-def determine_disk_type(disk_file: Optional[str] = None) -> DiskType:
+def determine_disk_type(disk_file: str | None = None) -> DiskType:
     """Check, whether a given disk (e.g. sda) is an HDD  or an SSD.
 
     If no disk is provided, the disk containing the current working directory is used.
@@ -68,7 +68,7 @@ class SystemInfo:
     disk_type: DiskType
 
     @staticmethod
-    def load(db_directory: str, *, disk_type: Optional[DiskType] = None) -> SystemInfo:
+    def load(db_directory: str, *, disk_type: DiskType | None = None) -> SystemInfo:
         """Automatically determines the properties of the current system.
 
         The db_directory is requrired to determine whether the database is located on an HDD or an SSD.
@@ -128,7 +128,7 @@ def generate_pg_config(system_info: SystemInfo) -> dict[str, str]:
     pg_config["max_parallel_maintenance_workers"] = maintenance_workers
 
     work_mem_mb = round(
-        ((system_info.memory_mb - shared_buffers_mb) / (3 * max_connections) / max_parallel_workers_per_gather / 2)
+        (system_info.memory_mb - shared_buffers_mb) / (3 * max_connections) / max_parallel_workers_per_gather / 2
     )
     pg_config["work_mem"] = f"{work_mem_mb}MB"
 

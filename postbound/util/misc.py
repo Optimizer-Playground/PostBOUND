@@ -6,7 +6,7 @@ import collections
 import re
 from collections.abc import Generator, Iterable
 from datetime import datetime
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from .jsonize import jsondict
 
@@ -47,7 +47,7 @@ class Version:
             return False
 
     @staticmethod
-    def wrap(ver: Version | str | int | list[str] | list[int]) -> Optional[Version]:
+    def wrap(ver: Version | str | int | list[str] | list[int]) -> Version | None:
         """Tries to wrap the provided version representation into a Version instance. Returns None if not possible."""
         try:
             return _wrap_version(ver)
@@ -64,8 +64,8 @@ class Version:
                 self._version = [int(v) for v in ver]
             else:
                 raise ValueError(f"Unknown version string: '{ver}'")
-        except ValueError:
-            raise ValueError(f"Unknown version string: '{ver}'")
+        except ValueError as e:
+            raise ValueError(f"Unknown version string: '{ver}'") from e
 
     @property
     def major(self) -> int:
@@ -73,12 +73,12 @@ class Version:
         return self._version[0]
 
     @property
-    def minor(self) -> Optional[int]:
+    def minor(self) -> int | None:
         """Get the minor version component, if available."""
         return self._version[1] if len(self._version) > 1 else None
 
     @property
-    def patch(self) -> Optional[int]:
+    def patch(self) -> int | None:
         """Get the patch version component, if available."""
         return self._version[2] if len(self._version) > 2 else None
 
@@ -98,10 +98,7 @@ class Version:
             other = _wrap_version(__o)
             if not len(self) == len(other):
                 return False
-            for i in range(len(self)):
-                if not self._version[i] == other._version[i]:
-                    return False
-            return True
+            return all(self._version[i] == other._version[i] for i in range(len(self)))
         except ValueError:
             return False
 
@@ -122,7 +119,7 @@ class Version:
         if other is None:
             return NotImplemented
 
-        for comp in zip(self._version, other._version):
+        for comp in zip(self._version, other._version, strict=False):
             own_version, other_version = comp
             if own_version < other_version:
                 return True
@@ -135,7 +132,7 @@ class Version:
         if other is None:
             return NotImplemented
 
-        for comp in zip(self._version, other._version):
+        for comp in zip(self._version, other._version, strict=False):
             own_version, other_version = comp
             if own_version < other_version:
                 return True
@@ -161,7 +158,7 @@ class DependencyGraph(Generic[T]):
         self._dependencies: dict[int, list[int]] = collections.defaultdict(list)
         self._nodes: dict[int, T] = {}
 
-    def add_task(self, node: T, *, depends_on: Optional[Iterable[T]] = None) -> None:
+    def add_task(self, node: T, *, depends_on: Iterable[T] | None = None) -> None:
         """Queues a new task/entry/whatever.
 
         Parameters

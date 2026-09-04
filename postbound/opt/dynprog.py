@@ -6,7 +6,6 @@ import math
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Optional
 
 from .. import transform, util
 from .._core import (
@@ -121,9 +120,9 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
     def __init__(
         self,
         *,
-        supported_scan_ops: Optional[set[ScanOperator]] = None,
-        supported_join_ops: Optional[set[JoinOperator]] = None,
-        target_db: Optional[Database] = None,
+        supported_scan_ops: set[ScanOperator] | None = None,
+        supported_join_ops: set[JoinOperator] | None = None,
+        target_db: Database | None = None,
     ) -> None:
         target_db = target_db if target_db is not None else DatabasePool.get_instance().current_database()
 
@@ -437,13 +436,13 @@ class RelOptInfo:
     partial_paths: list[QueryPlan]
     """All access paths that can be used to compute this relation with parallel workers. Otherwise the same as `paths`."""
 
-    cheapest_path: Optional[QueryPlan]
+    cheapest_path: QueryPlan | None
     """The cheapest access path that we have found.
 
     Notice that this is only set after all paths for the RelOpt have been collected.
     """
 
-    cheapest_partial_path: Optional[QueryPlan]
+    cheapest_partial_path: QueryPlan | None
     """The cheapest access path that we have found for parallel execution.
 
     Notice that this is only set after all paths for the RelOpt have been collected.
@@ -551,14 +550,14 @@ class PostgresDynProg(PlanEnumerator):
     def __init__(
         self,
         *,
-        supported_scan_ops: Optional[set[ScanOperator]] = None,
-        supported_join_ops: Optional[set[JoinOperator]] = None,
+        supported_scan_ops: set[ScanOperator] | None = None,
+        supported_join_ops: set[JoinOperator] | None = None,
         enable_materialize: bool = True,
         enable_memoize: bool = True,
         enable_sort: bool = True,
-        max_parallel_workers: Optional[int] = None,
-        add_path_hook: Optional[AddPathHook] = None,
-        target_db: Optional[PostgresInterface] = None,
+        max_parallel_workers: int | None = None,
+        add_path_hook: AddPathHook | None = None,
+        target_db: PostgresInterface | None = None,
         verbose: bool = False,
     ) -> None:
         if target_db is None:
@@ -1563,7 +1562,7 @@ class PostgresDynProg(PlanEnumerator):
     def _is_pg_cost(self, cost_model: CostModel) -> bool:
         return isinstance(cost_model, native.NativeCostModel) and cost_model.target_db == self.target_db
 
-    def _pg_plan(self, path: QueryPlan) -> Optional[QueryPlan]:
+    def _pg_plan(self, path: QueryPlan) -> QueryPlan | None:
         assert self.query is not None
 
         query_fragment = transform.extract_subquery(self.query, path.tables())
@@ -1685,11 +1684,7 @@ class PostgresDynProg(PlanEnumerator):
         if len(sorting) != len(other):
             return False
 
-        for key, other_key in zip(sorting, other):
-            if not key.is_compatible_with(other_key):
-                return False
-
-        return True
+        return all(key.is_compatible_with(other_key) for key, other_key in zip(sorting, other, strict=False))
 
     def _warn(self, msg: str) -> None:
         if not self._verbose:

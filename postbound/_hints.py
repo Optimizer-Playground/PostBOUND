@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import math
 import warnings
-from collections.abc import Collection, Container, Iterable
+from collections.abc import Collection, Container, Iterable, Sequence
 from enum import Enum
-from typing import Any, Literal, Optional, Self, Sequence, assert_never
+from typing import Any, Literal, Self, assert_never
 
 from . import util
 from ._base import T
@@ -406,8 +406,8 @@ class PhysicalOperatorAssignment:
     def get(
         self,
         intermediate: TableReference | Iterable[TableReference],
-        default: Optional[T] = None,
-    ) -> Optional[ScanOperatorAssignment | JoinOperatorAssignment | T]:
+        default: T | None = None,
+    ) -> ScanOperatorAssignment | JoinOperatorAssignment | T | None:
         """Retrieves the operator assignment for a specific scan or join.
 
         This is similar to the *dict.get* method. An important distinction is that we never raise an error if there is no
@@ -524,7 +524,7 @@ class PhysicalOperatorAssignment:
         self,
         item: TableReference | Iterable[TableReference] | ScanOperator | JoinOperator,
     ) -> ScanOperatorAssignment | JoinOperatorAssignment | bool | None:
-        if isinstance(item, ScanOperator) or isinstance(item, JoinOperator):
+        if isinstance(item, (ScanOperator, JoinOperator)):
             return self.global_settings.get(item, None)
         elif isinstance(item, TableReference):
             return self.scan_operators.get(item, None)
@@ -1220,7 +1220,7 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
 
     @staticmethod
     def create_scan(
-        table: TableReference, *, annotation: Optional[JoinTreeAnnotation] = None
+        table: TableReference, *, annotation: JoinTreeAnnotation | None = None
     ) -> JoinTree[JoinTreeAnnotation]:
         """Creates a new join tree with a single base table.
 
@@ -1243,7 +1243,7 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
         outer: JoinTree[JoinTreeAnnotation],
         inner: JoinTree[JoinTreeAnnotation],
         *,
-        annotation: Optional[JoinTreeAnnotation] = None,
+        annotation: JoinTreeAnnotation | None = None,
     ) -> JoinTree[JoinTreeAnnotation]:
         """Creates a new join tree by combining two existing join trees.
 
@@ -1333,7 +1333,7 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
         return self._outer, self._inner
 
     @property
-    def annotation(self) -> Optional[JoinTreeAnnotation]:
+    def annotation(self) -> JoinTreeAnnotation | None:
         """Get the annotation of the current node."""
         if self.is_empty():
             raise StateError("Join tree is empty.")
@@ -1420,7 +1420,7 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
         assert self._outer is not None and self._inner is not None
         return 1 + max(self._outer.plan_depth(), self._inner.plan_depth())
 
-    def lookup(self, table: TableReference | Iterable[TableReference]) -> Optional[JoinTree[JoinTreeAnnotation]]:
+    def lookup(self, table: TableReference | Iterable[TableReference]) -> JoinTree[JoinTreeAnnotation] | None:
         """Traverses the join tree to find a specific (intermediate) node.
 
         Parameters
@@ -1468,7 +1468,7 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
         self,
         partner: JoinTree[JoinTreeAnnotation] | TableReference,
         *,
-        annotation: Optional[JoinTreeAnnotation] = None,
+        annotation: JoinTreeAnnotation | None = None,
         partner_annotation: JoinTreeAnnotation | None = None,
         partner_direction: JoinDirection = "inner",
     ) -> JoinTree[JoinTreeAnnotation]:
@@ -1523,7 +1523,7 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
             return [self]
 
         assert self._outer is not None and self._inner is not None
-        return [self] + list(self._outer.iternodes()) + list(self._inner.iternodes())
+        return [self, *list(self._outer.iternodes()), *list(self._inner.iternodes())]
 
     def itertables(self) -> Iterable[TableReference]:
         """Provides all tables that are scanned in the join tree. Outer tables appear first."""
@@ -1549,7 +1549,7 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
         self,
         partner: JoinTree[JoinTreeAnnotation] | TableReference,
         *,
-        annotation: Optional[JoinTreeAnnotation] = None,
+        annotation: JoinTreeAnnotation | None = None,
     ) -> JoinTree[JoinTreeAnnotation]:
         """Handler method to create a new join tree when the current tree is empty."""
         if isinstance(partner, TableReference):
@@ -1716,7 +1716,7 @@ def operators_from_plan(query_plan: QueryPlan, *, include_workers: bool = False)
             assignment.add(operator)
         case ScanOperator():
             # scan operator without base table
-            warnings.warn(f"Ignoring scan operator without base table: {query_plan}")
+            warnings.warn(f"Ignoring scan operator without base table: {query_plan}", stacklevel=2)
             pass
 
         case JoinOperator():

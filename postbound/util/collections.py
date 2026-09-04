@@ -17,12 +17,12 @@ from collections.abc import (
     Sized,
     ValuesView,
 )
-from typing import Any, Literal, Optional, Union, overload
+from typing import Any, Literal, overload
 
 from .._base import T
 from .dicts import HashableDict
 
-ContainerType = Union[list[T], tuple[T, ...], set[T], frozenset[T]]
+ContainerType = list[T] | tuple[T, ...] | set[T] | frozenset[T]
 """Specifies which types are considered containers.
 
 For some methods this is necessary to determine whether any work still has to be done.
@@ -214,7 +214,7 @@ def simplify(obj):
         obj = list(obj)
 
     if len(obj) == 1:
-        return list(obj)[0]
+        return next(iter(obj))
 
     return obj
 
@@ -348,7 +348,7 @@ def make_hashable(obj: Any) -> Any:
     """
     if isinstance(obj, set):
         return frozenset(obj)
-    elif isinstance(obj, list) or isinstance(obj, tuple):
+    elif isinstance(obj, (list, tuple)):
         return tuple(make_hashable(elem) for elem in obj)
     elif isinstance(obj, dict):
         return HashableDict({k: make_hashable(v) for k, v in obj.items()})
@@ -413,7 +413,7 @@ class Queue(Iterable[T], Sized, Container[T]):
         """
         self.data.extend(values)
 
-    def head(self) -> Optional[T]:
+    def head(self) -> T | None:
         """Provides the current first element of the queue without removing.
 
         Returns
@@ -423,7 +423,7 @@ class Queue(Iterable[T], Sized, Container[T]):
         """
         return self.data[0] if self.data else None
 
-    def peak(self) -> Optional[T]:
+    def peak(self) -> T | None:
         """Provides the current first element of the queue without removing.
 
         This is an alias for `head`.
@@ -435,7 +435,7 @@ class Queue(Iterable[T], Sized, Container[T]):
         """
         return self.head()
 
-    def pop(self) -> Optional[T]:
+    def pop(self) -> T | None:
         """Provides the current first element of the queue and removes it.
 
         Returns
@@ -487,7 +487,7 @@ class SizedQueue(Collection[T]):
 
     """
 
-    def __init__(self, capacity: int, data: Optional[Iterable[T]] = None) -> None:
+    def __init__(self, capacity: int, data: Iterable[T] | None = None) -> None:
         self.data = list(data) if data else []
         self.capacity = capacity
 
@@ -513,7 +513,7 @@ class SizedQueue(Collection[T]):
         """
         self.data = (self.data + list(values))[: self.capacity]
 
-    def head(self) -> Optional[T]:
+    def head(self) -> T | None:
         """Provides the current first item of the queue without removing it.
 
         Returns
@@ -523,7 +523,7 @@ class SizedQueue(Collection[T]):
         """
         return self.data[0] if self.data else None
 
-    def pop(self) -> Optional[T]:
+    def pop(self) -> T | None:
         """Provides the current first item of the queue and removes it.
 
         Returns

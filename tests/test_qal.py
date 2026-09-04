@@ -11,6 +11,7 @@ import pathlib
 import textwrap
 import unittest
 from collections.abc import Iterable, Sequence
+from typing import ClassVar
 
 import postbound as pb
 from postbound import BoundColumnReference, ColumnReference, TableReference
@@ -236,7 +237,7 @@ class PredicateTests(unittest.TestCase):
 
 
 class MockSchemaLookup(pb.db.DatabaseSchema):
-    LookupData = {
+    LookupData: ClassVar[dict[str, TableReference]] = {
         "a": TableReference("r"),
         "b": TableReference("r"),
         "c": TableReference("s"),

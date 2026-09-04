@@ -21,10 +21,9 @@ parts of queries, such as individual clauses or expressions.
 
 from __future__ import annotations
 
-import typing
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping
-from typing import Literal, Optional, cast, overload
+from typing import Literal, cast, overload
 
 from . import util
 from ._core import ColumnReference, TableReference
@@ -217,7 +216,7 @@ def explicit_to_implicit(query: SelectStatement) -> SelectStatement:
     updated_from = From(table_sources)
     updated_where = Where(flatten_and_predicate(updated_pred)) if updated_pred else None
 
-    return build_query(list(query.clauses()) + [updated_from, updated_where])
+    return build_query([*list(query.clauses()), updated_from, updated_where])
 
 
 def _get_predicate_fragment(
@@ -274,7 +273,7 @@ def extract_query_fragment(
     referenced_tables: TableReference | Iterable[TableReference],
     *,
     projection: Literal["keep", "star", "*", "count_star"] = "keep",
-) -> Optional[SelectStatement]: ...
+) -> SelectStatement | None: ...
 
 
 @overload
@@ -283,7 +282,7 @@ def extract_query_fragment(
     referenced_tables: TableReference | Iterable[TableReference],
     *,
     projection: Literal["keep", "star", "*", "count_star"] = "keep",
-) -> Optional[SetQuery | SelectStatement]: ...
+) -> SetQuery | SelectStatement | None: ...
 
 
 @overload
@@ -292,7 +291,7 @@ def extract_query_fragment(
     referenced_tables: TableReference | Iterable[TableReference],
     *,
     projection: Literal["keep", "star", "*", "count_star"] = "keep",
-) -> Optional[SqlQuery]: ...
+) -> SqlQuery | None: ...
 
 
 def extract_query_fragment(
@@ -604,7 +603,7 @@ def move_into_subquery(
     updated_from_sources = [
         table_source for table_source in query.from_clause.items if not table_source.tables() < tables
     ]
-    updated_from_clause = From(updated_from_sources + [subquery_table_source])
+    updated_from_clause = From([*updated_from_sources, subquery_table_source])
 
     updated_predicate = query.where_clause.root if query.where_clause else None
     for predicate in subquery_predicates:
@@ -911,9 +910,9 @@ def as_explain_analyze[T: SqlQuery](query: T) -> T:
 
 
 def remove_predicate(
-    predicate: Optional[AbstractPredicate],
+    predicate: AbstractPredicate | None,
     predicate_to_remove: AbstractPredicate,
-) -> Optional[AbstractPredicate]:
+) -> AbstractPredicate | None:
     """Drops a specific predicate from the predicate hierarchy.
 
     If necessary, the hierarchy will be simplified. For example, if the `predicate_to_remove` is one of two childs of a
@@ -978,7 +977,7 @@ def add_clause[T: SqlQuery](query: T, clauses_to_add: SqlClause | Iterable[SqlCl
     return build_query(remaining_clauses + list(clauses_to_add))
 
 
-ClauseDescription = typing.Union[typing.Type, SqlClause, Iterable[typing.Type | SqlClause]]
+ClauseDescription = type | SqlClause | Iterable[type | SqlClause]
 """Denotes different ways clauses to remove can be denoted.
 
 See Also
@@ -1032,7 +1031,7 @@ def drop_clause(query, clauses_to_drop):
         drop_clause(query, query.limit_clause)
     """
     clauses_to_drop = set(util.enlist(clauses_to_drop))
-    clauses_to_drop = {drop if isinstance(drop, typing.Type) else type(drop) for drop in clauses_to_drop}
+    clauses_to_drop = {drop if isinstance(drop, type) else type(drop) for drop in clauses_to_drop}
     remaining_clauses = [clause for clause in query.clauses() if type(clause) not in clauses_to_drop]
     return build_query(remaining_clauses)
 
@@ -1574,7 +1573,7 @@ def rename_columns_in_expression(expression, available_renamings: Mapping[Column
     if expression is None:
         return None
 
-    if isinstance(expression, StaticValueExpression) or isinstance(expression, StarExpression):
+    if isinstance(expression, (StaticValueExpression, StarExpression)):
         return expression
     elif isinstance(expression, ColumnExpression):
         return (
@@ -1690,9 +1689,9 @@ def rename_columns_in_expression(expression, available_renamings: Mapping[Column
 
 
 def _rename_columns_in_expression(
-    expression: Optional[SqlExpression],
+    expression: SqlExpression | None,
     available_renamings: dict[ColumnReference, ColumnReference],
-) -> Optional[SqlExpression]:
+) -> SqlExpression | None:
     """See `rename_columns_in_expression` for details.
 
     See Also
@@ -1702,6 +1701,7 @@ def _rename_columns_in_expression(
     warnings.warn(
         "This method is deprecated and will be removed in the future. Use `rename_columns_in_expression` instead.",
         FutureWarning,
+        stacklevel=2,
     )
     return rename_columns_in_expression(expression, available_renamings)
 
@@ -1908,7 +1908,7 @@ def rename_columns_in_clause(clause, available_renamings: Mapping[ColumnReferenc
     if clause is None:
         return None
 
-    if isinstance(clause, Hint) or isinstance(clause, Explain):
+    if isinstance(clause, (Hint, Explain)):
         return clause
     if isinstance(clause, CommonTableExpression):
         renamed_ctes: list[WithQuery] = []
@@ -2391,7 +2391,7 @@ def rename_table(
     else:
         renamings = from_table
 
-    tabs_to_rename = set(tab for tab in renamings.keys())
+    tabs_to_rename = set(tab for tab in renamings)
 
     # Despite the convenient _TableReferenceRenamer, we still need to do a little bit of manual gathering/traversal to support
     # column prefixes.

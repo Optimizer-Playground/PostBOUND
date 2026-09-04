@@ -64,9 +64,9 @@ def make_logger(
 
     def _log(*args, **kwargs) -> None:
         if prefix and isinstance(prefix, str):
-            args = [prefix] + list(args)
+            args = [prefix, *list(args)]
         elif prefix and not isinstance(prefix, str):
-            args = [prefix()] + list(args)
+            args = [prefix(), *list(args)]
         print(*args, file=file, **kwargs)
 
     def _dummy_log(*args, **kwargs) -> None:
@@ -120,7 +120,7 @@ def print_if(should_print: bool, *args, use_stderr: bool = False, **kwargs) -> N
 class _TeeLogger:
     def __init__(self, target_file: str, output_mode: str = "a") -> None:
         self._original_stdout = sys.stdout
-        self._log_out = open(target_file, output_mode)
+        self._log_out = open(target_file, output_mode)  # noqa: SIM115 -- closed by the atexit hook below
         atexit.register(lambda: self._log_out.close())
 
     def write(self, message: str) -> None:

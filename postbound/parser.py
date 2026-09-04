@@ -33,7 +33,7 @@ import json
 import warnings
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal, Optional, overload
+from typing import Literal, overload
 
 import pglast
 
@@ -124,14 +124,14 @@ class SchemaCache:
         The schema to cache. If not provided, the cache cannot resolve column bindings.
     """
 
-    def __init__(self, schema: Optional[DatabaseSchema] = None) -> None:
+    def __init__(self, schema: DatabaseSchema | None = None) -> None:
         self._schema = schema
         self._lookup_cache: dict[str, tuple[list[str], set[str]]] = {}
 
-    def initialize_with(self, schema: Optional[DatabaseSchema]) -> None:
+    def initialize_with(self, schema: DatabaseSchema | None) -> None:
         """Sets the catalog if necessary"""
         if self._schema is not None and self._schema != schema:
-            warnings.warn("Parsing query for new schema. Dropping old schema cache.")
+            warnings.warn("Parsing query for new schema. Dropping old schema cache.", stacklevel=2)
             self._schema = schema
             self._lookup_cache.clear()
         elif self._schema is not None:
@@ -139,7 +139,7 @@ class SchemaCache:
             return
         self._schema = schema
 
-    def lookup_column(self, colname: str, candidate_tables: Iterable[TableReference]) -> Optional[TableReference]:
+    def lookup_column(self, colname: str, candidate_tables: Iterable[TableReference]) -> TableReference | None:
         """Resolves the table that defines a specific column.
 
         If no catalog is available, this method will always return *None*.
@@ -230,14 +230,14 @@ class QueryNamespace:
     """
 
     @staticmethod
-    def empty(schema: Optional[DatabaseSchema] = None, *, top_level: bool = False) -> QueryNamespace:
+    def empty(schema: DatabaseSchema | None = None, *, top_level: bool = False) -> QueryNamespace:
         QueryNamespace._schema_cache.initialize_with(schema)
         return QueryNamespace(top_level=top_level)
 
     def __init__(
         self,
         *,
-        parent: Optional[QueryNamespace] = None,
+        parent: QueryNamespace | None = None,
         top_level: bool = False,
     ) -> None:
         self._parent = parent
@@ -297,7 +297,7 @@ class QueryNamespace:
         self._column_cache: dict[str, TableReference] = {}
         """A cache to resolve common columns in the current context more quickly."""
 
-    def determine_output_shape(self, select_clause: Optional[Select | Iterable[ColumnReference | str]]) -> None:
+    def determine_output_shape(self, select_clause: Select | Iterable[ColumnReference | str] | None) -> None:
         """Determines the columns that form the result relation of this namespace.
 
         The result is only stored internally to allow parent namespaces to resolve column references correctly.
@@ -379,7 +379,7 @@ class QueryNamespace:
         """Checks, whether the current namespace has a specific column in its output relation."""
         return name in self._output_shape
 
-    def lookup_column(self, key: str) -> Optional[TableReference]:
+    def lookup_column(self, key: str) -> TableReference | None:
         """Searches for the table that provies a specific column.
 
         This table can be either virtual, i.e. a subquery or CTE (possibly from an outer namespace), or an actual physical
@@ -395,7 +395,7 @@ class QueryNamespace:
         if cached_table:
             return cached_table
 
-        matching_table: Optional[TableReference] = None
+        matching_table: TableReference | None = None
         for table in self._current_ctx:
             # later tables overwrite unqualified columns of earlier tables
             physical_table = self._schema_cache.lookup_column(key, [table]) if not table.virtual else None
@@ -424,7 +424,7 @@ class QueryNamespace:
         self._column_cache[key] = matching_table
         return matching_table
 
-    def resolve_table(self, key: str) -> Optional[TableReference]:
+    def resolve_table(self, key: str) -> TableReference | None:
         """Searches for the table that is referenced by a specific key.
 
         The table can be either provided by this namespace (as a physical table in the *FROM* clause, or defined through a
@@ -487,7 +487,7 @@ class QueryNamespace:
 
         return child
 
-    def _lookup_namespace(self, table_key: str) -> Optional[QueryNamespace]:
+    def _lookup_namespace(self, table_key: str) -> QueryNamespace | None:
         """Searches for the (parent) namespace that provides a specific table."""
         cte_nsp = self._cte_sources.get(table_key)
         if cte_nsp:
@@ -632,7 +632,7 @@ def _pglast_parse_const(pglast_data: dict) -> StaticValueExpression:
         case "isnull":
             return StaticValueExpression.null()
         case "ival":
-            val = pglast_data["ival"]["ival"] if "ival" in pglast_data["ival"] else 0
+            val = pglast_data["ival"].get("ival", 0)
             return StaticValueExpression(val)
         case "fval":
             val = pglast_data["fval"]["fval"]
@@ -1268,7 +1268,7 @@ def _pglast_parse_ctes(json_data: dict, *, parent_namespace: QueryNamespace, que
     return CommonTableExpression(parsed_ctes, recursive=recursive)
 
 
-def _pglast_try_select_star(target: dict, *, distinct: list[SqlExpression] | bool) -> Optional[Select]:
+def _pglast_try_select_star(target: dict, *, distinct: list[SqlExpression] | bool) -> Select | None:
     """Attempts to generate a *SELECT(\\*)* representation for a *SELECT* clause.
 
     If the query is not actually a *SELECT(\\*)* query, this method will return *None*.
@@ -1318,7 +1318,7 @@ def _pglast_parse_select(pglast_data: dict, *, namespace: QueryNamespace, query_
         The parsed *SELECT* clause
     """
 
-    pglast_distinct = pglast_data.get("distinctClause", None)
+    pglast_distinct = pglast_data.get("distinctClause")
     if pglast_distinct is None:
         distinct = False  # value not present --> no DISTINCT
     elif pglast_distinct == [{}]:  # that is pglasts encoding of a plain DISTINCT
@@ -1723,7 +1723,7 @@ def _pglast_parse_orderby(order_clause: list[dict], *, namespace: QueryNamespace
     return OrderBy(orderings)
 
 
-def _pglast_parse_limit(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> Optional[Limit]:
+def _pglast_parse_limit(pglast_data: dict, *, namespace: QueryNamespace, query_txt: str) -> Limit | None:
     """Handler method to parse LIMIT and OFFSET clauses.
 
     This method assumes that the given query actually contains *LIMIT* or *OFFSET* clauses and will fail otherwise.
@@ -1744,15 +1744,15 @@ def _pglast_parse_limit(pglast_data: dict, *, namespace: QueryNamespace, query_t
     Limit
         The limit clause. Can be *None* if no meaningful limit nor a meaningful offset is specified.
     """
-    raw_limit: Optional[dict] = pglast_data.get("limitCount", None)
-    raw_offset: Optional[dict] = pglast_data.get("limitOffset", None)
+    raw_limit: dict | None = pglast_data.get("limitCount")
+    raw_offset: dict | None = pglast_data.get("limitOffset")
     if raw_limit is None and raw_offset is None:
         return None
 
     if raw_limit is not None:
         # for LIMIT ALL there is no second ival, but instead an "isnull" member that is set to true
         raw_limit = raw_limit["A_Const"]["ival"]
-        nrows: int | None = raw_limit["ival"] if "ival" in raw_limit else None
+        nrows: int | None = raw_limit.get("ival", None)
     else:
         nrows = None
     if raw_offset is not None:
@@ -1853,7 +1853,7 @@ def _pglast_parse_setop(pglast_data: dict, *, parent_namespace: QueryNamespace, 
     )
 
 
-def _pglast_parse_explain(pglast_data: dict) -> tuple[Optional[Explain], dict]:
+def _pglast_parse_explain(pglast_data: dict) -> tuple[Explain | None, dict]:
     """Handler method to extract the *EXPLAIN* clause from a query.
 
     Parameters
@@ -1975,7 +1975,7 @@ def _pglast_parse_set_commands(
     """
     prep_stmts: list[str] = []
 
-    for i, item in enumerate(pglast_data):
+    for i, item in enumerate(pglast_data):  # noqa: B007 -- `i` is read after the loop, see the slice below
         stmt: dict = item["stmt"]
         if "VariableSetStmt" not in stmt:
             break
@@ -1997,7 +1997,7 @@ def _parse_hint_block(
     *,
     set_cmds: list[str],
     _current_hint_text: list[str] | None = None,
-) -> Optional[Hint]:
+) -> Hint | None:
     """Handler method to extract the hint block (i.e. preceding comments) from a query
 
     Parameters
@@ -2059,8 +2059,8 @@ def _parse_hint_block(
 def _apply_extra_clauses(
     parsed: SqlQuery,
     *,
-    hint: Optional[Hint],
-    explain_clause: Optional[Explain],
+    hint: Hint | None,
+    explain_clause: Explain | None,
 ) -> SqlQuery:
     clauses = list(parsed.clauses())
     if hint:
@@ -2080,8 +2080,8 @@ def parse_query(
     *,
     accept_set_query: Literal[True],
     include_hints: bool = ...,
-    bind_columns: Optional[bool] = ...,
-    db_schema: Optional[DatabaseSchema] = ...,
+    bind_columns: bool | None = ...,
+    db_schema: DatabaseSchema | None = ...,
 ) -> SqlQuery: ...
 
 
@@ -2091,8 +2091,8 @@ def parse_query(
     *,
     accept_set_query: Literal[False],
     include_hints: bool = ...,
-    bind_columns: Optional[bool] = ...,
-    db_schema: Optional[DatabaseSchema] = ...,
+    bind_columns: bool | None = ...,
+    db_schema: DatabaseSchema | None = ...,
 ) -> SelectStatement: ...
 
 
@@ -2101,8 +2101,8 @@ def parse_query(
     *,
     accept_set_query: bool = True,
     include_hints: bool = True,
-    bind_columns: Optional[bool] = None,
-    db_schema: Optional[DatabaseSchema] = None,
+    bind_columns: bool | None = None,
+    db_schema: DatabaseSchema | None = None,
 ) -> SqlQuery:
     """Parses a query string into a proper `SqlQuery` object.
 
@@ -2210,8 +2210,8 @@ def load_query(
     *,
     accept_set_query: bool = False,
     include_hints: bool = True,
-    bind_columns: Optional[bool] = None,
-    db_schema: Optional[DatabaseSchema] = None,
+    bind_columns: bool | None = None,
+    db_schema: DatabaseSchema | None = None,
 ) -> SqlQuery:
     """Loads and parses a single query from a file.
 

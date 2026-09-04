@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Literal, Optional, overload
+from typing import Literal, overload
 
 from .. import util
 from .._core import quote
@@ -244,7 +244,7 @@ def _quick_format_select(
     select_clause: Select,
     *,
     flavor: SqlDialect,
-    inlined_hint_block: Optional[Hint] = None,
+    inlined_hint_block: Hint | None = None,
 ) -> list[str]:
     """Quick and dirty formatting logic for *SELECT* clauses.
 
@@ -544,11 +544,13 @@ def _quick_format_limit(limit_clause: Limit, *, flavor: SqlDialect) -> list[str]
             return []
 
         case "postgres" if limit_clause.fetch_direction in {"prior", "last"}:
-            warnings.warn("Postgres does not support FETCH PRIOR and FETCH LAST. Falling back to naive formatting")
+            warnings.warn(
+                "Postgres does not support FETCH PRIOR and FETCH LAST. Falling back to naive formatting", stacklevel=2
+            )
             return [str(limit_clause)]
 
         case _:
-            warnings.warn("Unknown SQL flavor for LIMIT clauses. Falling back to naive formatting")
+            warnings.warn("Unknown SQL flavor for LIMIT clauses. Falling back to naive formatting", stacklevel=2)
             return [str(limit_clause)]
 
 
@@ -951,7 +953,7 @@ def _quick_format_set_query(
     flavor: SqlDialect,
     inline_hint_block: bool,
     trailing_semicolon: bool,
-    custom_formatter: Optional[Callable[[SqlQuery], SqlQuery]],
+    custom_formatter: Callable[[SqlQuery], SqlQuery] | None,
 ) -> str:
     """Quick and dirty formatting logic for set queries.
 
@@ -1026,7 +1028,7 @@ class _PostgresCastExpression(CastExpression):
         expression: SqlExpression,
         target_type: str,
         *,
-        type_params: Optional[Sequence[SqlExpression]] = None,
+        type_params: Sequence[SqlExpression] | None = None,
         array_type: bool = False,
     ) -> None:
         super().__init__(
@@ -1061,7 +1063,7 @@ def format_quick(
     flavor: SqlDialect = "vanilla",
     inline_hint_block: bool = False,
     trailing_semicolon: bool = True,
-    custom_formatter: Optional[Callable[[SqlQuery], SqlQuery]] = None,
+    custom_formatter: Callable[[SqlQuery], SqlQuery] | None = None,
 ) -> str:
     """Applies a quick formatting heuristic to structure the given query.
 

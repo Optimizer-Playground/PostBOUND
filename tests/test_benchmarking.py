@@ -179,12 +179,12 @@ class StatsBenchmarkTests(unittest.TestCase):
         self.assertTrue((results["status"] == "ok").all())
 
     def test_result_streaming(self) -> None:
-        out_file = tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8")
-        pb.bench.execute_workload(
-            self.stats.first(3),
-            on=self.pg_instance,
-            progressive_output=out_file.name,
-        )
+        with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as out_file:
+            pb.bench.execute_workload(
+                self.stats.first(3),
+                on=self.pg_instance,
+                progressive_output=out_file.name,
+            )
 
     def test_optimization_error(self) -> None:
         estimator = FailingCardinalityEstimator()

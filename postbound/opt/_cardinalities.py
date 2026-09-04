@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import random
 from collections.abc import Iterable
-from typing import Literal, Optional
+from typing import Literal
 
 import pandas as pd
 
@@ -43,7 +43,7 @@ class PreciseCardinalities(CardinalityEstimator):
 
     def __init__(
         self,
-        database: Optional[Database] = None,
+        database: Database | None = None,
         *,
         enable_cache: bool = False,
         allow_cross_products: bool = False,
@@ -141,13 +141,13 @@ class PreComputedCardinalities(CardinalityEstimator):
         lookup_table_path: str,
         *,
         include_cross_products: bool = False,
-        default_cardinality: Optional[Cardinality] = None,
+        default_cardinality: Cardinality | None = None,
         label_col: str = "label",
         tables_col: str = "tables",
         cardinality_col: str = "cardinality",
         live_fallback: bool = False,
         error_on_missing_card: bool = True,
-        live_db: Optional[Database] = None,
+        live_db: Database | None = None,
         live_fallback_style: Literal["actual", "estimated"] = "estimated",
         save_live_fallback_results: bool = True,
     ) -> None:
@@ -160,7 +160,7 @@ class PreComputedCardinalities(CardinalityEstimator):
         self._lookup_df_path = lookup_table_path
 
         self._error_on_missing_card = error_on_missing_card
-        self._live_db: Optional[Database] = None
+        self._live_db: Database | None = None
         if live_fallback:
             self._live_db = DatabasePool.get_instance().current_database() if live_db is None else live_db
         else:

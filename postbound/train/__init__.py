@@ -39,10 +39,10 @@ from ._train import (
 )
 
 __all__ = [
-    "TrainingFeature",
-    "TrainingSpec",
     "SpecViolations",
     "TrainingData",
     "TrainingDataRepository",
+    "TrainingFeature",
     "TrainingMetrics",
+    "TrainingSpec",
 ]

@@ -5,12 +5,11 @@ from __future__ import annotations
 import os
 import sys
 import warnings
-from typing import Optional
 
 from . import proc
 
 
-def open_files(pid: Optional[int] = None) -> list[str]:
+def open_files(pid: int | None = None) -> list[str]:
     """Provides all files (e.g. text files and shared objects) opened by the given process/PID.
 
     Parameters
@@ -23,7 +22,7 @@ def open_files(pid: Optional[int] = None) -> list[str]:
     list[str]
         All opened files
     """
-    if not os.name == "posix":
+    if os.name != "posix":
         warnings.warn("Can only check for open files on POSIX systems.", stacklevel=2)
         return []
 

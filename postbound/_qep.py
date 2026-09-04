@@ -6,7 +6,7 @@ import math
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Number
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from . import util
 from ._core import (
@@ -205,12 +205,12 @@ class PlanParams:
     def __init__(
         self,
         *,
-        base_table: Optional[TableReference] = None,
-        filter_predicate: Optional[AbstractPredicate] = None,
-        sort_keys: Optional[Sequence[SortKey]] = None,
-        parallel_workers: Optional[int] = None,
-        index: Optional[str] = None,
-        lookup_key: Optional[SqlExpression] = None,
+        base_table: TableReference | None = None,
+        filter_predicate: AbstractPredicate | None = None,
+        sort_keys: Sequence[SortKey] | None = None,
+        parallel_workers: int | None = None,
+        index: str | None = None,
+        lookup_key: SqlExpression | None = None,
         **kwargs,
     ) -> None:
         self._params: dict[str, Any] = {
@@ -224,12 +224,12 @@ class PlanParams:
         }
 
     @property
-    def base_table(self) -> Optional[TableReference]:
+    def base_table(self) -> TableReference | None:
         """Get the base table that is being scanned. For non-scan nodes, this is *None*."""
         return self._params["base_table"]
 
     @property
-    def filter_predicate(self) -> Optional[AbstractPredicate]:
+    def filter_predicate(self) -> AbstractPredicate | None:
         """Get the filter predicate that is used to restrict the tuples in the output of a relation.
 
         For join nodes this would be the join condition and for scan nodes this would be the filter conditions from the
@@ -274,7 +274,7 @@ class PlanParams:
         return self._params["index"]
 
     @property
-    def lookup_key(self) -> Optional[SqlExpression]:
+    def lookup_key(self) -> SqlExpression | None:
         """Get the expression that is used to lookup tuples in some indexing structure.
 
         For scans, this could actually be the physical index. In this case, the lookup expression should be the one that is
@@ -371,7 +371,7 @@ class PlanParams:
     def __copy__(self) -> PlanParams:
         return PlanParams(**self._params)
 
-    def __deepcopy__(self, memo: dict[int, object] = {}) -> PlanParams:
+    def __deepcopy__(self, memo: dict[int, object] | None = None) -> PlanParams:
         params = copy.deepcopy(self._params, memo)
         return PlanParams(**params)
 
@@ -516,7 +516,7 @@ class PlanEstimates:
     def __copy__(self) -> PlanEstimates:
         return PlanEstimates(**self._params)
 
-    def __deepcopy__(self, memo: dict[int, object] = {}) -> PlanEstimates:
+    def __deepcopy__(self, memo: dict[int, object] | None = None) -> PlanEstimates:
         params = copy.deepcopy(self._params, memo)
         return PlanEstimates(**params)
 
@@ -589,8 +589,8 @@ class PlanMeasures:
         *,
         cardinality: Cardinality | float | None = Cardinality.unknown(),
         execution_time: float = math.nan,
-        cache_hits: Optional[int] = None,
-        cache_misses: Optional[int] = None,
+        cache_hits: int | None = None,
+        cache_misses: int | None = None,
         **kwargs,
     ) -> None:
         cardinality = Cardinality.of(cardinality)
@@ -613,7 +613,7 @@ class PlanMeasures:
         return self._params["execution_time"]
 
     @property
-    def cache_hits(self) -> Optional[int]:
+    def cache_hits(self) -> int | None:
         """Get the number of page reads that were satisfied by the shared buffer.
 
         If no measurement is available, *None* is returned.
@@ -621,7 +621,7 @@ class PlanMeasures:
         return self._params["cache_hits"]
 
     @property
-    def cache_misses(self) -> Optional[int]:
+    def cache_misses(self) -> int | None:
         """Get the number of page reads that had to be delegated to the disk and could not be satisfied by the shared buffer.
 
         If no measurement is available, *None* is returned.
@@ -688,7 +688,7 @@ class PlanMeasures:
     def __copy__(self) -> PlanMeasures:
         return PlanMeasures(**self._params)
 
-    def __deepcopy__(self, memo: dict[int, object] = {}) -> PlanMeasures:
+    def __deepcopy__(self, memo: dict[int, object] | None = None) -> PlanMeasures:
         params = copy.deepcopy(self._params, memo)
         return PlanMeasures(**params)
 
@@ -778,7 +778,7 @@ class Subplan:
     def __copy__(self) -> Subplan:
         return Subplan(self.root.clone(deep=False), self.target_name)
 
-    def __deepcopy__(self, memo: dict[int, object] = {}) -> Subplan:
+    def __deepcopy__(self, memo: dict[int, object] | None = None) -> Subplan:
         return Subplan(self.root.clone(deep=True), self.target_name)
 
 
@@ -921,25 +921,25 @@ class QueryPlan:
         self,
         node_type: str | PhysicalOperator,
         *,
-        operator: Optional[PhysicalOperator] = None,
-        children: Optional[QueryPlan | Iterable[QueryPlan]] = None,
-        plan_params: Optional[PlanParams] = None,
-        subplan: Optional[Subplan] = None,
-        estimates: Optional[PlanEstimates] = None,
-        measures: Optional[PlanMeasures] = None,
-        base_table: Optional[TableReference] = None,
-        filter_predicate: Optional[AbstractPredicate] = None,
-        parallel_workers: Optional[int] = None,
-        index: Optional[str] = None,
-        sort_keys: Optional[Sequence[SortKey]] = None,
-        lookup_key: Optional[SqlExpression] = None,
+        operator: PhysicalOperator | None = None,
+        children: QueryPlan | Iterable[QueryPlan] | None = None,
+        plan_params: PlanParams | None = None,
+        subplan: Subplan | None = None,
+        estimates: PlanEstimates | None = None,
+        measures: PlanMeasures | None = None,
+        base_table: TableReference | None = None,
+        filter_predicate: AbstractPredicate | None = None,
+        parallel_workers: int | None = None,
+        index: str | None = None,
+        sort_keys: Sequence[SortKey] | None = None,
+        lookup_key: SqlExpression | None = None,
         estimated_cardinality: Cardinality | float | None = Cardinality.unknown(),
         estimated_cost: Cost = math.nan,
         actual_cardinality: Cardinality | float | None = Cardinality.unknown(),
         execution_time: float = math.nan,
-        cache_hits: Optional[int] = None,
-        cache_misses: Optional[int] = None,
-        subplan_root: Optional[QueryPlan] = None,
+        cache_hits: int | None = None,
+        cache_misses: int | None = None,
+        subplan_root: QueryPlan | None = None,
         subplan_target_name: str = "",
         **kwargs,
     ) -> None:
@@ -1024,7 +1024,7 @@ class QueryPlan:
         return self._node_type
 
     @property
-    def operator(self) -> Optional[PhysicalOperator]:
+    def operator(self) -> PhysicalOperator | None:
         """Get the actual operator that is used to compute the result set.
 
         For transient operators (e.g. hash tables), this can be *None*.
@@ -1032,7 +1032,7 @@ class QueryPlan:
         return self._operator
 
     @property
-    def input_node(self) -> Optional[QueryPlan]:
+    def input_node(self) -> QueryPlan | None:
         """Get the input node of the current operator.
 
         For nodes without an input (e.g. most scans), or nodes with multiple inputs (e.g. joins), this is *None*.
@@ -1050,7 +1050,7 @@ class QueryPlan:
         return self._children
 
     @property
-    def outer_child(self) -> Optional[QueryPlan]:
+    def outer_child(self) -> QueryPlan | None:
         """Get the outer input of the current operator.
 
         For nodes that do not have exactly two inputs, this is *None*.
@@ -1060,7 +1060,7 @@ class QueryPlan:
         return None
 
     @property
-    def inner_child(self) -> Optional[QueryPlan]:
+    def inner_child(self) -> QueryPlan | None:
         """Get the inner input of the current operator.
 
         For nodes that do not have exactly two inputs, this is *None*.
@@ -1085,7 +1085,7 @@ class QueryPlan:
         return self._plan_params
 
     @property
-    def base_table(self) -> Optional[TableReference]:
+    def base_table(self) -> TableReference | None:
         """Get the table that is being scanned. For non-scan nodes, this will probably is *None*.
 
         This is just a shorthand for accessing the plan parameters manually.
@@ -1097,7 +1097,7 @@ class QueryPlan:
         return self._plan_params.base_table
 
     @property
-    def filter_predicate(self) -> Optional[AbstractPredicate]:
+    def filter_predicate(self) -> AbstractPredicate | None:
         """Get the filter predicate that is used to restrict the tuples in the output of a relation.
 
         This is just a shorthand for accessing the plan parameters manually.
@@ -1123,7 +1123,7 @@ class QueryPlan:
         return self._plan_params.sort_keys
 
     @property
-    def lookup_key(self) -> Optional[SqlExpression]:
+    def lookup_key(self) -> SqlExpression | None:
         """Get the expression that is used to lookup tuples in some indexing structure.
 
         This is just a shorthand for accessing the plan parameters manually.
@@ -1225,7 +1225,7 @@ class QueryPlan:
         return self.execution_time - child_time
 
     @property
-    def subplan(self) -> Optional[Subplan]:
+    def subplan(self) -> Subplan | None:
         """Get the subplan that has to be executed as part of this node."""
         return self._subplan
 
@@ -1391,7 +1391,7 @@ class QueryPlan:
         """
         return 1 + max((child.plan_depth() for child in self.children), default=0)
 
-    def fetch_base_table(self) -> Optional[TableReference]:
+    def fetch_base_table(self) -> TableReference | None:
         """Retrieves the base table that is being scanned by the plan.
 
         The base table is only specified for plans that directly lead to a scan node, as defined by `is_scan_branch()`.
@@ -1405,7 +1405,7 @@ class QueryPlan:
             return self.children[0].fetch_base_table()
         return None
 
-    def outermost_scan(self) -> Optional[QueryPlan]:
+    def outermost_scan(self) -> QueryPlan | None:
         """Retrieves the scan node that is furthest to the "left", i.e. on the outer-most position in the plan."""
         if self.is_scan():
             return self
@@ -1435,9 +1435,9 @@ class QueryPlan:
 
     def iternodes(self) -> Iterable[QueryPlan]:
         """Provides all nodes that are contained in the plan in depth-first order, prioritizing outer child nodes."""
-        return util.flatten(child.iternodes() for child in self._children) + [self]
+        return [*util.flatten(child.iternodes() for child in self._children), self]
 
-    def lookup(self, tables: TableReference | Iterable[TableReference]) -> Optional[QueryPlan]:
+    def lookup(self, tables: TableReference | Iterable[TableReference]) -> QueryPlan | None:
         """Traverse the plan to find a specific intermediate node.
 
         If two nodes compute the same intermediate (i.e. provide the same tables), the node that is higher up in the plan is
@@ -1476,7 +1476,7 @@ class QueryPlan:
         *args,
         direction: JoinDirection = "outer",
         **kwargs,
-    ) -> Optional[QueryPlan]:
+    ) -> QueryPlan | None:
         """Recursively searches for the first node that matches a specific predicate.
 
         Parameters
@@ -1613,8 +1613,8 @@ class QueryPlan:
     def with_estimates(
         self,
         *,
-        cardinality: Optional[Cardinality] = None,
-        cost: Optional[Cost] = None,
+        cardinality: Cardinality | None = None,
+        cost: Cost | None = None,
         keep_measures: bool = False,
     ) -> QueryPlan:
         """Replaces the current estimates of the operator with new ones.
@@ -1649,7 +1649,7 @@ class QueryPlan:
     def with_actual_card(
         self,
         *,
-        cost_estimator: Optional[Callable[[QueryPlan, Cardinality], Cost]] = None,
+        cost_estimator: Callable[[QueryPlan, Cardinality], Cost] | None = None,
         ignore_nan: bool = True,
     ) -> QueryPlan:
         """Replaces the current estimates of the operator with the actual measurements.
@@ -1827,7 +1827,7 @@ class QueryPlan:
             subplan=updated_subplan,
         )
 
-    def inspect(self, *, fields: Optional[Iterable[str]] = None) -> str:
+    def inspect(self, *, fields: Iterable[str] | None = None) -> str:
         """Provides a human-readable representation of the query plan, inspired by Postgre's *EXPLAIN* output.
 
         By default, the output will contain fields akin to the *EXPLAIN* output of Postgres. For example, this includes the
@@ -1895,7 +1895,7 @@ class QueryPlan:
             subplan=self._subplan.clone(deep=False) if self._subplan else None,
         )
 
-    def __deepcopy__(self, memo: dict[int, object] = {}) -> QueryPlan:
+    def __deepcopy__(self, memo: dict[int, object] | None = None) -> QueryPlan:
         return QueryPlan(
             self._node_type,
             operator=self._operator,

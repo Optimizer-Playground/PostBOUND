@@ -30,7 +30,7 @@ import zipfile
 from collections import UserDict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, Optional, cast, overload
+from typing import Literal, cast, overload
 
 import natsort
 import pandas as pd
@@ -185,7 +185,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             matching_files = root.glob(query_file_pattern)
 
         for query_file_path in matching_files:
-            with open(query_file_path, "r", encoding=file_encoding) as query_file:
+            with open(query_file_path, encoding=file_encoding) as query_file:
                 raw_contents = query_file.readlines()
             query_contents = "\n".join([line for line in raw_contents])
 
@@ -198,9 +198,9 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
             except Exception as e:
                 match on_error:
                     case "raise":
-                        raise ValueError(f"Could not parse query from {query_file_path}", e)
+                        raise ValueError(f"Could not parse query from {query_file_path}", e) from e
                     case "warn":
-                        warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})")
+                        warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})", stacklevel=2)
                     case "ignore":
                         pass
 
@@ -213,7 +213,7 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         self,
         queries: Mapping[L, Q],
         name: str = "",
-        root: Optional[Path] = None,
+        root: Path | None = None,
     ) -> None:
         super().__init__(queries)
         self._name = name
@@ -270,9 +270,9 @@ class Workload[L: Hashable, Q: SqlQuery](UserDict[L, Q]):
         Sequence[tuple[LabelType, SqlQuery]]
             The queries along with their labels
         """
-        return list(zip(self._sorted_labels, self._sorted_queries))
+        return list(zip(self._sorted_labels, self._sorted_queries, strict=False))
 
-    def head(self) -> Optional[tuple[L, Q]]:
+    def head(self) -> tuple[L, Q] | None:
         """Provides the first query in the workload.
 
         The first query is determined according to the natural order of the query labels by default. If that order was manually
@@ -671,7 +671,7 @@ def read_workload(
         matching_files = root.glob(query_file_pattern)
 
     for query_file_path in matching_files:
-        with open(query_file_path, "r", encoding=file_encoding) as query_file:
+        with open(query_file_path, encoding=file_encoding) as query_file:
             raw_contents = query_file.readlines()
         query_contents = "\n".join([line for line in raw_contents])
 
@@ -684,9 +684,9 @@ def read_workload(
         except Exception as e:
             match on_error:
                 case "raise":
-                    raise ValueError(f"Could not parse query from {query_file_path}", e)
+                    raise ValueError(f"Could not parse query from {query_file_path}", e) from e
                 case "warn":
-                    warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})")
+                    warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})", stacklevel=2)
                 case "ignore":
                     pass
 
@@ -746,7 +746,7 @@ def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "
     """
     filepath = Path(filename)
     name = name if name else filepath.stem
-    with open(filename, "r", encoding=file_encoding) as query_file:
+    with open(filename, encoding=file_encoding) as query_file:
         raw_queries = query_file.readlines()
         parsed_queries = [parser.parse_query(raw) for raw in raw_queries if raw]
         return generate_workload(parsed_queries, name=name, workload_root=filepath)
@@ -760,7 +760,7 @@ def read_csv_workload(
     query_column: str = "query",
     label_column: str,
     file_encoding: str = "utf-8",
-    pd_args: Optional[dict] = None,
+    pd_args: dict | None = None,
 ) -> Workload[str, SqlQuery]: ...
 
 
@@ -772,7 +772,7 @@ def read_csv_workload(
     query_column: str = "query",
     label_column: Literal[None],
     file_encoding: str = "utf-8",
-    pd_args: Optional[dict] = None,
+    pd_args: dict | None = None,
 ) -> Workload[int, SqlQuery]: ...
 
 
@@ -781,9 +781,9 @@ def read_csv_workload(
     name: str = "",
     *,
     query_column: str = "query",
-    label_column: Optional[str] = None,
+    label_column: str | None = None,
     file_encoding: str = "utf-8",
-    pd_args: Optional[dict] = None,
+    pd_args: dict | None = None,
 ) -> Workload[str, SqlQuery] | Workload[int, SqlQuery]:
     """Loads a workload consisting of queries from a CSV column.
 
@@ -844,7 +844,7 @@ def read_csv_workload(
     queries = workload_df[query_column].tolist()
     if label_column:
         labels = workload_df[label_column].tolist()
-        label_provider = dict(zip(queries, labels))
+        label_provider = dict(zip(queries, labels, strict=False))
     else:
         label_provider = None
 
@@ -855,8 +855,8 @@ def generate_workload[L: Hashable, Q: SqlQuery](
     queries: Iterable[Q],
     *,
     name: str = "",
-    labels: Optional[Mapping[Q, L]] = None,
-    workload_root: Optional[Path | str] = None,
+    labels: Mapping[Q, L] | None = None,
+    workload_root: Path | str | None = None,
 ) -> Workload[L, Q]:
     """Wraps a number of queries in a workload object.
 
@@ -1007,7 +1007,7 @@ def job_complex(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatemen
     return cast(Workload[str, SelectStatement], job_complex_workload)
 
 
-def ssb(*, file_encoding: str = "utf-8", bind_columns: Optional[bool] = None) -> Workload[str, SelectStatement]:
+def ssb(*, file_encoding: str = "utf-8", bind_columns: bool | None = None) -> Workload[str, SelectStatement]:
     """Reads the Star Schema Benchmark, with labels according to the original data (e.g. *q1-1*, *q3-2*, etc.).
 
     Parameters
@@ -1039,7 +1039,7 @@ def ssb(*, file_encoding: str = "utf-8", bind_columns: Optional[bool] = None) ->
 def stack(
     *,
     file_encoding: str = "utf-8",
-    bind_columns: Optional[bool] = None,
+    bind_columns: bool | None = None,
 ) -> Workload[str, SelectStatement]:
     """Reads the Stack Benchmark, as shipped with the PostBOUND repository.
 

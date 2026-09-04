@@ -48,7 +48,7 @@ def main():
 
     for query_file in query_files:
         labels.append(query_file.stem)
-        with open(query_file, "r", encoding="utf-8") as raw_query:
+        with open(query_file, encoding="utf-8") as raw_query:
             query_text = "".join(raw_query.readlines())
             queries.append(query_text)
 

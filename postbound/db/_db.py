@@ -23,7 +23,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Literal, Optional, Protocol, Type, overload, runtime_checkable
+from typing import Any, Literal, Protocol, overload, runtime_checkable
 
 import networkx as nx
 
@@ -73,15 +73,15 @@ class Cursor(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    def execute(self, operation: str, parameters: Optional[dict | Sequence] = None) -> Optional[Cursor]:
+    def execute(self, operation: str, parameters: dict | Sequence | None = None) -> Cursor | None:
         raise NotImplementedError
 
     @abstractmethod
-    def fetchone(self) -> Optional[ResultRow]:
+    def fetchone(self) -> ResultRow | None:
         raise NotImplementedError
 
     @abstractmethod
-    def fetchall(self) -> Optional[ResultSet]:
+    def fetchall(self) -> ResultSet | None:
         raise NotImplementedError
 
 
@@ -117,7 +117,7 @@ class PrewarmingSupport(Protocol):
     @abstractmethod
     def prewarm_tables(
         self,
-        tables: Optional[TableReference | Iterable[TableReference]] = None,
+        tables: TableReference | Iterable[TableReference] | None = None,
         *more_tables: TableReference,
         exclude_table_pages: bool = False,
         include_primary_index: bool = True,
@@ -160,7 +160,7 @@ class PrewarmingSupport(Protocol):
 class TimeoutSupport(Protocol):
     """Marks database systems that support executing queries with a timeout."""
 
-    def execute_with_timeout(self, query: SqlQuery | str, *, timeout: float = 60.0) -> Optional[ResultSet]:
+    def execute_with_timeout(self, query: SqlQuery | str, *, timeout: float = 60.0) -> ResultSet | None:
         """Executes a query with a specific timeout.
 
         For query execution, we use the following rules in contrast to `Database.execute_query`:
@@ -191,7 +191,7 @@ class TimeoutSupport(Protocol):
 class StopwatchSupport(Protocol):
     """Marks the database systems that support measurement of query execution times."""
 
-    def time_query(self, query: SqlQuery | str, *, timeout: Optional[float] = None) -> float:
+    def time_query(self, query: SqlQuery | str, *, timeout: float | None = None) -> float:
         """Determines the execution time of a query.
 
         The execution time is measured from the moment the query is passed to the internal cursor (i.e. including sending the
@@ -443,10 +443,10 @@ class Database(ABC):
         self,
         query: SqlQuery,
         *,
-        plan: Optional[QueryPlan] = None,
-        join_order: Optional[JoinTree] = None,
-        physical_ops: Optional[PhysicalOperatorAssignment] = None,
-        plan_params: Optional[PlanParameterization] = None,
+        plan: QueryPlan | None = None,
+        join_order: JoinTree | None = None,
+        physical_ops: PhysicalOperatorAssignment | None = None,
+        plan_params: PlanParameterization | None = None,
     ) -> QueryPlan:
         """Shortcut method to obtain the query plan for a given query.
 
@@ -551,7 +551,7 @@ class Database(ABC):
         """Shuts down all currently open connections to the database."""
         raise NotImplementedError
 
-    def provides(self, support: Type) -> bool:
+    def provides(self, support: type) -> bool:
         """Checks, whether the database interface supports a specific protocol."""
         return isinstance(self, support)
 
@@ -810,7 +810,7 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
         candidate_tables: Iterable[TableReference],
         *,
         expect_match: bool = False,
-    ) -> Optional[TableReference]:
+    ) -> TableReference | None:
         """Searches for a table that owns the given column.
 
         Parameters
@@ -905,7 +905,7 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
 
         return result_set is not None
 
-    def primary_key_column(self, table: TableReference | str) -> Optional[BoundColumnReference]:
+    def primary_key_column(self, table: TableReference | str) -> BoundColumnReference | None:
         """Determines the primary key column of a specific table.
 
         Parameters
@@ -1102,7 +1102,7 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
         if table.catalog:
             params.append(table.catalog)
         if table.schema:
-            params = [table.schema] + params
+            params = [table.schema, *params]
 
         cur = self._db.cursor()
         cur.execute(query_template, params)
@@ -1484,7 +1484,7 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
                     ref = ColumnReference(col, TableReference(tab))
                     return self[ref]
                 except KeyError:
-                    raise KeyError(f"Key '{key}' not found in database schema")
+                    raise KeyError(f"Key '{key}' not found in database schema") from None
             case _:
                 raise KeyError(
                     f"Unsupported key type: {type(key).__name__}. "
@@ -1576,18 +1576,18 @@ class MostCommonValues[T]:
         return list(self._mcv_map.values())
 
     @overload
-    def frequency_of(self, value: T) -> Optional[int]: ...
+    def frequency_of(self, value: T) -> int | None: ...
 
     @overload
     def frequency_of(self, value: T, *, bound_missing: Literal[True]) -> int: ...
 
     @overload
-    def frequency_of(self, value: T, *, bound_missing: Literal[False]) -> Optional[int]: ...
+    def frequency_of(self, value: T, *, bound_missing: Literal[False]) -> int | None: ...
 
     @overload
     def frequency_of(self, value: T, *, default: int) -> int: ...
 
-    def frequency_of(self, value: T, *, default: int | None = None, bound_missing: bool = False) -> Optional[int]:
+    def frequency_of(self, value: T, *, default: int | None = None, bound_missing: bool = False) -> int | None:
         """Load the frequency of a specific value.
 
         Parameters
@@ -1849,7 +1849,7 @@ class Histogram[T: _HistElem]:
         return len(self._bounds)
 
     def __iter__(self) -> Iterator[tuple[T, int]]:
-        return iter(zip(self._bounds, self._frequencies))
+        return iter(zip(self._bounds, self._frequencies, strict=False))
 
     def __getitem__(self, idx: int) -> tuple[T, int]:
         return self._bounds[idx], self._frequencies[idx]
@@ -1877,7 +1877,7 @@ class Histogram[T: _HistElem]:
         return str(self)
 
     def __str__(self) -> str:
-        buckets = ", ".join(f"{bound} ({freq})" for bound, freq in zip(self._bounds, self._frequencies))
+        buckets = ", ".join(f"{bound} ({freq})" for bound, freq in zip(self._bounds, self._frequencies, strict=False))
         return f"Histogram(buckets=[{buckets}], lower={self._lower})"
 
 
@@ -1935,7 +1935,7 @@ class DatabaseStatistics(ABC):
     """
 
     @abstractmethod
-    def total_rows(self, table: TableReference) -> Optional[Cardinality]:
+    def total_rows(self, table: TableReference) -> Cardinality | None:
         """Provides (an estimate of) the total number of rows in a table.
 
         Parameters
@@ -1959,7 +1959,7 @@ class DatabaseStatistics(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def num_distinct(self, column: ColumnReference) -> Optional[int]:
+    def num_distinct(self, column: ColumnReference) -> int | None:
         """Provides (an estimate of) the total number of different column values of a specific column.
 
         Parameters
@@ -1985,7 +1985,7 @@ class DatabaseStatistics(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def null_frac(self, column: ColumnReference) -> Optional[float]:
+    def null_frac(self, column: ColumnReference) -> float | None:
         """Provides (an estimate of) the fraction of NULL values in a column.
 
         Parameters
@@ -2010,7 +2010,7 @@ class DatabaseStatistics(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def min_max(self, column: ColumnReference) -> Optional[tuple[Any, Any]]:
+    def min_max(self, column: ColumnReference) -> tuple[Any, Any] | None:
         """Provides (an estimate of) the minimum and maximum values in a column.
 
         Parameters
@@ -2035,7 +2035,7 @@ class DatabaseStatistics(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def most_common_values(self, column: ColumnReference) -> Optional[MostCommonValues]:
+    def most_common_values(self, column: ColumnReference) -> MostCommonValues | None:
         """Provides (an estimate of) the total number of occurrences of the `k` most frequent values of a column.
 
         Parameters
@@ -2064,7 +2064,7 @@ class DatabaseStatistics(ABC):
     @abstractmethod
     def histogram(
         self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni"
-    ) -> Optional[Histogram]:
+    ) -> Histogram | None:
         """Provides (an estimate of) the value distribution of a column.
 
         This method does not restrict the kind of histogram (e.g., equi-width vs. equi-depth vs. v-optimal) that will
@@ -2125,11 +2125,11 @@ class HintService(ABC):
     def generate_hints(
         self,
         query: SqlQuery,
-        plan: Optional[QueryPlan] = None,
+        plan: QueryPlan | None = None,
         *,
-        join_order: Optional[JoinTree] = None,
-        physical_operators: Optional[PhysicalOperatorAssignment] = None,
-        plan_parameters: Optional[PlanParameterization] = None,
+        join_order: JoinTree | None = None,
+        physical_operators: PhysicalOperatorAssignment | None = None,
+        plan_parameters: PlanParameterization | None = None,
     ) -> SqlQuery:
         """Transforms the input query such that the given optimization decisions are respected during query execution.
 
@@ -2283,7 +2283,7 @@ class OptimizerInterface(ABC):
         return self.analyze_plan(query)
 
     @abstractmethod
-    def parse_plan(self, plan: Any, *, query: Optional[SqlQuery] = None) -> QueryPlan:
+    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
         """Transforms the system-specific EXPLAIN output into a standardized `QueryPlan`.
 
         The optional `query` can be used to provide additional context for the plan. This can be used by
@@ -2524,7 +2524,7 @@ class DatabaseServerError(RuntimeError):
         intended for debugging purposes.
     """
 
-    def __init__(self, message: str = "", context: Optional[object] = None) -> None:
+    def __init__(self, message: str = "", context: object | None = None) -> None:
         super().__init__(message)
         self.ctx = context
 
@@ -2543,6 +2543,6 @@ class DatabaseUserError(RuntimeError):
         intended for debugging purposes.
     """
 
-    def __init__(self, message: str = "", context: Optional[object] = None) -> None:
+    def __init__(self, message: str = "", context: object | None = None) -> None:
         super().__init__(message)
         self.ctx = context

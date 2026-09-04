@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Collection, Mapping
-from typing import Optional, Protocol, Self
+from typing import Protocol, Self
 
 from ._core import TimeMs
 from ._hints import PhysicalOperatorAssignment, PlanParameterization
@@ -321,9 +321,9 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
         extracted from the `DatabasePool`.
     """
 
-    def __init__(self, target_db: Optional[Database] = None) -> None:
+    def __init__(self, target_db: Database | None = None) -> None:
         self._target_db = target_db if target_db is not None else DatabasePool.get_instance().current_database()
-        self._optimization_algorithm: Optional[CompleteOptimizationAlgorithm] = None
+        self._optimization_algorithm: CompleteOptimizationAlgorithm | None = None
         self._build = False
         super().__init__()
 
@@ -350,7 +350,7 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
         self._target_db = system
 
     @property
-    def optimization_algorithm(self) -> Optional[CompleteOptimizationAlgorithm]:
+    def optimization_algorithm(self) -> CompleteOptimizationAlgorithm | None:
         """The optimization algorithm is used each time a query should be optimized.
 
         Returns
@@ -716,7 +716,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         self._build = False
 
     @property
-    def pre_check(self) -> Optional[OptimizationPreCheck]:
+    def pre_check(self) -> OptimizationPreCheck | None:
         """An overarching check that should be applied to all queries before they are optimized.
 
         This check complements the pre checks of the individual stages and can be used to enforce experiment-specific
@@ -730,7 +730,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         return self._pre_check
 
     @property
-    def join_order_enumerator(self) -> Optional[JoinOrderOptimization]:
+    def join_order_enumerator(self) -> JoinOrderOptimization | None:
         """The selected join order optimization algorithm.
 
         Returns
@@ -741,7 +741,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         return self._join_order_enumerator
 
     @property
-    def physical_operator_selection(self) -> Optional[PhysicalOperatorSelection]:
+    def physical_operator_selection(self) -> PhysicalOperatorSelection | None:
         """The selected operator selection algorithm.
 
         Returns
@@ -752,7 +752,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         return self._physical_operator_selection
 
     @property
-    def plan_parameterization(self) -> Optional[ParameterGeneration]:
+    def plan_parameterization(self) -> ParameterGeneration | None:
         """The selected parameterization algorithm.
 
         Returns
@@ -1037,7 +1037,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
 
     def __init__(self, target_db: Database) -> None:
         self._target_db = target_db
-        self._initial_plan_generator: Optional[CompleteOptimizationAlgorithm] = None
+        self._initial_plan_generator: CompleteOptimizationAlgorithm | None = None
         self._optimization_steps: list[IncrementalOptimizationStep] = []
 
     @property
@@ -1064,7 +1064,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         self._target_db = database
 
     @property
-    def initial_plan_generator(self) -> Optional[CompleteOptimizationAlgorithm]:
+    def initial_plan_generator(self) -> CompleteOptimizationAlgorithm | None:
         """Strategy to construct the first physical query execution plan to start the incremental optimization.
 
         If no initial generator is selected, the initial plan will be derived from the optimizer of the target
@@ -1083,7 +1083,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         return self._initial_plan_generator
 
     @initial_plan_generator.setter
-    def initial_plan_generator(self, plan_generator: Optional[CompleteOptimizationAlgorithm]) -> None:
+    def initial_plan_generator(self, plan_generator: CompleteOptimizationAlgorithm | None) -> None:
         self._ensure_pipeline_integrity(initial_plan_generator=plan_generator)
         self._initial_plan_generator = plan_generator
 
@@ -1153,9 +1153,9 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
     def _ensure_pipeline_integrity(
         self,
         *,
-        database: Optional[Database] = None,
-        initial_plan_generator: Optional[CompleteOptimizationAlgorithm] = None,
-        additional_optimization_step: Optional[IncrementalOptimizationStep] = None,
+        database: Database | None = None,
+        initial_plan_generator: CompleteOptimizationAlgorithm | None = None,
+        additional_optimization_step: IncrementalOptimizationStep | None = None,
     ) -> None:
         """Checks that all selected optimization strategies work with the target database.
 
@@ -1230,7 +1230,7 @@ class OptimizationSettings(Protocol):
     All components are optional, depending on the specific optimization scenario/approach.
     """
 
-    def query_pre_check(self) -> Optional[OptimizationPreCheck]:
+    def query_pre_check(self) -> OptimizationPreCheck | None:
         """The required query pre-check.
 
         Returns
@@ -1240,10 +1240,10 @@ class OptimizationSettings(Protocol):
         """
         return None
 
-    def build_complete_optimizer(self) -> Optional[CompleteOptimizationAlgorithm]:
+    def build_complete_optimizer(self) -> CompleteOptimizationAlgorithm | None:
         return None
 
-    def build_join_order_optimizer(self) -> Optional[JoinOrderOptimization]:
+    def build_join_order_optimizer(self) -> JoinOrderOptimization | None:
         """The algorithm that is used to obtain the optimized join order.
 
         Returns
@@ -1254,7 +1254,7 @@ class OptimizationSettings(Protocol):
         """
         return None
 
-    def build_physical_operator_selection(self) -> Optional[PhysicalOperatorSelection]:
+    def build_physical_operator_selection(self) -> PhysicalOperatorSelection | None:
         """The algorithm that is used to determine the physical operators.
 
         Returns
@@ -1265,7 +1265,7 @@ class OptimizationSettings(Protocol):
         """
         return None
 
-    def build_plan_parameterization(self) -> Optional[ParameterGeneration]:
+    def build_plan_parameterization(self) -> ParameterGeneration | None:
         """The algorithm that is used to further parameterize the query plan.
 
         Returns
@@ -1275,5 +1275,5 @@ class OptimizationSettings(Protocol):
         """
         return None
 
-    def build_incremental_optimizer(self) -> Optional[IncrementalOptimizationStep]:
+    def build_incremental_optimizer(self) -> IncrementalOptimizationStep | None:
         return None

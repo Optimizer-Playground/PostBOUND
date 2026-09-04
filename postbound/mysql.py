@@ -36,7 +36,7 @@ import os
 import textwrap
 import warnings
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, Optional
+from typing import Any
 
 import mysql.connector
 
@@ -271,7 +271,7 @@ class MysqlSchemaInterface(DatabaseSchema):
         candidate_tables: Iterable[TableReference],
         *,
         expect_match: bool = False,
-    ) -> Optional[TableReference]:
+    ) -> TableReference | None:
         column = column.name if isinstance(column, ColumnReference) else column
 
         for table in candidate_tables:
@@ -383,7 +383,7 @@ class MysqlStatisticsInterface(DatabaseStatistics):
         super().__init__()
         self._db = mysql_db
 
-    def total_rows(self, table: TableReference) -> Optional[Cardinality]:
+    def total_rows(self, table: TableReference) -> Cardinality | None:
         if table.virtual:
             raise VirtualTableError(table)
 
@@ -394,7 +394,7 @@ class MysqlStatisticsInterface(DatabaseStatistics):
         count = result_set[0]
         return Cardinality.of(count)
 
-    def num_distinct(self, column: ColumnReference) -> Optional[int]:
+    def num_distinct(self, column: ColumnReference) -> int | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
         if column.table.virtual:
@@ -405,7 +405,7 @@ class MysqlStatisticsInterface(DatabaseStatistics):
         distinct_vals = self._db.cursor().fetchone()
         return distinct_vals[0] if distinct_vals is not None else None
 
-    def null_frac(self, column: ColumnReference) -> Optional[float]:
+    def null_frac(self, column: ColumnReference) -> float | None:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
                 self._db, "null fraction statistics. Set db.enable_emulation_fallback to activate."
@@ -463,7 +463,7 @@ class _MysqlStaticValueExpression(StaticValueExpression):
 class _MysqlCastExpression(CastExpression):
     def __init__(self, original_expression: CastExpression) -> None:
         if original_expression.array_type:
-            warnings.warn("MySQL does not support array types in CAST expressions. Ignoring array type.")
+            warnings.warn("MySQL does not support array types in CAST expressions. Ignoring array type.", stacklevel=2)
         super().__init__(original_expression.casted_expression, original_expression.target_type)
 
     def __str__(self) -> str:
@@ -478,7 +478,7 @@ def _replace_casts(e: SqlExpression) -> SqlExpression:
     return _MysqlCastExpression(e) if isinstance(e, CastExpression) else e
 
 
-def _generate_join_order_hint(join_order: Optional[JoinTree]) -> str:
+def _generate_join_order_hint(join_order: JoinTree | None) -> str:
     if not join_order:
         return ""
 
@@ -498,7 +498,7 @@ MysqlOptimizerHints = {
 
 
 def _generate_operator_hints(
-    physical_operators: Optional[PhysicalOperatorAssignment],
+    physical_operators: PhysicalOperatorAssignment | None,
 ) -> str:
     if not physical_operators:
         return ""
@@ -515,7 +515,7 @@ def _generate_operator_hints(
         hints.append(f"  {operator}({join_key})")
 
     if physical_operators.intermediate_operators:
-        warnings.warn("Cannot generate intermediate operator hints for MySQL.")
+        warnings.warn("Cannot generate intermediate operator hints for MySQL.", stacklevel=2)
 
     return "\n".join(hints)
 
@@ -526,7 +526,7 @@ MysqlSwitchableOptimizations: Mapping[PhysicalOperator, str] = {JoinOperator.Has
 
 def _escape_setting(setting) -> str:
     """Transforms the setting variable into a string that can be used in an SQL query."""
-    if isinstance(setting, float) or isinstance(setting, int):
+    if isinstance(setting, (float, int)):
         return str(setting)
     elif isinstance(setting, bool):
         return "TRUE" if setting else "FALSE"
@@ -534,8 +534,8 @@ def _escape_setting(setting) -> str:
 
 
 def _generate_prep_statements(
-    physical_operators: Optional[PhysicalOperatorAssignment],
-    plan_parameters: Optional[PlanParameterization],
+    physical_operators: PhysicalOperatorAssignment | None,
+    plan_parameters: PlanParameterization | None,
 ) -> str:
     statements = []
     if physical_operators:
@@ -562,11 +562,11 @@ class MysqlHintService(HintService):
     def generate_hints(
         self,
         query: SqlQuery,
-        plan: Optional[QueryPlan] = None,
+        plan: QueryPlan | None = None,
         *,
-        join_order: Optional[JoinTree] = None,
-        physical_operators: Optional[PhysicalOperatorAssignment] = None,
-        plan_parameters: Optional[PlanParameterization] = None,
+        join_order: JoinTree | None = None,
+        physical_operators: PhysicalOperatorAssignment | None = None,
+        plan_parameters: PlanParameterization | None = None,
     ) -> SqlQuery:
         if join_order and not join_order.is_linear():
             raise UnsupportedDatabaseFeatureError(
@@ -625,7 +625,7 @@ class MysqlOptimizer(OptimizerInterface):
     def analyze_plan(self, query: SqlQuery) -> QueryPlan:
         raise NotImplementedError("MySQL interface does not support ANALYZE plans yet")
 
-    def parse_plan(self, plan: Any, *, query: Optional[SqlQuery] = None) -> QueryPlan:
+    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
         mysql_plan = MysqlExplainPlan(plan)
         return mysql_plan.as_qep()
 
@@ -667,7 +667,7 @@ def _parse_mysql_connection(config_file: str) -> MysqlConnectionArguments:
 def connect(
     *,
     name: str = "mysql",
-    connection_args: Optional[MysqlConnectionArguments] = None,
+    connection_args: MysqlConnectionArguments | None = None,
     config_file: str = ".mysql_connection.config",
     private: bool = False,
 ) -> MysqlInterface:
@@ -872,7 +872,7 @@ def _determine_join_type(explain_data: dict) -> str:
     return _MysqlJoinTypes[explain_data["using_join_buffer"]]
 
 
-def _parse_mysql_join_node(query: Optional[SqlQuery], node_name: str, explain_data: list) -> Optional[MysqlExplainNode]:
+def _parse_mysql_join_node(query: SqlQuery | None, node_name: str, explain_data: list) -> MysqlExplainNode | None:
     first_table, *remaining_tables = explain_data
     first_node = _parse_next_mysql_explain_node(query, first_table)
     if first_node is None:
@@ -890,9 +890,7 @@ def _parse_mysql_join_node(query: Optional[SqlQuery], node_name: str, explain_da
     return first_node
 
 
-def _parse_mysql_table_node(
-    query: Optional[SqlQuery], node_name: str, explain_data: dict
-) -> Optional[MysqlExplainNode]:
+def _parse_mysql_table_node(query: SqlQuery | None, node_name: str, explain_data: dict) -> MysqlExplainNode | None:
     scanned_table = _lookup_table(explain_data["table_name"], query.tables()) if query is not None else None
     scan_type = _MysqlJoinSourceTypes[explain_data["access_type"]]  # tables are mostly scanned as part of a join
     join_type = _determine_join_type(explain_data)
@@ -917,9 +915,7 @@ def _parse_mysql_table_node(
     return table_node
 
 
-def _parse_mysql_wrapper_node(
-    query: Optional[SqlQuery], node_name: str, explain_data: dict
-) -> Optional[MysqlExplainNode]:
+def _parse_mysql_wrapper_node(query: SqlQuery | None, node_name: str, explain_data: dict) -> MysqlExplainNode | None:
     scan_cost, join_cost = _parse_cost_info(explain_data)
     scan_card, join_card = _parse_cardinality_info(explain_data)
     source_node = _parse_next_mysql_explain_node(query, explain_data)
@@ -935,8 +931,8 @@ def _parse_mysql_wrapper_node(
 
 
 def _parse_mysql_explain_node(
-    query: Optional[SqlQuery], node_name: str, explain_data: dict | list
-) -> Optional[MysqlExplainNode]:
+    query: SqlQuery | None, node_name: str, explain_data: dict | list
+) -> MysqlExplainNode | None:
     if not explain_data:
         return None
 
@@ -948,18 +944,18 @@ def _parse_mysql_explain_node(
         return _parse_mysql_table_node(query, node_name, explain_data)
     else:
         assert isinstance(explain_data, dict)
-        explain_data = explain_data["query_block"] if "query_block" in explain_data else explain_data
+        explain_data = explain_data.get("query_block", explain_data)
         return _parse_mysql_wrapper_node(query, node_name, explain_data)
 
 
-def _parse_next_mysql_explain_node(query: Optional[SqlQuery], explain_data: dict) -> Optional[MysqlExplainNode]:
+def _parse_next_mysql_explain_node(query: SqlQuery | None, explain_data: dict) -> MysqlExplainNode | None:
     for info_key, node_data in explain_data.items():
         if info_key in _MysqlExplainNodeTypes:
             return _parse_mysql_explain_node(query, info_key, node_data)
     raise ValueError("No known node found: " + str(explain_data))
 
 
-def parse_mysql_explain_plan(query: Optional[SqlQuery], explain_data: dict) -> MysqlExplainPlan:
+def parse_mysql_explain_plan(query: SqlQuery | None, explain_data: dict) -> MysqlExplainPlan:
     explain_data = explain_data["query_block"]
     query_cost = explain_data.get("cost_info", {}).get("query_cost", math.nan)
 
@@ -1022,7 +1018,7 @@ def _node_sequence_to_qep(nodes: Sequence[MysqlExplainNode]) -> QueryPlan:
         )
         return join_node
 
-    assert False, "Should never reach this point, because all cases are handled above."
+    raise AssertionError("Should never reach this point, because all cases are handled above.")
 
 
 class MysqlExplainNode:
@@ -1030,15 +1026,15 @@ class MysqlExplainNode:
         self,
         scan_type: str = "",
         join_type: str = "",
-        next_node: Optional[MysqlExplainNode] = None,
+        next_node: MysqlExplainNode | None = None,
         *,
-        node_type: Optional[str] = None,
-        table: Optional[TableReference] = None,
+        node_type: str | None = None,
+        table: TableReference | None = None,
         scan_cost: float = math.nan,
         join_cost: float = math.nan,
         scan_cardinality_estimate: float = math.nan,
         join_cardinality_estimate: float = math.nan,
-        subquery_node: Optional[MysqlExplainNode] = None,
+        subquery_node: MysqlExplainNode | None = None,
     ) -> None:
         self.scan_type = scan_type
         self.join_type = join_type
@@ -1086,7 +1082,7 @@ class MysqlExplainNode:
     def _collect_node_sequence(self) -> list[MysqlExplainNode]:
         if not self.next_node:
             return [self]
-        return self.next_node._collect_node_sequence() + [self]
+        return [*self.next_node._collect_node_sequence(), self]
 
     def _make_qep_node_for_scan(self) -> QueryPlan:
         return QueryPlan(
@@ -1138,7 +1134,7 @@ class MysqlExplainNode:
 
 
 class MysqlExplainPlan:
-    def __init__(self, root: MysqlExplainNode, total_cost: Optional[float] = None) -> None:
+    def __init__(self, root: MysqlExplainNode, total_cost: float | None = None) -> None:
         self.root = root
         self.total_cost = total_cost
 

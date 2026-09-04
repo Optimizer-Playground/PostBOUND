@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 import warnings
-from typing import Callable
+from collections.abc import Callable
 
 from .._base import T
 

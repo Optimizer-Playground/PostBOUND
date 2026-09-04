@@ -73,4 +73,4 @@ def to_json_dump(obj: Any, file: IO, *args, **kwargs) -> None:
     All arguments other than the object itself are passed to the default Python `json.dump` function.
     """
     kwargs.pop("cls", None)
-    json.dump(obj, file, cls=JsonizeEncoder, *args, **kwargs)
+    json.dump(obj, file, *args, cls=JsonizeEncoder, **kwargs)

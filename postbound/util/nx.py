@@ -20,7 +20,6 @@ from collections.abc import (
     Iterator,
     Sequence,
 )
-from typing import Optional
 
 import networkx as nx
 
@@ -70,7 +69,7 @@ def nx_filter_nodes(graph: nx.Graph, predicate: Callable[[NodeType, dict], bool]
     return [(n, d) for n, d in graph.nodes.data() if predicate(n, d)]
 
 
-def nx_random_walk(graph: nx.Graph, *, starting_node: Optional[NodeType] = None) -> Generator[NodeType, None, None]:
+def nx_random_walk(graph: nx.Graph, *, starting_node: NodeType | None = None) -> Generator[NodeType, None, None]:
     """A modified random walk implementation for NetworkX graphs.
 
     A random walk starts at any of the nodes of the graph. At each iteration, a neighboring node is selected and moved to.
@@ -106,7 +105,7 @@ def nx_random_walk(graph: nx.Graph, *, starting_node: Optional[NodeType] = None)
     yield current_node
 
     while len(visited_nodes) < total_n_nodes:
-        shell_nodes |= set(n for n in graph.adj[current_node].keys() if n not in visited_nodes)
+        shell_nodes |= set(n for n in graph.adj[current_node] if n not in visited_nodes)
         if not shell_nodes:
             # we have multiple connected components and need to jump into the other component
             current_node = random.choice([n for n in graph.nodes if n not in visited_nodes])
@@ -204,7 +203,7 @@ class GraphWalk:
     """
 
     start_node: NodeType
-    path: Sequence[tuple[NodeType, Optional[dict]]] = dataclasses.field(default_factory=list)
+    path: Sequence[tuple[NodeType, dict | None]] = dataclasses.field(default_factory=list)
 
     def nodes(self) -> Sequence[NodeType]:
         """Provides all nodes that are visited by this walk, in the sequence in which they are visited.
@@ -226,7 +225,7 @@ class GraphWalk:
         """
         return self.start_node if not self.path else self.path[-1][0]
 
-    def expand(self, next_node: NodeType, edge_data: Optional[dict] = None) -> GraphWalk:
+    def expand(self, next_node: NodeType, edge_data: dict | None = None) -> GraphWalk:
         """Creates a new walk by prolonging the current one with one more edge at the end.
 
         Parameters
@@ -241,7 +240,7 @@ class GraphWalk:
         GraphWalk
             The resulting larger walk. The original walk is not modified in any way.
         """
-        return GraphWalk(self.start_node, list(self.path) + [(next_node, edge_data)])
+        return GraphWalk(self.start_node, [*list(self.path), (next_node, edge_data)])
 
     def nodes_hash(self) -> int:
         """Provides a hash value only based on the nodes sequence, not the selected predicates.

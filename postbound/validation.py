@@ -11,7 +11,6 @@ from __future__ import annotations
 import abc
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Optional
 
 import networkx as nx
 
@@ -513,9 +512,7 @@ class EquiJoinPreCheck(OptimizationPreCheck):
         bool
             Whether the predicate passed the check
         """
-        if not self._allow_conjunctions:
-            return False
-        elif predicate.operation != CompoundOperator.And:
+        if not self._allow_conjunctions or predicate.operation != CompoundOperator.And:
             return False
         return all(self._perform_predicate_check(child_pred) for child_pred in predicate.iterchildren())
 
@@ -654,8 +651,8 @@ class CustomCheck(OptimizationPreCheck):
         self,
         name: str = "custom-check",
         *,
-        query_check: Optional[Callable[[SqlQuery], PreCheckResult]] = None,
-        db_check: Optional[Callable[[Database], PreCheckResult]] = None,
+        query_check: Callable[[SqlQuery], PreCheckResult] | None = None,
+        db_check: Callable[[Database], PreCheckResult] | None = None,
     ) -> None:
         super().__init__(name)
         self._query_check = query_check

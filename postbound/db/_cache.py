@@ -4,7 +4,7 @@ import atexit
 import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..qal import SqlQuery
 from ..util import Version, jsondict
@@ -39,7 +39,7 @@ class _DBCacheJsonEncoder(json.JSONEncoder):
 class _DBCacheJsonDecoder(json.JSONDecoder):
     def __init__(self, *args, **kwargs):
         self._second_hook = kwargs.get("object_hook")
-        super().__init__(object_hook=self.object_hook, *args, **kwargs)
+        super().__init__(*args, object_hook=self.object_hook, **kwargs)
 
     def object_hook(self, obj: Any) -> Any:
         if self._second_hook:
@@ -61,7 +61,7 @@ _caches: dict[tuple[Database, Path | None], ResultCache] = {}
 
 class ResultCache(Database):
     @staticmethod
-    def create_cache(db: Database, *, offline_cache: Optional[Path] = None) -> ResultCache:
+    def create_cache(db: Database, *, offline_cache: Path | None = None) -> ResultCache:
         existing_cache = _caches.get((db, offline_cache))
         if existing_cache is not None:
             return existing_cache
@@ -70,7 +70,7 @@ class ResultCache(Database):
         _caches[db, offline_cache] = fresh_cache
         return fresh_cache
 
-    def __init__(self, db: Database, *, offline_cache: Optional[Path] = None) -> None:
+    def __init__(self, db: Database, *, offline_cache: Path | None = None) -> None:
         super().__init__(db.system_name)
         self.offline_file = offline_cache
 
@@ -139,7 +139,7 @@ class ResultCache(Database):
             atexit.register(self._dump_cache)
             return
 
-        with open(self.offline_file, "r") as f:
+        with open(self.offline_file) as f:
             self._cache = json.load(f, cls=_DBCacheJsonDecoder)
 
         atexit.register(self._dump_cache)

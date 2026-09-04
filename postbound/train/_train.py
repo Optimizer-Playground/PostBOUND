@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional, Self
+from typing import Literal, Self
 
 import pandas as pd
 
@@ -256,7 +256,7 @@ class TrainingData:
     """
 
     @staticmethod
-    def from_df(df: pd.DataFrame | Path | str, *, source: Optional[Path | str] = None) -> TrainingData:
+    def from_df(df: pd.DataFrame | Path | str, *, source: Path | str | None = None) -> TrainingData:
         """Reads training data from a data frame or a file.
 
         The features of the dataset are inferred from the column names of the data frame. If the raw data contains a *query*
@@ -302,7 +302,7 @@ class TrainingData:
         self,
         samples: pd.DataFrame,
         *,
-        source: Optional[Path] = None,
+        source: Path | None = None,
         feature_map: dict[TrainingFeature, str],
     ) -> None:
         self._source = source
@@ -311,7 +311,7 @@ class TrainingData:
         self._spec = TrainingSpec(self._feature_map.keys())
 
     @property
-    def source(self) -> Optional[Path]:
+    def source(self) -> Path | None:
         """Get the data file that originally provided the training data, if available."""
         return self._source
 
@@ -385,7 +385,7 @@ class TrainingData:
         }
         return TrainingData(self._samples, source=self._source, feature_map=reduced_spec)
 
-    def as_df(self, requested_spec: Optional[TrainingSpec] = None) -> pd.DataFrame:
+    def as_df(self, requested_spec: TrainingSpec | None = None) -> pd.DataFrame:
         """Provides the training samples as a data frame.
 
         Columns of the data frame are automatically aligned with the features of the given spec. If no spec is given, the
@@ -457,7 +457,7 @@ class TrainingDataRepository:
         self._datasets.append(samples)
         return self
 
-    def retrieve_first(self, spec: TrainingSpec) -> Optional[TrainingData]:
+    def retrieve_first(self, spec: TrainingSpec) -> TrainingData | None:
         """Provides the first dataset in the repository that satisfies the given spec.
 
         If no dataset satisfies the given spec, *None* is returned.
@@ -471,7 +471,7 @@ class TrainingDataRepository:
         """Provides all datasets in the repository that satisfy the given spec."""
         return [ds for ds in self._datasets if ds.satisfies(spec)]
 
-    def retrieve_merged(self, spec: TrainingSpec) -> Optional[TrainingData]:
+    def retrieve_merged(self, spec: TrainingSpec) -> TrainingData | None:
         """Provides all datasets in the repository that satisfy the given spec.
 
         The datasets are merged together into a single large dataset that contains all samples from the individual datasets.

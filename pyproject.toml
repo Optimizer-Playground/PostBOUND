@@ -85,10 +85,21 @@ ignore = [
     "UP047",   # PEP 695 generic functions: ditto
     "RUF001",  # ambiguous unicode in strings: intentional in the operator/plan symbols
     "RUF002",  # ambiguous unicode in docstrings: intentional in the research prose
+    "SIM108",  # if/else -> ternary: hurts readability for the multi-branch cases here
 ]
 
 [tool.ruff.lint.isort]
 known-first-party = ["postbound"]
+
+[tool.ruff.lint.flake8-bugbear]
+# These factories all return immutable value objects, so sharing one instance across all calls
+# (which is what a default argument does) is safe and intentional.
+extend-immutable-calls = [
+    "postbound._core.Cardinality.unknown",
+    "postbound.qal._qal.Explain.plan",
+    "postbound.qal.Explain.plan",
+    "postbound.qal._qal.StarExpression",
+]
 
 [tool.ty.src]
 exclude = ["vol-postbound/**", "**/*.ipynb"]
