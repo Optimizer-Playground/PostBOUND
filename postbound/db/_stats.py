@@ -120,7 +120,7 @@ class PreciseStatistics(DatabaseStatistics):
         order_clause = OrderBy(
             [OrderByExpression.create_for(ColumnReference("n"), ascending=False), OrderByExpression.create_for(column)]
         )
-        limit_clause = Limit(limit=k) if k is not None else None
+        limit_clause = Limit(limit=k) if k is not None and k > 0 else None
         sql = as_query(select_clause, from_clause, group_clause, order_clause, limit_clause)
 
         result_set = self._db.execute_query(sql)
