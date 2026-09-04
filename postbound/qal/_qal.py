@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import collections
-import functools
 import itertools
 import numbers
 import warnings
@@ -4421,7 +4420,17 @@ class QueryPredicates:
     def __init__(self, root: AbstractPredicate | None):
         self._root = root
         self._hash_val = hash(self._root)
-        self._join_predicate_map = self._init_join_predicate_map()
+
+        self._filters: set[AbstractPredicate] | None = None
+        self._joins: set[AbstractPredicate] | None = None
+
+        self._aliased_join_graph: nx.Graph | None = None
+        self._merged_join_graph: nx.Graph | None = None
+        self._connected_intermediates: dict[frozenset[TableReference], bool] = {}
+
+        self._filter_map: dict[TableReference, AbstractPredicate | Literal[False]] = {}
+        self._join_map: dict[TableReference, list[AbstractPredicate]] = {}
+        self._join_predicate_map: dict[frozenset[TableReference], AbstractPredicate] | None = None
 
     @property
     def root(self) -> AbstractPredicate:
@@ -4452,7 +4461,6 @@ class QueryPredicates:
         """
         return self._root is None
 
-    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
     def filters(self) -> Collection[AbstractPredicate]:
         """Provides all filter predicates that are contained in the predicate hierarchy.
 
@@ -4473,9 +4481,13 @@ class QueryPredicates:
         """
         if self._root is None:
             return []
-        return _collect_filter_predicates(self._root)
 
-    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
+        if self._filters is not None:
+            return self._filters
+
+        self._filters = _collect_filter_predicates(self._root)
+        return self._filters
+
     def joins(self) -> Collection[AbstractPredicate]:
         """Provides all join predicates that are contained in the predicate hierarchy.
 
@@ -4496,9 +4508,13 @@ class QueryPredicates:
         """
         if self._root is None:
             return []
-        return _collect_join_predicates(self._root)
 
-    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
+        if self._joins is not None:
+            return self._joins
+
+        self._joins = _collect_join_predicates(self._root)
+        return self._joins
+
     def join_graph(self, *, merge_aliases: bool = False) -> nx.Graph:
         """Provides the join graph for the predicates.
 
@@ -4525,49 +4541,19 @@ class QueryPredicates:
         Since our implementation of a join graph is not based on a multigraph, only binary joins can be represented. The
         determination of edges is based on `AbstractPredicate.join_partners`.
         """
-        join_graph = nx.Graph()
-        if self._root is None:
-            return join_graph
+        if merge_aliases:
+            if self._merged_join_graph is not None:
+                return self._merged_join_graph
 
-        if not merge_aliases:
-            for table in self._root.tables():
-                filter_predicates = self.filters_for(table)
-                join_graph.add_node(table, predicate=filter_predicates)
+            self._merged_join_graph = self._build_join_graph(merge_aliases=True)
+            return self._merged_join_graph
 
-            for join in self.joins():
-                for first_col, second_col in join.join_partners():
-                    join_graph.add_edge(first_col.table, second_col.table, predicate=join)
+        if self._aliased_join_graph is not None:
+            return self._aliased_join_graph
 
-            return join_graph
+        self._aliased_join_graph = self._build_join_graph(merge_aliases=False)
+        return self._aliased_join_graph
 
-        table2alias = collections.defaultdict(set)
-        for tab in self._root.tables():
-            table2alias[tab.drop_alias()].add(tab)
-
-        table2preds = {
-            tab: {alias: self.filters_for(alias) for alias in aliased} for tab, aliased in table2alias.items()
-        }
-        for table, preds in table2preds.items():
-            join_graph.add_node(table, predicate=preds, aliases=table2alias[table])
-
-        col2join: dict[frozenset[ColumnReference], AbstractPredicate] = {}
-        for join in self.joins():
-            for first_col, second_col in join.join_partners():
-                partners = frozenset([first_col, second_col])
-                col2join[partners] = join
-
-        tab2join = collections.defaultdict(dict)
-        for partners, join in col2join.items():
-            tabs = frozenset([col.drop_table_alias() for col in partners])
-            tab2join[tabs][partners] = join
-
-        for tabs, joins in tab2join.items():
-            first_tab, second_tab = tabs
-            join_graph.add_edge(first_tab, second_tab, predicate=joins)
-
-        return join_graph
-
-    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
     def filters_for(self, table: TableReference) -> AbstractPredicate | None:
         """Provides all filter predicates that reference a specific table.
 
@@ -4586,12 +4572,19 @@ class QueryPredicates:
         Optional[AbstractPredicate]
             A (conjunction of) the filter predicates of the `table`, or *None* if the table is unfiltered.
         """
-        if self.is_empty():
+        if self._root is None:
             return None
-        applicable_filters = [filter_pred for filter_pred in self.filters() if filter_pred.contains_table(table)]
-        return CompoundPredicate.create_and(applicable_filters) if applicable_filters else None
 
-    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
+        cached_filters = self._filter_map.get(table)
+        if cached_filters is not None:
+            return cached_filters if cached_filters is not False else None
+
+        applicable_filters = [filter_pred for filter_pred in self.filters() if filter_pred.contains_table(table)]
+        final_pred = CompoundPredicate.create_and(applicable_filters) if applicable_filters else False
+
+        self._filter_map[table] = final_pred
+        return final_pred if final_pred is not False else None
+
     def joins_for(self, table: TableReference) -> Collection[AbstractPredicate]:
         """Provides all join predicates that reference a specific table.
 
@@ -4612,8 +4605,12 @@ class QueryPredicates:
         Collection[AbstractPredicate]
             The join predicates with `table`. If there are no such predicates, the collection is empty.
         """
-        if self.is_empty():
+        if self._root is None:
             return []
+
+        cached_joins = self._join_map.get(table)
+        if cached_joins is not None:
+            return cached_joins
 
         applicable_joins: list[AbstractPredicate] = [
             join_pred for join_pred in self.joins() if join_pred.contains_table(table)
@@ -4630,6 +4627,8 @@ class QueryPredicates:
         aggregated_predicates = []
         for join_group in distinct_joins.values():
             aggregated_predicates.append(CompoundPredicate.create_and(join_group))
+
+        self._join_map[table] = aggregated_predicates
         return aggregated_predicates
 
     def joins_between(
@@ -4664,8 +4663,11 @@ class QueryPredicates:
         ValueError
             If the `_computation` strategy is none of the allowed values
         """
-        if self.is_empty():
+        if self._root is None:
             return None
+
+        if self._join_predicate_map is None:
+            self._join_predicate_map = self._init_join_predicate_map()
 
         join_predicates = set()
         first_table, second_table = (
@@ -4794,27 +4796,76 @@ class QueryPredicates:
         merged = CompoundPredicate.create_and([own_root, other_root])
         return QueryPredicates(merged)
 
-    @functools.cache  # noqa: B019 -- deliberate hot-path memoisation on an immutable object; keeps `self` alive for the process lifetime, see TODO in the class docstring
+    def _build_join_graph(self, merge_aliases: bool) -> nx.Graph:
+        join_graph = nx.Graph()
+        if self._root is None:
+            return join_graph
+
+        if not merge_aliases:
+            for table in self._root.tables():
+                filter_predicates = self.filters_for(table)
+                join_graph.add_node(table, predicate=filter_predicates)
+
+            for join in self.joins():
+                for first_col, second_col in join.join_partners():
+                    join_graph.add_edge(first_col.table, second_col.table, predicate=join)
+
+            return join_graph
+
+        table2alias = collections.defaultdict(set)
+        for tab in self._root.tables():
+            table2alias[tab.drop_alias()].add(tab)
+
+        table2preds = {
+            tab: {alias: self.filters_for(alias) for alias in aliased} for tab, aliased in table2alias.items()
+        }
+        for table, preds in table2preds.items():
+            join_graph.add_node(table, predicate=preds, aliases=table2alias[table])
+
+        col2join: dict[frozenset[ColumnReference], AbstractPredicate] = {}
+        for join in self.joins():
+            for first_col, second_col in join.join_partners():
+                partners = frozenset([first_col, second_col])
+                col2join[partners] = join
+
+        tab2join = collections.defaultdict(dict)
+        for partners, join in col2join.items():
+            tabs = frozenset([col.drop_table_alias() for col in partners])
+            tab2join[tabs][partners] = join
+
+        for tabs, joins in tab2join.items():
+            first_tab, second_tab = tabs
+            join_graph.add_edge(first_tab, second_tab, predicate=joins)
+
+        return join_graph
+
     def _join_tables_check(self, tables: frozenset[TableReference]) -> bool:
         """Constructs the join graph for the given tables and checks, whether it is connected.
 
         Parameters
         ----------
         tables : frozenset[TableReference]
-            The tables to check. Has to be a frozenset to enable caching via `functools.cache`
+            The tables to check.
 
         Returns
         -------
         bool
             Whether the specified tables induce a connected subgraph of the full join graph.
         """
+        cached_check = self._connected_intermediates.get(tables)
+        if cached_check is not None:
+            return cached_check
+
         join_graph = nx.Graph()
         join_graph.add_nodes_from(tables)
         for table in tables:
             for join in self.joins_for(table):
                 partner_tables = set(col.table for col in join.join_partners_of(table)) & tables
                 join_graph.add_edges_from(itertools.product([table], partner_tables))
-        return nx.is_connected(join_graph)
+        check_result = nx.is_connected(join_graph)
+
+        self._connected_intermediates[tables] = check_result
+        return check_result
 
     def _assert_root(self) -> AbstractPredicate:
         """Ensures that a root predicate is set
