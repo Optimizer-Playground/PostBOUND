@@ -3423,12 +3423,22 @@ class PredicateVisitor(ABC, Generic[VisitorResult]):
     .. Visitor pattern: https://en.wikipedia.org/wiki/Visitor_pattern
     """
 
-    def visit_query_predicates(self, query: SelectStatement | QueryPredicates, *args, **kwargs) -> VisitorResult:
-        if isinstance(query, SelectStatement):
-            predicates = query.predicates()
-        else:
-            predicates = query
-        return predicates.root.accept_visitor(self, *args, **kwargs)
+    def visit_query_predicates(self, query: SqlQuery | QueryPredicates, *args, **kwargs) -> VisitorResult:
+        match query:
+            case SelectStatement():
+                predicates = query.predicates()
+                return predicates.root.accept_visitor(self, *args, **kwargs)
+
+            case SetQuery():
+                raise ValueError(
+                    "Cannot visit predicates of set queries. Visit the subqueries manually and combine the results afterwards."
+                )
+
+            case QueryPredicates():
+                return query.root.accept_visitor(self, *args, **kwargs)
+
+            case _:
+                raise ValueError(f"Cannot visit predicates of query type {type(query)}")
 
     @abstractmethod
     def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> VisitorResult:
@@ -6957,7 +6967,7 @@ class JoinTableSource(TableSource):
 
 
 class TableSourceVisitor(ABC, Generic[VisitorResult]):
-    def visit_query(self, query: SelectStatement, *args, **kwargs) -> Sequence[VisitorResult]:
+    def visit_query(self, query: SqlQuery, *args, **kwargs) -> Sequence[VisitorResult]:
         if query.from_clause is None:
             return []
         return self.visit_from_clause(query.from_clause, *args, **kwargs)
