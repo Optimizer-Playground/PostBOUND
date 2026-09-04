@@ -1,0 +1,17 @@
+{
+  // Shared workspace settings. Style itself is defined in pyproject.toml ([tool.ruff]);
+  // this file only wires the editor up to it.
+  "format_on_save": "on",
+  "ensure_final_newline_on_save": true,
+  "remove_trailing_whitespace_on_save": true,
+  "languages": {
+    "Python": {
+      "language_servers": ["ruff", "ty", "!pyright", "!pylsp"],
+      "formatter": [{ "language_server": { "name": "ruff" } }],
+      "code_actions_on_format": {
+        "source.organizeImports.ruff": true,
+        "source.fixAll.ruff": true
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  // Shared workspace settings. Style itself is defined in pyproject.toml ([tool.ruff]);
+  // this file only wires the editor up to it. Personal settings belong in your user
+  // settings, not here.
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.testing.unittestEnabled": true,
+  "python.testing.pytestEnabled": false,
+  "python.testing.unittestArgs": ["discover", "-s", "tests", "-t", "."],
+
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "[toml]": {
+    "editor.formatOnSave": false
+  },
+
+  "ruff.importStrategy": "fromEnvironment",
+  "ty.importStrategy": "fromEnvironment"
+}

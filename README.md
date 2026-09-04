@@ -303,6 +303,19 @@ pg_lab installation and skips the corresponding setup.
 > If pg_lab is not used, the Postgres server will setup pg_hint_plan instead.
 
 
+## 🛠️ Contributing
+
+PostBOUND is developed with [uv](https://docs.astral.sh/uv/). To get set up:
+
+```sh
+uv sync                     # creates .venv with the package, all extras and the dev tools
+uv run pre-commit install   # enables the formatting/linting/type-checking git hooks
+```
+
+Formatting (`ruff format`), linting (`ruff check`) and type checking (`ty`) are enforced on every
+commit and configured in `pyproject.toml`, so your editor and the hooks always agree.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
+
 ## 📑 Repo Structure
 
 The repository is structured as follows.

@@ -1,0 +1,8 @@
+# Revisions listed here are bulk, purely mechanical reformats. Tell git to skip them:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# (GitHub picks this file up automatically.)
+
+# Apply ruff format (line-length 120)
+3a517bcebc5c0490de1cf0e865d539e58ca6aac0

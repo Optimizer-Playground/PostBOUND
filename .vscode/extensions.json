@@ -1,0 +1,9 @@
+{
+  // Extensions that make VS Code match the project's tooling. See CONTRIBUTING.md.
+  "recommendations": [
+    "ms-python.python",
+    "charliermarsh.ruff",
+    "astral-sh.ty",
+    "editorconfig.editorconfig"
+  ]
+}
