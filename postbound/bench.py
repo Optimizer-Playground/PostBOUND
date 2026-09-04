@@ -40,7 +40,7 @@ from .db import (
     TimeoutSupport,
     simplify_result_set,
 )
-from .qal import SelectStatement
+from .qal import SqlQuery
 from .train import TrainingData, TrainingDataRepository
 from .util.jsonize import Jsonizable
 from .workloads import Workload, generate_workload
@@ -73,7 +73,7 @@ For errors, the actual reason is contained in the `failure_reason` column of the
 class ExecutionResult:
     """Captures all relevant components of a query optimization and execution result."""
 
-    query: SelectStatement
+    query: SqlQuery
     """The query that was executed. If the query was optimized and transformed, these modifications are included."""
 
     status: ExecStatus = "ok"
@@ -104,7 +104,7 @@ class ExecutionResult:
 
     @staticmethod
     def passed(
-        query: SelectStatement,
+        query: SqlQuery,
         *,
         query_result: ResultSet,
         execution_time: float,
@@ -123,7 +123,7 @@ class ExecutionResult:
         )
 
     @staticmethod
-    def execution_error(query: SelectStatement, *, optimization_time: float = np.nan) -> ExecutionResult:
+    def execution_error(query: SqlQuery, *, optimization_time: float = np.nan) -> ExecutionResult:
         """Constructs an `ExecutionResult` for a query that failed during execution."""
         return ExecutionResult(
             query=query,
@@ -134,7 +134,7 @@ class ExecutionResult:
         )
 
     @staticmethod
-    def optimization_error(query: SelectStatement) -> ExecutionResult:
+    def optimization_error(query: SqlQuery) -> ExecutionResult:
         return ExecutionResult(
             query=query,
             status="optimization-error",
@@ -247,7 +247,7 @@ class QueryPreparation:
 
         self.preparatory_stmts = preparatory_statements or []
 
-    def prepare_query(self, query: SelectStatement, *, on: Database | None = None) -> SelectStatement:
+    def prepare_query(self, query: SqlQuery, *, on: Database | None = None) -> SqlQuery:
         """Applies the selected transformations to the given input query and executes the preparatory statements
 
         Parameters
@@ -314,7 +314,7 @@ class QueryPreparation:
 
 
 def _wrap_workload(
-    queries: Iterable[SelectStatement] | Workload,
+    queries: Iterable[SqlQuery] | Workload,
 ) -> Workload:
     """Transforms an iterable of queries into a proper workload object to enable execution by the runner methods."""
     return queries if isinstance(queries, Workload) else generate_workload(queries)
@@ -353,7 +353,7 @@ class _BenchmarkConfig:
     shuffled: bool
     query_prep: QueryPreparation | None
     timeout: float | None
-    pre_exec_callback: Callable[[SelectStatement], dict | None] | None
+    pre_exec_callback: Callable[[SqlQuery], dict | None] | None
     post_exec_callback: Callable[[ExecutionResult], dict | None] | None
     log: _LoggerImpl
     error_action: ErrorHandling
@@ -459,7 +459,7 @@ ExecutionTarget = Database | OptimizationPipeline | OptimizationStage
 
 @dataclass
 class _SuccessfullOptimization:
-    optimized_query: SelectStatement
+    optimized_query: SqlQuery
     optimization_time: float
 
 
@@ -476,7 +476,7 @@ class _NoOptimization:
 _InternalOptResult = _SuccessfullOptimization | _FailedOptimization | _NoOptimization
 
 
-def _optimize_query(query: SelectStatement, *, pipeline: OptimizationPipeline | None = None) -> _InternalOptResult:
+def _optimize_query(query: SqlQuery, *, pipeline: OptimizationPipeline | None = None) -> _InternalOptResult:
     """Tries to run a query through the optimization pipeline while gracefully handling errors."""
     if pipeline is None:
         return _NoOptimization()
@@ -486,9 +486,7 @@ def _optimize_query(query: SelectStatement, *, pipeline: OptimizationPipeline | 
         optimized_query = pipeline.optimize_query(query)
         opt_end = time.perf_counter_ns()
         optimization_time = (opt_end - opt_start) / 10**9  # convert to seconds
-        return _SuccessfullOptimization(optimized_query=optimized_query, optimization_time=optimization_time)  # ty: ignore[invalid-argument-type] -- OptimizationPipeline.optimize_query is declared
-        # to return SqlQuery, but _SuccessfullOptimization narrows to SelectStatement. Widening
-        # the dataclass would ripple through the result frames, so it is left for a separate change.
+        return _SuccessfullOptimization(optimized_query=optimized_query, optimization_time=optimization_time)
     except Exception as e:
         return _FailedOptimization(error=e)
 
@@ -513,7 +511,7 @@ _InternalExecResult = _SuccessfullExecution | _TimeoutExecution | _FailedExecuti
 
 
 def _execute_query(
-    query: SelectStatement,
+    query: SqlQuery,
     *,
     on: Database,
     timeout: float | None = None,
@@ -619,7 +617,7 @@ class _ResultSample:
     def __init__(
         self,
         *,
-        query: SelectStatement,
+        query: SqlQuery,
         label: str,
         initial_exec_idx: int,
         current_workload_rep: int,
@@ -637,7 +635,7 @@ class _ResultSample:
         self.status: list[ExecStatus] = []
         self.optimization_time: float = np.nan
         self.optimization_pipeline: OptimizationPipeline | None = None
-        self.optimized_query: SelectStatement | None = None
+        self.optimized_query: SqlQuery | None = None
         self.failure_reasons: list[str] = []
         self.result_sets: list[ResultSet | None] = []
         self.exec_times: list[float] = []
@@ -654,7 +652,7 @@ class _ResultSample:
     def optimization_results(
         self,
         *,
-        optimized_query: SelectStatement,
+        optimized_query: SqlQuery,
         pipeline: OptimizationPipeline | None,
         optimization_time: float,
     ) -> None:
@@ -899,7 +897,7 @@ class _ExecutionResults:
     def next_workload_repetition(self) -> None:
         self._workload_rep += 1
 
-    def next_query(self, query: SelectStatement, *, label: str) -> _ResultSample:
+    def next_query(self, query: SqlQuery, *, label: str) -> _ResultSample:
         if self._samples:
             last_sample = self._samples[-1]
             self._execution_counter += last_sample.num_executions()
@@ -928,7 +926,7 @@ class _ExecutionResults:
 
 
 def _exec_ctl_loop(
-    query: SelectStatement,
+    query: SqlQuery,
     *,
     sample: _ResultSample,
     cfg: _BenchmarkConfig,
@@ -1029,7 +1027,7 @@ def _workload_ctl_loop(queries: Workload, *, results: _ExecutionResults, cfg: _B
 
 
 def execute_workload(
-    queries: Iterable[SelectStatement] | Workload,
+    queries: Iterable[SqlQuery] | Workload,
     on: ExecutionTarget,
     *,
     name: str = "<unnamed>",
@@ -1040,7 +1038,7 @@ def execute_workload(
     training_data: TrainingData | TrainingDataRepository | None = None,
     timeout: float | None = None,
     exec_callback: Callable[[ExecutionResult], None] | None = None,
-    pre_exec_callback: Callable[[SelectStatement], dict | None] | None = None,
+    pre_exec_callback: Callable[[SqlQuery], dict | None] | None = None,
     post_exec_callback: Callable[[ExecutionResult], dict | None] | None = None,
     repetition_callback: Callable[[int], None] | None = None,
     progressive_output: str | Path | None = None,
