@@ -4,7 +4,7 @@ More specifically, this includes
 
 - an interface to interact with databases (the `Database` interface)
 - an interface to retrieve schema information (the `DatabaseSchema` interface)
-- an interface to obtain different table-level and column-level statistics (the `DatabaseStatistics` interface)
+- an interface to obtain different table-level and column-level statistics (the `StatisticsCatalog` interface)
 - an interface to modify queries such that optimization decisions are respected during the actual query execution (the
   `HintService` interface)
 - an interface to access information of the native optimizer of the database system (the `OptimizerInterface` class)
@@ -330,7 +330,7 @@ class Database(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def statistics(self) -> DatabaseStatistics:
+    def statistics(self) -> StatisticsCatalog:
         """Provides access to the current statistics of the database.
 
         Implementing generalized statistics for a framework that supports multiple different physical database systems
@@ -1884,7 +1884,7 @@ class Histogram[T: _HistElem]:
 enable_statistics_fallback: bool = True
 
 
-class DatabaseStatistics(ABC):
+class StatisticsCatalog(ABC):
     """The statistics interface provides unified access to table-level and column-level statistics.
 
     There are two main challenges when implementing a generalized statistics interface for different database systems.

@@ -81,7 +81,7 @@ This has been extracted directly from ExplainNode() in explain.c from the Postgr
 """
 
 
-class PostgresExplainNode:
+class PostgresExplain:
     """Simplified model of a plan node as provided by Postgres' *EXPLAIN* output in JSON format.
 
     Generally speaking, a node stores all the information about the plan node that we currently care about. This is mostly
@@ -206,7 +206,7 @@ class PostgresExplainNode:
         self.temp_blocks_read: int = explain_data.get("Temp Read Blocks", math.nan)
         self.temp_blocks_written: int = explain_data.get("Temp Written Blocks", math.nan)
         self.plan_width: int = explain_data.get("Plan Width", math.nan)
-        self.children = [PostgresExplainNode(child) for child in explain_data.get("Plans", [])]
+        self.children = [PostgresExplain(child) for child in explain_data.get("Plans", [])]
 
         self.explain_data: dict = explain_data
         self._hash_val = hash(
@@ -299,7 +299,7 @@ class PostgresExplainNode:
             conditions["Recheck Cond"] = self.recheck_condition
         return conditions
 
-    def inner_outer_children(self) -> Sequence[PostgresExplainNode]:
+    def inner_outer_children(self) -> Sequence[PostgresExplain]:
         """Provides the children of this node in a sequence of inner, outer if applicable.
 
         For all nodes where this structure is not meaningful (e.g. intermediate nodes that operate on a single relation or
@@ -504,7 +504,7 @@ class PostgresExplainNode:
         return self.node_type + scan_info + explain_content + analyze_content + conditions
 
 
-class PostgresExplainPlan:
+class PostgresPlan:
     """Models an entire *EXPLAIN* plan produced by Postgres
 
     In contrast to `PostgresExplainNode`, this includes additional parameters (planning time and execution time) for the entire
@@ -537,11 +537,11 @@ class PostgresExplainPlan:
 
         self.planning_time: float = self.explain_data.get("Planning Time", math.nan) / 1000
         self.execution_time: float = self.explain_data.get("Execution Time", math.nan) / 1000
-        self.query_plan = PostgresExplainNode(self.explain_data["Plan"])
+        self.query_plan = PostgresExplain(self.explain_data["Plan"])
         self._normalized_plan = self.query_plan.as_qep()
 
     @property
-    def root(self) -> PostgresExplainNode:
+    def root(self) -> PostgresExplain:
         """Gets the root node of the actual query plan."""
         return self.query_plan
 

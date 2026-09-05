@@ -18,7 +18,7 @@ from ..qal import (
 )
 from ..util import jsondict
 from ._cache import ResultCache
-from ._db import Database, DatabaseStatistics, Histogram, HistogramApproximation, MostCommonValues
+from ._db import Database, Histogram, HistogramApproximation, MostCommonValues, StatisticsCatalog
 
 
 def _infer_histogram_bounds[T](
@@ -44,7 +44,7 @@ def _infer_histogram_bounds[T](
     return frequencies[0][0], bounds, buckets
 
 
-class PreciseStatistics(DatabaseStatistics):
+class PreciseStatistics(StatisticsCatalog):
     @staticmethod
     def create_cached(db: Database, *, offline_cache: Path | None = None) -> PreciseStatistics:
         cached = ResultCache.create_cache(db, offline_cache=offline_cache)

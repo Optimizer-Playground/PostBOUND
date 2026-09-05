@@ -44,7 +44,7 @@ from .._stages import (
     PhysicalOperatorSelection,
 )
 from ..db import Database, DatabaseServerError, DatabaseUserError
-from ..postgres import PostgresInterface
+from ..postgres import PostgresDatabase
 from ..qal import ColumnExpression, OrderBy, SqlQuery
 from ..util import jsondict
 
@@ -191,7 +191,7 @@ class NativeCostModel(CostModel):
         # Our entire strategy is closely aligned with the Postgres planning and execution model. Therefore, we are going to
         # restrict this cost function to Postgres backends.
 
-        if not isinstance(self.target_db, PostgresInterface):
+        if not isinstance(self.target_db, PostgresDatabase):
             warnings.warn(
                 "Can only estimate the cost of materialize operators for Postgres.",
                 stacklevel=2,
@@ -280,7 +280,7 @@ class NativeCostModel(CostModel):
         # Our entire strategy is closely aligned with the Postgres planning and execution model. Therefore, we are going to
         # restrict this cost function to Postgres backends.
 
-        if not isinstance(self.target_db, PostgresInterface):
+        if not isinstance(self.target_db, PostgresDatabase):
             warnings.warn(
                 "Can only estimate the cost of memoize operators for Postgres. Returning infinte costs.",
                 stacklevel=2,

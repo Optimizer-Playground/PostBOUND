@@ -67,7 +67,7 @@ from .db import (
     Database,
     DatabasePool,
     DatabaseSchema,
-    DatabaseStatistics,
+    StatisticsCatalog,
     HintService,
     Histogram,
     HistogramApproximation,
@@ -378,7 +378,7 @@ class MysqlSchemaInterface(DatabaseSchema):
         return index_map
 
 
-class MysqlStatisticsInterface(DatabaseStatistics):
+class MysqlStatisticsInterface(StatisticsCatalog):
     def __init__(self, mysql_db: MysqlInterface):
         super().__init__()
         self._db = mysql_db

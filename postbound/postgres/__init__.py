@@ -9,34 +9,34 @@ a lot of the original Postgres interfaces eventually evolved into the more abstr
 
 from ._config import PostgresConfiguration, PostgresSetting
 from ._ctl import is_running, start, stop
-from ._explain import PostgresExplainNode, PostgresExplainPlan
+from ._explain import PostgresExplain, PostgresPlan
 from ._pg import (
     PostgresConfigInterface,
-    PostgresHintService,
-    PostgresInterface,
+    PostgresDatabase,
+    PostgresHinting,
     PostgresJoinHints,
     PostgresOptimizer,
     PostgresPlanHints,
     PostgresScanHints,
-    PostgresSchemaInterface,
-    PostgresStatisticsInterface,
+    PostgresSchema,
+    PostgresStatistics,
     connect,
 )
 
 __all__ = [
     "PostgresConfigInterface",
     "PostgresConfiguration",
-    "PostgresExplainNode",
-    "PostgresExplainPlan",
-    "PostgresHintService",
-    "PostgresInterface",
+    "PostgresDatabase",
+    "PostgresExplain",
+    "PostgresHinting",
     "PostgresJoinHints",
     "PostgresOptimizer",
+    "PostgresPlan",
     "PostgresPlanHints",
     "PostgresScanHints",
-    "PostgresSchemaInterface",
+    "PostgresSchema",
     "PostgresSetting",
-    "PostgresStatisticsInterface",
+    "PostgresStatistics",
     "connect",
     "is_running",
     "start",

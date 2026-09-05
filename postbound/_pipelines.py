@@ -26,7 +26,7 @@ from ._stages import (
     PlanEnumerator,
 )
 from .db import Database, DatabasePool, ResultSet
-from .postgres import PostgresInterface
+from .postgres import PostgresDatabase
 from .qal import SqlQuery
 from .train import TrainingData, TrainingDataRepository, TrainingMetrics
 from .util._errors import StateError
@@ -482,7 +482,7 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         self._card_est: CardinalityEstimator = NativeCardinalityEstimator()
         self._cost_model: CostModel = NativeCostModel()
 
-        if isinstance(target_db, PostgresInterface):
+        if isinstance(target_db, PostgresDatabase):
             self._plan_enumerator = PostgresDynProg(target_db=target_db)
             self._plan_enumerator.infer_settings()
         else:

@@ -12,10 +12,10 @@ from ._db import (
     Cursor,
     Database,
     DatabaseSchema,
-    DatabaseStatistics,
     HintService,
     OptimizerInterface,
     ResultSet,
+    StatisticsCatalog,
     simplify_result_set,
 )
 
@@ -82,7 +82,7 @@ class ResultCache(Database):
     def schema(self) -> DatabaseSchema:
         return self._db.schema()
 
-    def statistics(self) -> DatabaseStatistics:
+    def statistics(self) -> StatisticsCatalog:
         return self._db.statistics()
 
     def hinting(self) -> HintService:

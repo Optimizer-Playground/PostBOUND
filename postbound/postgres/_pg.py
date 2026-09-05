@@ -54,7 +54,6 @@ from ..db import (
     DatabasePool,
     DatabaseSchema,
     DatabaseServerError,
-    DatabaseStatistics,
     DatabaseUserError,
     HintService,
     HintWarning,
@@ -65,6 +64,7 @@ from ..db import (
     PreciseStatistics,
     QueryCacheWarning,
     ResultSet,
+    StatisticsCatalog,
     UnsupportedDatabaseFeatureError,
     simplify_result_set,
 )
@@ -79,13 +79,13 @@ from ._config import (
     RuntimeChangeablePostgresSettings,
     SignificantPostgresSettings,
 )
-from ._explain import PostgresExplainPlan
+from ._explain import PostgresPlan
 
 
 class PostgresConfigInterface:
     """A thin wrapper that provides read-only access to Postgres configuration settings using __getitem__ syntax."""
 
-    def __init__(self, pg_instance: PostgresInterface) -> None:
+    def __init__(self, pg_instance: PostgresDatabase) -> None:
         self._pg = pg_instance
 
     def __getitem__(self, key: str) -> Any:
@@ -216,7 +216,7 @@ def _apply_preparatory_statements(query: SqlQuery, *, cur: psycopg.Cursor) -> Sq
     return transform.drop_hints(query, preparatory_statements_only=True)
 
 
-class PostgresInterface(Database):
+class PostgresDatabase(Database):
     """Database implementation for PostgreSQL backends.
 
     The `config` attribute provides read-only access to the current GUC values of the server.
@@ -253,22 +253,22 @@ class PostgresInterface(Database):
         self._client_encoding = client_encoding
         self._init_connection()
 
-        self._db_stats = PostgresStatisticsInterface(self)
-        self._db_schema = PostgresSchemaInterface(self)
-        self._hinting_backend = PostgresHintService(self)
+        self._db_stats = PostgresStatistics(self)
+        self._db_schema = PostgresSchema(self)
+        self._hinting_backend = PostgresHinting(self)
 
         self._timeout_executor = _TimeoutQueryExecutor(self)
         self._last_query_runtime = math.nan
 
         super().__init__(system_name)
 
-    def schema(self) -> PostgresSchemaInterface:
+    def schema(self) -> PostgresSchema:
         return self._db_schema
 
-    def statistics(self) -> PostgresStatisticsInterface:
+    def statistics(self) -> PostgresStatistics:
         return self._db_stats
 
-    def hinting(self) -> PostgresHintService:
+    def hinting(self) -> PostgresHinting:
         return self._hinting_backend
 
     def execute_query(
@@ -860,7 +860,7 @@ class PostgresInterface(Database):
         return hash(self.connect_string)
 
 
-class PostgresSchemaInterface(DatabaseSchema):
+class PostgresSchema(DatabaseSchema):
     """Database schema implementation for Postgres systems.
 
     Parameters
@@ -869,7 +869,7 @@ class PostgresSchemaInterface(DatabaseSchema):
         The database for which schema information should be retrieved
     """
 
-    def __init__(self, postgres_db: PostgresInterface) -> None:
+    def __init__(self, postgres_db: PostgresDatabase) -> None:
         super().__init__(postgres_db)
         self._table_cache = False
         self._user_tables: set[TableReference] = set()
@@ -1143,7 +1143,7 @@ _DTypeArrayConverters = {
 }
 
 
-class PostgresStatisticsInterface(DatabaseStatistics):
+class PostgresStatistics(StatisticsCatalog):
     """Statistics implementation for Postgres systems.
 
     Parameters
@@ -1160,7 +1160,7 @@ class PostgresStatisticsInterface(DatabaseStatistics):
         caching behavior of the `db`
     """
 
-    def __init__(self, postgres_db: PostgresInterface) -> None:
+    def __init__(self, postgres_db: PostgresDatabase) -> None:
         super().__init__()
         self._db = postgres_db
 
@@ -1716,7 +1716,7 @@ def _generate_pghintplan_hints(
     phys_ops: PhysicalOperatorAssignment | None,
     plan_params: PlanParameterization | None,
     *,
-    pg_instance: PostgresInterface,
+    pg_instance: PostgresDatabase,
 ) -> Hint:
     hints: list[str] = []
     prep_statements: list[str] = []
@@ -2060,7 +2060,7 @@ def _expand_pglab_hints(raw_hints: list[str]) -> Hint:
     return Hint("", "\n".join(hints))
 
 
-class PostgresHintService(HintService):
+class PostgresHinting(HintService):
     """Postgres-specific implementation of the hinting capabilities.
 
     Most importantly, this service implements a mapping from the abstract optimization descisions (join order + operators) to
@@ -2101,7 +2101,7 @@ class PostgresHintService(HintService):
     .. Postgres query planning configuration: https://www.postgresql.org/docs/current/runtime-config-query.html
     """
 
-    def __init__(self, postgres_db: PostgresInterface) -> None:
+    def __init__(self, postgres_db: PostgresDatabase) -> None:
         self._postgres_db = postgres_db
         self._inactive = True
         self._backend = "none"
@@ -2337,7 +2337,7 @@ class PostgresOptimizer(OptimizerInterface):
         The database whose optimizer should be introspected
     """
 
-    def __init__(self, postgres_instance: PostgresInterface) -> None:
+    def __init__(self, postgres_instance: PostgresDatabase) -> None:
         self._pg_instance = postgres_instance
 
     def query_plan(self, query: SqlQuery | str) -> QueryPlan:
@@ -2347,7 +2347,7 @@ class PostgresOptimizer(OptimizerInterface):
         else:
             query = self._explainify(query)
         raw_query_plan: list = self._pg_instance.execute_query(query)
-        query_plan = PostgresExplainPlan(raw_query_plan[0])
+        query_plan = PostgresPlan(raw_query_plan[0])
         return query_plan.as_qep()
 
     @overload
@@ -2367,7 +2367,7 @@ class PostgresOptimizer(OptimizerInterface):
         except TimeoutError:
             return None
 
-        query_plan = PostgresExplainPlan(raw_query_plan)
+        query_plan = PostgresPlan(raw_query_plan)
         return query_plan.as_qep()
 
     def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
@@ -2384,7 +2384,7 @@ class PostgresOptimizer(OptimizerInterface):
         if isinstance(plan, tuple):
             plan = plan[0]
 
-        pg_plan = PostgresExplainPlan(plan)
+        pg_plan = PostgresPlan(plan)
         return pg_plan.as_qep()
 
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:
@@ -2589,10 +2589,10 @@ def _timeout_query_worker(
     kwargs : Any
         Additional parameters to pass to the `PostgresInterface.execute_query` method.
     """
-    pg_instance: PostgresInterface | None = None
+    pg_instance: PostgresDatabase | None = None
     try:
         connect_string = pg_config["connect_string"]
-        pg_instance = PostgresInterface(
+        pg_instance = PostgresDatabase(
             connect_string,
             application_name="PostBOUND Timeout Worker",
         )
@@ -2685,13 +2685,13 @@ class _TimeoutQueryExecutor:
     refreshed. Any direct references to these instances should no longer be used.
     """
 
-    def __init__(self, postgres_instance: PostgresInterface | None = None) -> None:
-        self._pg_instance: PostgresInterface
+    def __init__(self, postgres_instance: PostgresDatabase | None = None) -> None:
+        self._pg_instance: PostgresDatabase
         if postgres_instance is not None:
             self._pg_instance = postgres_instance
         else:
             fallback = DatabasePool.get_instance().current_database()
-            if not isinstance(fallback, PostgresInterface):
+            if not isinstance(fallback, PostgresDatabase):
                 raise ValueError(
                     "Cannot create TimeoutQueryExecutor: No Postgres instance was supplied and the current database is not a "
                     "Postgres instance."
@@ -2842,7 +2842,7 @@ class _TimeoutQueryExecutor:
         return self.execute_query(query, timeout, **kwargs)
 
 
-def _reconnect(key: str, *, pool: DatabasePool) -> PostgresInterface:
+def _reconnect(key: str, *, pool: DatabasePool) -> PostgresDatabase:
     """Fetches a connection from the database pool.
 
     If the connection is in a bad state (e.g. because the user called close() before), it is re-established.
@@ -2855,7 +2855,7 @@ def _reconnect(key: str, *, pool: DatabasePool) -> PostgresInterface:
         The current pool.
     """
     current_instance = pool.retrieve_database(key)
-    assert isinstance(current_instance, PostgresInterface)
+    assert isinstance(current_instance, PostgresDatabase)
 
     status = current_instance._connection.info.status
     if status != psycopg.pq.ConnStatus.OK:
@@ -2915,7 +2915,7 @@ def connect(
     refresh: bool = False,
     private: bool = False,
     debug: bool = False,
-) -> PostgresInterface:
+) -> PostgresDatabase:
     """Convenience function to seamlessly connect to a Postgres instance.
 
     This function obtains a connection to a Postgres database by trying the following methods in order:
@@ -3036,7 +3036,7 @@ def connect(
     if pool_key in db_pool and not refresh:
         return _reconnect(pool_key, pool=db_pool)
 
-    postgres_db = PostgresInterface(
+    postgres_db = PostgresDatabase(
         connect_string,
         application_name=application_name,
         client_encoding=encoding,

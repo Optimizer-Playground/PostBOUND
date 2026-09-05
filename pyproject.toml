@@ -109,10 +109,6 @@ extend-immutable-calls = [
 exclude = [
     "vol-postbound/**",
     "**/*.ipynb",
-    # BROKEN: both import `postbound.experiments`, which no longer exists. They need to be
-    # ported or deleted; until then there is nothing meaningful for ty to check.
-    "tools/ceb-generator.py",
-    "tools/query-generator.py",
 ]
 
 # The overrides below silence rule families in specific files rather than excluding the files.

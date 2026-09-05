@@ -25,7 +25,7 @@ from .._stages import (
     PlanEnumerator,
 )
 from ..db import Database, DatabasePool, DatabaseSchema, DatabaseServerError
-from ..postgres import PostgresInterface, PostgresJoinHints, PostgresScanHints
+from ..postgres import PostgresDatabase, PostgresJoinHints, PostgresScanHints
 from ..qal import (
     AbstractPredicate,
     AndPredicate,
@@ -557,14 +557,14 @@ class PostgresDynProg(PlanEnumerator):
         enable_sort: bool = True,
         max_parallel_workers: int | None = None,
         add_path_hook: AddPathHook | None = None,
-        target_db: PostgresInterface | None = None,
+        target_db: PostgresDatabase | None = None,
         verbose: bool = False,
     ) -> None:
         if target_db is None:
             fallback = DatabasePool.get_instance().current_database()
-            target_db = fallback if isinstance(fallback, PostgresInterface) else None
+            target_db = fallback if isinstance(fallback, PostgresDatabase) else None
 
-        if not isinstance(target_db, PostgresInterface):
+        if not isinstance(target_db, PostgresDatabase):
             raise LogicError(
                 "The PostgresDynProg enumerator can only be used with a Postgres database. "
                 "(but you can execute the plans on any database that supports the required hints)."

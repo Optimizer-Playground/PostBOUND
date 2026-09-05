@@ -15,8 +15,8 @@ from typing import Any, overload
 
 import quacklab
 
-from . import db, qal, transform
-from ._core import (
+from .. import db, qal, transform
+from .._core import (
     BoundColumnReference,
     Cardinality,
     ColumnReference,
@@ -27,7 +27,7 @@ from ._core import (
     TableReference,
     UnboundColumnError,
 )
-from ._hints import (
+from .._hints import (
     HintType,
     JoinTree,
     PhysicalOperatorAssignment,
@@ -36,12 +36,11 @@ from ._hints import (
     operators_from_plan,
     parameters_from_plan,
 )
-from ._qep import QueryPlan
-from .db import (
+from .._qep import QueryPlan
+from ..db import (
     Database,
     DatabasePool,
     DatabaseSchema,
-    DatabaseStatistics,
     HintService,
     Histogram,
     HistogramApproximation,
@@ -49,11 +48,12 @@ from .db import (
     OptimizerInterface,
     PreciseStatistics,
     ResultSet,
+    StatisticsCatalog,
     UnsupportedDatabaseFeatureError,
     simplify_result_set,
 )
-from .qal import SqlQuery
-from .util import Version, dicts, jsondict, stats
+from ..qal import SqlQuery
+from ..util import Version, dicts, jsondict, stats
 
 
 class DuckDBInterface(Database):
@@ -82,7 +82,7 @@ class DuckDBInterface(Database):
     def schema(self) -> DuckDBSchema:
         return self._schema
 
-    def statistics(self) -> DatabaseStatistics:
+    def statistics(self) -> StatisticsCatalog:
         return self._stats
 
     def hinting(self) -> HintService:
@@ -383,7 +383,7 @@ class DuckDBSchema(DatabaseSchema):
         return foreign_keys
 
 
-class DuckDBStatistics(DatabaseStatistics):
+class DuckDBStatistics(StatisticsCatalog):
     def __init__(self, db: DuckDBInterface) -> None:
         super().__init__()
         self._db = db
