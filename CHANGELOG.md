@@ -12,6 +12,59 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
+# Version 0.22.0 (unreleased)
+
+## 🐣 New features
+
+- Added a standalone `ResultCache` (`postbound.db.ResultCache`). It wraps an arbitrary `Database` and transparently
+  caches the results of `execute_query()` calls, optionally persisting them to a JSON file. Use
+  `ResultCache.create_cache()` to obtain a shared instance for a given database.
+- Added a standalone `PreciseStatistics` (`postbound.db.PreciseStatistics`). It implements the full
+  `StatisticsCatalog` interface by computing every statistic with a live SQL query.
+  `PreciseStatistics.create_cached()` combines it with a `ResultCache` in one step.
+
+## 📰 Updates
+
+- Databases no longer provide result caching out-of-the-box. The `cache_enabled` parameters and properties on
+  `Database`, `execute_query()` and the statistics catalogs have been removed in favor of `ResultCache`.
+  This completes the deprecation announced in version 0.21.6.
+- The statistics interfaces no longer have a built-in emulation mode. The `emulated`, `enable_emulation_fallback` and
+  `cache_enabled` attributes are gone; use `PreciseStatistics` instead. Whether a native catalog falls back to
+  computing an unsupported statistic is now controlled by the module-level `postbound.db.enable_emulation_fallback`.
+- Simplified the names of the central database abstractions:
+  `DatabaseStatistics` → `StatisticsCatalog`, `PostgresInterface` → `PostgresDatabase`,
+  `PostgresSchemaInterface` → `PostgresSchema`, `PostgresStatisticsInterface` → `PostgresStatistics`,
+  `PostgresHintService` → `PostgresHinting`, and `PostgresExplainNode`/`PostgresExplainPlan` →
+  `PostgresExplain`/`PostgresPlan`. `Database.database_system_version()` is now `Database.dbms_version()`.
+- The `postgres` and `duckdb` backends are now packages (`postbound/postgres/`, `postbound/duckdb/`) rather than
+  single modules. The public import path (`pb.postgres`, `pb.duckdb`) is unchanged.
+- The `DatabasePool` can now hold connections to several databases of the same system at the same time, which removes
+  the need for the `private=True`/`refresh=True` workarounds when connecting to more than one database.
+
+## 🏥 Fixes
+
+- Fixed `ResultCache` and `DuckDBInterface` being impossible to instantiate: both still declared the pre-rename
+  `database_system_version()` and were missing `__eq__`/`__hash__`, so they remained abstract.
+- Fixed `MysqlStatisticsInterface.min_max()` being named `min_max_`, which left the abstract method unimplemented.
+  `MysqlInterface` was missing `__eq__`/`__hash__` for the same reason.
+- Fixed the DuckDB and MySQL statistics catalogs naming the wrong statistic in their
+  `UnsupportedDatabaseFeatureError` messages.
+- Removed the dead `Database.reset_cache()` and the leftover cache handling in the Postgres timeout executor. Both
+  accessed a `_query_cache` attribute that no longer exists.
+- Fixed `vis.optimizer` passing the removed `cache_enabled`/`emulated` arguments to `execute_query()` and
+  `total_rows()`.
+- Fixed several Postgres statistics being less accurate than necessary. The root cause was that Postgres maintains
+  statistics over all non-NULL values in addition to a `null_frac` statistic, which skewed count-based statistics that
+  also relied on the total number of rows.
+
+## ⚠️ Deprecations
+
+- The `ues`, `tonic` and `experiments` modules have been removed and moved to the separate optimizer repository, as
+  announced in version 0.21.6. The `tools/ceb-generator.py` and `tools/query-generator.py` scripts were removed along
+  with them.
+
+---
+
 # Version 0.21.6
 
 ## 🐣 New features

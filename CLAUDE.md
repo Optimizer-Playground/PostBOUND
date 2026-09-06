@@ -21,7 +21,7 @@ uv run python -m unittest discover -s tests -t .        # full test suite
 uv run python -m unittest tests.test_qal -v             # single module
 uv run python -m unittest tests.test_qal.SomeTest.test_x # single test
 uv run python -m examples.example-01-basic-workflow      # examples are modules, not scripts
-uv run python -m tools.ceb-generator --help              # same for tools/*.py
+uv run python -m tools.generate-workload --help          # same for tools/*.py
 ```
 
 Formatting, linting and type checking (all enforced by the pre-commit hooks):
@@ -79,15 +79,22 @@ SqlQuery  --(pipeline: optimization stages)-->  QueryPlan  --(HintService)-->  h
 ### Database backends
 
 `postbound/db/_db.py` defines the abstract `Database` and its delegated interfaces: `DatabaseSchema`,
-`DatabaseStatistics`, `OptimizerInterface`, and `HintService`. `HintService.generate_hints()` is the bridge from
-PostBOUND's abstractions back to executable SQL. Concrete backends are top-level modules: `postgres.py` (by far the most
-complete — two hint dialects, `PostgresExplainPlan` parsing, timeout/parallel executors, `WorkloadShifter`),
-`duckdb.py`, `mysql.py`. `DatabasePool` holds the "current" database so most APIs can default to it.
+`StatisticsCatalog`, `OptimizerInterface`, and `HintService`. `HintService.generate_hints()` is the bridge from
+PostBOUND's abstractions back to executable SQL. Concrete backends are top-level packages/modules: `postgres/` (by far
+the most complete — two hint dialects, `PostgresExplain`/`PostgresPlan` parsing, timeout executor), `duckdb/`, and
+`mysql.py`. `DatabasePool` holds the "current" database so most APIs can default to it.
+
+Two cross-cutting services wrap any backend: `db/_cache.py` provides `ResultCache` (result-set caching, optionally
+persisted to a JSON file — `Database` itself does **not** cache), and `db/_stats.py` provides `PreciseStatistics`
+(a `StatisticsCatalog` that computes every statistic with a live SQL query — the statistics interfaces themselves have
+no "emulated" mode). The module-level `db.enable_emulation_fallback` flag controls whether a native catalog falls back
+to `PreciseStatistics` for statistics it does not maintain.
 
 ### Query abstraction layer (qal)
 
-`postbound/qal/` is the SQL model: expressions → predicates → clauses → `SqlQuery` (plus `ImplicitSqlQuery`,
-`ExplicitSqlQuery`, `MixedSqlQuery`, `SetQuery`). Everything is **immutable**; there is no in-place mutation anywhere.
+`postbound/qal/` is the SQL model: expressions → predicates → clauses → `SqlQuery` (an abstract base with the two
+concrete subclasses `SelectStatement` and `SetQuery`). Everything is **immutable**; there is no in-place mutation
+anywhere.
 
 - `postbound/parser.py` — string/JSON → qal, built on `pglast` (the real Postgres parser). It also binds columns to
   tables; the second, schema-dependent binding phase needs a DB connection and is controlled by the module-level
@@ -103,9 +110,9 @@ complete — two hint dialects, `PostgresExplainPlan` parsing, timeout/parallel 
   `job_light()`, `job_complex()`, `stats()`, `stack()`, `ssb()`.
 - `postbound/opt/` — ready-made algorithms and helpers: `dynprog.py`, `enumeration.py`, `randomized.py`, `native.py`,
   `noopt.py`, plan/JSON helpers (`_helpers.py`), cardinality wrappers (`_cardinalities.py`). The `JoinGraph` abstraction
-  was removed; `README.md` and `docs/source/` still reference it.
-  `postbound/experiments/` has already been removed; `tools/ceb-generator.py` and `tools/query-generator.py` still
-  import it and are therefore broken.
+  was removed; `README.md` and `docs/source/core/{index,optimization}.rst` still reference it.
+  `postbound/experiments/`, `postbound/opt/ues.py` and `postbound/opt/tonic.py` have been removed (moved to the separate
+  optimizer repository), as were the `tools/ceb-generator.py` and `tools/query-generator.py` scripts.
 - `postbound/util/` — generic helpers (collections, dicts, `jsonize`, logging, networkx, stats).
 - `postbound/train/` — training data plumbing for learned stages. `postbound/vis/` — plotting/graphviz (extra `vis`).
 

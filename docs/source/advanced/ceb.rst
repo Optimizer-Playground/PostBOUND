@@ -9,11 +9,11 @@ each other. Therefore, we ship our own generator implementation inspired by the 
 addition to the actual implementation, we also provide a detailed specification of the templates and their properties in the
 following section.
 
-.. tip::
+.. note::
 
-    To use the CEB generator, you can either use the ``tools/ceb-generator.py`` script for a high-level interface, or
-    you can manually call :func:`generate_workload() <postbound.experiments.ceb.generate_workload>` from the
-    :mod:`ceb <postbound.experiments.ceb>` module.
+    The CEB generator implementation has been moved out of the core framework and now lives in the separate optimizer
+    repository, together with the other strategy-specific modules. The template specification below is kept here as the
+    reference documentation of the template format.
 
 Generator Templates
 -------------------

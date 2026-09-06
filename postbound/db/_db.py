@@ -163,13 +163,10 @@ class TimeoutSupport(Protocol):
     def execute_with_timeout(self, query: SqlQuery | str, *, timeout: float = 60.0) -> ResultSet | None:
         """Executes a query with a specific timeout.
 
-        For query execution, we use the following rules in contrast to `Database.execute_query`:
-
-        1. We never make use of the database interfaces' cache, even if it the query is contained in the cache
-        2. We never attempt to simplify the result set, even if this would be possible (e.g., for single-row result sets).
-           This is more of a pragmatic decision to be able to indicate a timeout with *None* and distinguishing it from a
-           valid result set of a single *NULL* tuple. Otherwise, we would have to resort to raising *TimeoutError* or similar
-           strategies, which complicates the control flow for the caller.
+        In contrast to `Database.execute_query`, we never attempt to simplify the result set, even if this would be
+        possible (e.g., for single-row result sets). This is more of a pragmatic decision to be able to indicate a timeout
+        with *None* and distinguishing it from a valid result set of a single *NULL* tuple. Otherwise, we would have to
+        resort to raising *TimeoutError* or similar strategies, which complicates the control flow for the caller.
 
         Parameters
         ----------
@@ -234,13 +231,6 @@ class StopwatchSupport(Protocol):
         ...
 
 
-class QueryCacheWarning(UserWarning):
-    """Warning to indicate that the query result cache was not found."""
-
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
-
-
 def simplify_result_set(result_set: ResultSet | None) -> Any:
     """Default implementation of the result set simplification logic outlined in `Database.execute_query`.
 
@@ -287,11 +277,9 @@ class Database(ABC):
     Notice, that all this information is by design read-only and functionality to write queries is intentionally not
     implemented (although one could issue `INSERT`/`UPDATE`/`DELETE` queries via the query execution functionality).
 
-    This restriction to read-only information enables the caching of query results to provide them without running a
-    query over and over again. This is achieved by storing the results of past queries in a special JSON file, which is
-    read upon creation of the `Database` instance. If this behavior is not desired, it can simply be turned off
-    globally via the `cache_enabled` property, or on a per-method-call basis by setting the corresponding parameter. If
-    no such parameter is available, the specific method does not make use of the caching mechanic.
+    Notice further that `Database` does not provide any caching of query results out of the box. If repeated execution
+    of expensive queries should be avoided (e.g. for emulated statistics, see `StatisticsCatalog`), wrap the database in
+    a `ResultCache` instead.
 
     Each database management system will need to implement this basic interface to enable PostBOUND to access the
     necessary information.
@@ -301,17 +289,11 @@ class Database(ABC):
     system_name : str
         The name of the database system for which the connection is established. This is only really important to
         distinguish different instances of the interface in a convenient manner.
-    cache_enabled : bool, optional
-        Whether complex queries that are executed against the database system should be cached. This is especially useful to
-        emulate certain statistics that are not maintained by the specific database system (see `DatabaseStatistics` for
-        details). If this is *False*, the query cache will not be loaded as well. Defaults to *True*.
 
     Notes
     -----
     When the `__init__` method is called, the connection to the specific database system has to be established already,
-    i.e. calling any of the public methods should provide a valid result. This is particularly important, because this
-    method takes care of the cache initialization. This initialization in turn relies on identifying the correct
-    cache file, which in turn depends on the system name, system version and database name of the connection.
+    i.e. calling any of the public methods should provide a valid result.
     """
 
     def __init__(self, system_name: str) -> None:
@@ -334,16 +316,15 @@ class Database(ABC):
         """Provides access to the current statistics of the database.
 
         Implementing generalized statistics for a framework that supports multiple different physical database systems
-        is much more complicated than it might seem at first. Therefore, different modes for the statistics
-        provisioning exist. These modes can be changed by setting the properties of the interface. See the
-        documentation of `DatabaseStatistics` for more details.
+        is much more complicated than it might seem at first. See the documentation of `StatisticsCatalog` for more
+        details, in particular on how unsupported statistics are handled and how the `PreciseStatistics` wrapper can be
+        used to emulate statistics that a database system does not maintain natively.
 
-        Repeated calls to this method are guaranteed to provide the same object. Therefore, changes to the statistics
-        interface configuration are guaranteed to be persisted accross multiple accesses to the statistics system.
+        Repeated calls to this method are guaranteed to provide the same object.
 
         Returns
         -------
-        DatabaseStatistics
+        StatisticsCatalog
             The statistics interface. Repeated calls to this method are guaranteed to provide the same object.
         """
         raise NotImplementedError
@@ -397,12 +378,7 @@ class Database(ABC):
         ----------
         query : SqlQuery | str
             The query to execute. If it contains a `Hint` with `preparatory_statements`, these will be executed
-            beforehand. Notice that such statements are never subject to caching.
-        cache_enabled : Optional[bool], optional
-            Controls the caching behavior for just this one query. The default value of *None* indicates that the
-            "global" configuration of the database system should be used. Setting this parameter to a boolean value
-            forces or deactivates caching for the specific query for the specific execution no matter what the "global"
-            configuration is.
+            beforehand.
         raw : bool, optional
             Whether the result set should be returned as-is. By default, the result set is simplified. Raw mode skips this
             step.
@@ -428,14 +404,8 @@ class Database(ABC):
         needs to execute mutating queries, they can be issued as plain text. Just remember that this behavior is
         heavily discouraged!
 
-        The precise behavior of this method depends on whether caching is enabled or not. If it is, the query will
-        only be executed against the live database system, if it is not in the cache. Otherwise, the result will simply
-        be retrieved. Caching can be enabled/disabled for just this one query via the `cache_enabled` switch. If this
-        is not specified, caching depends on the `cache_enabled` property.
-
-        If caching should be used for this method, but is disabled at a database-level, the current cache will still
-        be read and persisted. This ensures that all cached queries are properly saved and none of the previous cache
-        content is lost.
+        This method does not perform any caching of results by itself. If repeated execution of the same query should be
+        avoided, wrap the database in a `ResultCache`.
         """
         raise NotImplementedError
 
@@ -501,8 +471,8 @@ class Database(ABC):
         """Provides a representation of the current database connection as well as its system settings.
 
         This description is intended to transparently document which customizations have been applied, thereby giving
-        an idea of how the default query execution might have been affected. It can be JSON-serialized and will be
-        included by most of the output of the utilities in the `runner` module of the `experiments` package.
+        an idea of how the default query execution might have been affected. It can be JSON-serialized and is included by
+        the benchmark results produced by the `bench` module.
         """
         raise NotImplementedError
 
@@ -524,10 +494,6 @@ class Database(ABC):
         Database.cursor
         """
         raise NotImplementedError
-
-    def reset_cache(self) -> None:
-        """Removes all results from the query cache. Useful for debugging purposes."""
-        self._query_cache = {}
 
     @abstractmethod
     def cursor(self) -> Cursor:
@@ -1645,29 +1611,6 @@ type HistogramApproximation = Literal["approx-uni", "bound"]
 """The strategy to estimate the frequency of values that are not exactly on the bucket bounds of a histogram."""
 
 
-def _infer_histogram_bounds[T](
-    frequencies: Sequence[tuple[T, int]], *, n_bins: int, n_rows: int
-) -> tuple[T, Sequence[T], Sequence[int]]:
-    """Infer the bucket bounds and frequencies for a histogram from a list of (value, frequency) pairs."""
-    if not frequencies:
-        raise ValueError("Cannot infer histogram bounds from empty frequency list")
-
-    bucket_size = n_rows // n_bins
-
-    bounds: list[T] = []
-    buckets: list[int] = []
-    cumulative_freq = 0
-    for value, freq in frequencies:
-        cumulative_freq += freq
-        if cumulative_freq < bucket_size:
-            continue
-        bounds.append(value)
-        buckets.append(cumulative_freq)
-        cumulative_freq = 0
-
-    return frequencies[0][0], bounds, buckets
-
-
 class _HistElem[T](Protocol):
     def __sub__(self, other: T) -> T: ...
 
@@ -1881,9 +1824,6 @@ class Histogram[T: _HistElem]:
         return f"Histogram(buckets=[{buckets}], lower={self._lower})"
 
 
-enable_statistics_fallback: bool = True
-
-
 class StatisticsCatalog(ABC):
     """The statistics interface provides unified access to table-level and column-level statistics.
 
@@ -1900,38 +1840,17 @@ class StatisticsCatalog(ABC):
     of an optimization algorithm if it relies on a basic statistic that just happens to not be available on the desired
     target database system.
 
-    To address both of these issues, the statistics interface operates in two different modes: in *native* mode it
-    simply delegates all requests to statistical information to the corresponding catalogs of the database systems.
-    Alternatively, the statistics interface can create the illusion of a normalized and standardized statistics
-    catalogue. This so-called *emulated* mode does not rely on the statistics catalogs and issues equivalent SQL
-    queries instead. For example, if a statistic on the number of distinct values of a column is requested, this
-    emulated by running a *SELECT COUNT(DISTINCT column) FROM table* query.
+    Concrete implementations of this interface delegate all requests to the corresponding statistics catalog of the
+    database system (this is sometimes called *native* mode). If the requested statistic is not maintained by the
+    target database system, the behavior depends on the module-level `enable_emulation_fallback` flag: if it is
+    *True* (the default), the statistic is instead computed live by issuing an equivalent SQL query (e.g. a statistic
+    on the number of distinct values of a column is emulated by running a *SELECT COUNT(DISTINCT column) FROM table*
+    query). Otherwise, an `UnsupportedDatabaseFeatureError` is raised.
 
-    The current mode can be customized using the boolean `emulated` property. If the statistics interface operates in
-    native mode (i.e. based on the actual statistics catalog) and the user requests a statistic that is not available
-    in the selected database system, the behavior depends on another attribute: `enable_emulation_fallback`. If this
-    boolean attribute is *True*, an emulated statistic will be calculated instead. Otherwise, an
-    `UnsupportedDatabaseFeatureError` is raised.
-
-    Since the live computation of emulated statistics can be costly, the statistics interface has its own
-    `cache_enabled` attribute. It can be set to `None` to use the default caching behavior of the database system.
-    However, if this attribute is set to `True` or `False` directly, caching will be used accordingly for all
-    compute-intensive statistics operations (and only such operations). Once again, this only works because PostBOUND
-    assumes the database to be immutable.
-
-    Parameters
-    ----------
-    db : Database
-        The database for which the schema information should be read. This is required to hook into the database cache
-        and to obtain the cursors to actuall execute queries.
-    emulated : bool, optional
-        Whether the statistics interface should operate in emulation mode. To enable reproducibility, this is *True*
-        by default
-    enable_emulation_fallback : bool, optional
-        Whether emulation should be used for unsupported statistics when running in native mode, by default True
-    cache_enabled : Optional[bool], optional
-        Whether emulated statistics queries should be subject to caching, by default True. Set to *None* to use the
-        caching behavior of the `db`
+    The `PreciseStatistics` class provides a database-independent implementation that always computes statistics this
+    way, i.e. it can be used to force emulation even for database systems that maintain a specific statistic natively.
+    Since such live computation can be costly, consider wrapping the underlying `Database` in a `ResultCache` first
+    (see `PreciseStatistics.create_cached`).
     """
 
     @abstractmethod

@@ -25,8 +25,8 @@ Each instance of the :class:`~postbound.Database` class is connected to an actua
 .. warning::
 
     Currently, the database interface assumes that the underlying database is not modified while PostBOUND is running and
-    you need to be careful when you deviate from this assumption. Especially, make sure to disable the
-    :ref:`query cache <query-cache>` before executing any queries.
+    you need to be careful when you deviate from this assumption. Especially, make sure not to wrap the database in a
+    :class:`~postbound.db.ResultCache` if the data can change while PostBOUND is running.
 
 
 Database Backends
@@ -56,13 +56,12 @@ This behavior can be controlled with the ``raw`` parameter.
     :func:`~postbound.db.TimeoutSupport.execute_with_timeout` method is also available on the database interface.
     See :class:`~postbound.db.TimeoutSupport` for more details.
 
-.. _query-cache:
-
-Since the underlying database is usually assumed to be static, you can use a query cache to prevent repeated execution of
-non-benchmark queries. This can be especially useful when running complex queries to calculate advanced statistics.
-Caching can be controlled either globally via the :attr:`~postbound.Database.cache_enabled` property, or by setting
-the parameter on :func:`~postbound.Database.execute_query` calls. See the documentation on
-:class:`~postbound.Database` for more details.
+Since the underlying database is usually assumed to be static, you can wrap any database in a
+:class:`~postbound.db.ResultCache` to prevent repeated execution of non-benchmark queries. This can be especially useful
+when running complex queries to calculate advanced statistics. The cache behaves like any other
+:class:`~postbound.Database` and only intercepts :func:`~postbound.Database.execute_query`. Use
+:meth:`~postbound.db.ResultCache.create_cache` to obtain one, optionally backed by a JSON file that persists the cached
+results across processes.
 
 If the query execution fails for some reason, a :exc:`~postbound.db.DatabaseServerError` or
 :exc:`~postbound.db.DatabaseUserError` is raised - depending on the error's cause.
@@ -113,7 +112,7 @@ relationships in the schema.
 Statistics catalog
 ------------------
 
-The :class:`~postbound.db.DatabaseStatistics` serves as a unified statistics catalog. It is the central repository for all
+The :class:`~postbound.db.StatisticsCatalog` serves as a unified statistics catalog. It is the central repository for all
 base statistics that are typically maintained by database systems. The catalog can be used to retrieve table cardinalities,
 most common values, etc. Use :meth:`~postbound.Database.statistics` to access the them.
 
@@ -121,30 +120,27 @@ One important design consideration of the statistics catalog is that different s
 statistics. For example, Postgres does not keep track of minimum or maximum values for columns, but derives them from the
 histograms. On the other hand, MySQL does not store most common values and pretty much entirely relies on histograms.
 Such differences hinder the implementation of optimizer prototypes if they rely on a specific set of statistics.
-To address this, :class:`~postbound.db.DatabaseStatistics` offer an *emulation mode*. The basic idea is that whenever a
-database system does not maintain a specific statistic, an equivalent SQL query is issued that computes the same
-information. For example, say you want to retrieve the most common values of a column on MySQL. Calling
-:meth:`~postbound.db.DatabaseStatistics.most_common_values` will instead issue the following query:
+To address this, PostBOUND can compute the missing statistics on live data instead: whenever a database system does not
+maintain a specific statistic, an equivalent SQL query is issued that computes the same information. For example, say you
+want to retrieve the most common values of a column on MySQL. Calling
+:meth:`~postbound.db.StatisticsCatalog.most_common_values` will instead issue the following query:
 ``SELECT col, COUNT(*) FROM tab GROUP BY col ORDER BY COUNT(*) DESC LIMIT 10``.
 
-Since these computations can be pretty expensive, the statistics catalog provides its own
-:ref:`caching control <query-cache>` that is independent of the global cache setting. By switching
-:attr:`~postbound.db.DatabaseStatistics.cache_enabled` on, queries from the statistics catalog are always cached, no matter
-what the global cache setting is. Setting this attribute to *None* falls back to the global cache setting.
+This behavior is controlled by the module-level :data:`~postbound.db.enable_emulation_fallback` flag. If it is disabled,
+database systems raise an :exc:`~postbound.db.UnsupportedDatabaseFeatureError` for statistics they do not maintain
+themselves.
+
+The computation itself is implemented by :class:`~postbound.db.PreciseStatistics`, which is a full
+:class:`~postbound.db.StatisticsCatalog` in its own right. You can use it directly to force *all* statistics to be
+computed on live data, even for systems that do maintain them natively. Since this can be pretty expensive, prefer
+:meth:`~postbound.db.PreciseStatistics.create_cached`, which puts a :class:`~postbound.db.ResultCache` underneath.
 
 .. important::
 
-    One downside of the emulation approach is granularity: by issuing SQL queries to emulate statistics, you always get
-    perfect statistics (since they are computed on live data). However, an actual statistics catalog might be slightly
-    outdated. As a consequence, database systems with emulated statistics might perform better than their counterparts with
-    actual statistics.
-
-    If the emulation leads to weird results, you can disable it via the
-    :attr:`~postbound.db.DatabaseStatistics.emulation_fallback` attribute. You can also go the different route and force
-    all statistics to be emulated (even if the database system actually supports them) by setting
-    :attr:`~postbound.db.DatabaseStatistics.emulated`.
-
-    See :class:`~postbound.db.DatabaseStatistics` for more details.
+    One downside of computing statistics this way is granularity: by issuing SQL queries, you always get perfect
+    statistics (since they are computed on live data). However, an actual statistics catalog might be slightly
+    outdated. As a consequence, database systems with computed statistics might perform better than their counterparts
+    with actual statistics.
 
 
 Utilities
@@ -166,11 +162,11 @@ provides means to simulate query execution on a perfectly pre-warmed database (i
 shared buffer). This is achieved via the :meth:`~postbound.db.PrewarmingSupport.prewarm_tables` method. Since not all
 database provide this kind of functionality and it is also not a core feature of the database interface, this method is
 part of an extra :class:`~postbound.db.PrewarmingSupport` protocol. Notably, the
-:class:`~postbound.postgres.PostgresInterface` provides full prewarming support.
+:class:`~postbound.postgres.PostgresDatabase` provides full prewarming support.
 For other systems, you can use simple ``isinstance`` checks to see if the database supports prewarming.
 
 .. tip::
 
     `pg_lab <https://github.com/rbergm/pg_lab>`_-based installations of Postgres also provide support for proper cold
-    starts in Postgres. The :class:`~postbound.postgres.PostgresInterface` has a corresponding
-    :meth:`~postbound.postgres.PostgresInterface.cooldown_tables` method.
+    starts in Postgres. The :class:`~postbound.postgres.PostgresDatabase` has a corresponding
+    :meth:`~postbound.postgres.PostgresDatabase.cooldown_tables` method.

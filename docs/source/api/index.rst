@@ -13,7 +13,6 @@ API
     opt/index
     workloads
     bench
-    experiments
     validation
     util
     vis

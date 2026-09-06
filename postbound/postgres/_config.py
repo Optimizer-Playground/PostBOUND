@@ -249,7 +249,7 @@ class PostgresConfiguration(collections.UserString):
     Notice that while the configuration is a *UserString*, pyscopg currently does not support executing the configuration, i.e.
     executing ``cursor.execute(config)`` will not work. Instead, the configuration has to be manually converted into a string
     first by calling *str* as in ``cursor.execute(str(config))``. This also applies to the `execute_query()` method of the
-    `PostgresInterface` class, since it uses psycopg under the hood.
+    `PostgresDatabase` class, since it uses psycopg under the hood.
     """
 
     @staticmethod

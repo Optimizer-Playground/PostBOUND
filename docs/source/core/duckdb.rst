@@ -141,8 +141,8 @@ References
 
 .. [#f1]
     DuckDB maintains only a minimal set of statistics (due to the large variety of input sources).
-    In particular, only the number of rows is reliably available. Other statistics can only be
-    :ref:`emulated <database-statistics>`.
+    In particular, only the number of rows is reliably available. Other statistics are computed on live data via
+    :class:`~postbound.db.PreciseStatistics` (see :ref:`database-statistics`).
 
 .. [#f2]
     DuckDB query plans lack one crucial piece of information: if a table appears multiple times in a query, we cannot

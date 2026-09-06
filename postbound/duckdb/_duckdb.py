@@ -57,6 +57,22 @@ from ..util import Version, dicts, jsondict, stats
 
 
 class DuckDBInterface(Database):
+    """Database implementation for DuckDB backends.
+
+    The connection is established through *quacklab*, a DuckDB fork that adds the hinting extension points that
+    PostBOUND relies on. Since DuckDB is an embedded database, an instance is identified by the database file it
+    operates on rather than by a connection string.
+
+    Parameters
+    ----------
+    db : Path
+        The DuckDB database file to open.
+    system_name : str, optional
+        Description of the specific DuckDB instance, by default *DuckDB*
+    read_only : bool, optional
+        Whether the database file should be opened in read-only mode. Defaults to *False*.
+    """
+
     def __init__(
         self,
         db: Path,
@@ -153,7 +169,7 @@ class DuckDBInterface(Database):
         db_name = result_set[0]
         return db_name
 
-    def database_system_version(self) -> Version:
+    def dbms_version(self) -> Version:
         self._cur.execute("SELECT version();")
         result_set = self._cur.fetchone()
         assert result_set is not None
@@ -182,7 +198,7 @@ class DuckDBInterface(Database):
     def describe(self) -> jsondict:
         base_info: dict[str, object] = {
             "system_name": self.dbms_name(),
-            "system_version": self.database_system_version(),
+            "system_version": self.dbms_version(),
             "database": self.database_name(),
             "statistics": self.statistics().describe(),
         }
@@ -218,8 +234,22 @@ class DuckDBInterface(Database):
         end_time = time.perf_counter_ns()
         self._last_query_runtime = (end_time - start_time) / 10**9  # convert to seconds
 
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, type(self)) and self._dbfile == other._dbfile
+
+    def __hash__(self) -> int:
+        return hash(self._dbfile)
+
 
 class DuckDBSchema(DatabaseSchema):
+    """Schema implementation for DuckDB backends.
+
+    Parameters
+    ----------
+    db : DuckDBInterface
+        The database instance whose schema should be inspected
+    """
+
     def __init__(self, db: DuckDBInterface) -> None:
         super().__init__(db, prep_placeholder="?")
         self._tables: set[TableReference] = set()
@@ -384,6 +414,23 @@ class DuckDBSchema(DatabaseSchema):
 
 
 class DuckDBStatistics(StatisticsCatalog):
+    """Statistics implementation for DuckDB backends.
+
+    DuckDB maintains only a very small set of statistics, essentially just the number of rows per table. This is a
+    consequence of the large variety of input sources that DuckDB supports. All other statistics are therefore not
+    available natively. Depending on `enable_emulation_fallback`, requesting them either falls back to
+    `PreciseStatistics` or raises an `UnsupportedDatabaseFeatureError`.
+
+    Parameters
+    ----------
+    db : DuckDBInterface
+        The database instance for which the statistics should be retrieved
+
+    See Also
+    --------
+    postbound.db.enable_emulation_fallback
+    """
+
     def __init__(self, db: DuckDBInterface) -> None:
         super().__init__()
         self._db = db
@@ -432,21 +479,21 @@ class DuckDBStatistics(StatisticsCatalog):
     def min_max(self, column: ColumnReference) -> tuple[Any, Any]:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
-                self._db, "min/max value count statistics. Set db.enable_emulation_fallback to activate."
+                self._db, "min/max value statistics. Set db.enable_emulation_fallback to activate."
             )
         return PreciseStatistics(self._db).min_max(column)
 
     def most_common_values(self, column: ColumnReference) -> MostCommonValues:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
-                self._db, "distinct value count statistics. Set db.enable_emulation_fallback to activate."
+                self._db, "most common values statistics. Set db.enable_emulation_fallback to activate."
             )
         return PreciseStatistics(self._db).most_common_values(column, k=100)
 
     def histogram(self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni") -> Histogram:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
-                self._db, "distinct value count statistics. Set db.enable_emulation_fallback to activate."
+                self._db, "histogram statistics. Set db.enable_emulation_fallback to activate."
             )
         return PreciseStatistics(self._db).histogram(column, n_bins=100, interpolation=interpolation)
 
@@ -560,6 +607,16 @@ def parse_duckdb_plan(raw_plan: dict | str, *, query: SqlQuery | None = None) ->
 
 
 class DuckDBOptimizer(OptimizerInterface):
+    """Optimizer interface for DuckDB backends.
+
+    DuckDB does not expose the cost estimates of its optimizer, so `cost_estimate` is not supported.
+
+    Parameters
+    ----------
+    db : DuckDBInterface
+        The database instance whose optimizer should be queried
+    """
+
     def __init__(self, db: DuckDBInterface) -> None:
         self._db = db
 
@@ -626,7 +683,7 @@ class DuckDBOptimizer(OptimizerInterface):
 
 @dataclass
 class HintParts:
-    """Models the different kinds of optimizer hints that are supported by Postgres.
+    """Models the different kinds of optimizer hints that are supported by DuckDB.
 
     HintParts are designed to conveniently collect all kinds of hints in order to prepare the generation of a proper
     `Hint` clause.
@@ -637,10 +694,10 @@ class HintParts:
     """
 
     settings: list[str]
-    """Settings are global to the current database connection and influence the selection of operators for all queries.
+    """Settings are global to the current database connection and influence the plan generation for all queries.
 
-    Typical examples include ``SET enable_nestloop = 'off'``, which disables the usage of nested loop joins for all
-    queries.
+    These are emitted as plain DuckDB *SET* statements, e.g. ``threads = 1;``. They are filled from the
+    `system_settings` of a `PlanParameterization`.
     """
 
     hints: list[str]
@@ -697,6 +754,18 @@ class HintParts:
 
 
 class DuckDBHintService(HintService):
+    """Hint generation for DuckDB backends.
+
+    Hints are emitted in the dialect understood by the *quacklab* extension. Note that DuckDB couples the
+    implementation of its physical operators to the rules that select them, so operator hints can lead to execution
+    errors and should be used with care. Join order and cardinality hints are reliable.
+
+    Parameters
+    ----------
+    db : DuckDBInterface
+        The database instance for which the hints should be generated
+    """
+
     def __init__(self, db: DuckDBInterface) -> None:
         self._db = db
 
@@ -899,16 +968,26 @@ def connect(
 ) -> DuckDBInterface:
     """Connects to a DuckDB database file.
 
+    After the connection has been established, it is registered automatically on the current `DatabasePool` instance.
+    This can be changed via the `private` parameter.
+
     Parameters
     ----------
+    db : str | Path
+        Path to the DuckDB database file to open.
     read_only : bool, optional
         If true, the database will be opened in read-only mode. By default, the database is opened in read-write mode.
     refresh : bool, optional
         If true, a new connection to the database will always be established, even if a connection to the same database is
-        already pooled. The registration key will be suffixed to prevent collisions. By default, the current connection is
-        re-used. If that is the case, no further information (e.g. config strings) is read and only the `name` is accessed.
+        already pooled. The new connection replaces the pooled one. By default, the pooled connection is re-used (and
+        transparently re-opened if it has been closed in the meantime).
     private : bool, optional
         If true, skips registration of the new instance on the `DatabasePool`. Registration is performed by default.
+
+    Returns
+    -------
+    DuckDBInterface
+        The DuckDB database object
     """
     db_pool = DatabasePool.get_instance()
     db_key = f"duckdb[{db}]"

@@ -11,8 +11,6 @@ Join Orders
 .. autoclass:: postbound.JoinTree
     :members:
 
-.. autodata:: postbound.JoinTreeAnnotation
-
 .. autoclass:: postbound.LogicalJoinTree
     :members:
 

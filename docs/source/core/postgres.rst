@@ -78,20 +78,21 @@ Advanced Backend Features
 In addition to the standardized database abstraction features, the Postgres backend provides the following additional
 features:
 
-* cache warmup via :meth:`~postbound.postgres.PostgresInterface.prewarm_tables`
-* server configuration via :meth:`~postbound.postgres.PostgresInterface.apply_configuration`
-* statistics maintenance via :meth:`~postbound.postgres.PostgresStatisticsInterface.update_statistics`
+* cache warmup via :meth:`~postbound.postgres.PostgresDatabase.prewarm_tables`
+* cold starts via :meth:`~postbound.postgres.PostgresDatabase.cooldown_tables` (requires pg_lab)
+* server configuration via :meth:`~postbound.postgres.PostgresDatabase.apply_configuration`
+* statistics maintenance via :meth:`~postbound.postgres.PostgresStatistics.update_statistics`
 * server management with :func:`~postbound.postgres.start`, :func:`~postbound.postgres.stop`, and
   :func:`~postbound.postgres.is_running`
-* parallel query execution based on the :class:`~postbound.postgres.ParallelQueryExecutor`
-* simple database manipulation with the :class:`~postbound.postgres.WorkloadShifter`
+* query execution with timeouts via the ``timeout`` parameter of
+  :meth:`~postbound.postgres.PostgresDatabase.execute_query`
 
 
 Query Plans
 -----------
 
-To obtain DuckDB query plans, you can either use the :meth:`~postbound.postgres.PostgresOptimizer.query_plan` method or
-parse the EXPLAIN output manually using :class:`~postbound.postgres.PostgresExplainPlan`. Both options yield the same
+To obtain Postgres query plans, you can either use the :meth:`~postbound.postgres.PostgresOptimizer.query_plan` method or
+parse the EXPLAIN output manually using :class:`~postbound.postgres.PostgresPlan`. Both options yield the same
 results:
 
 .. code-block:: python
@@ -102,7 +103,7 @@ results:
     # this is equivalent to:
     explain_query = pb.transform.as_explain(job["1a"])
     raw_plan = pg_instance.execute_query(explain_query)
-    equivalent_plan = pb.postgres.PostgresExplainPlan(raw_plan)
+    equivalent_plan = pb.postgres.PostgresPlan(raw_plan)
 
 
 .. _pg-server-config:
@@ -126,7 +127,7 @@ the storage type or raises an error, you can manually specify it via ``--disk-ty
 Hinting Backends
 -----------------
 
-The :class:`~postbound.postgres.PostgresInterface` supports two different hinting backends: the widely-used
+The :class:`~postbound.postgres.PostgresDatabase` supports two different hinting backends: the widely-used
 `pg_hint_plan <https://github.com/ossc-db/pg_hint_plan>`_ and the research-focused
 `pg_lab <https://github.com/rbergm/pg_lab>`_. pg_lab is a fork of vanilla Postgres that adds additional extension points
 to the server. These extension points allow to control optimizer internals in a fine-grained manner. The hinting extension
@@ -134,7 +135,7 @@ shipped with pg_lab uses these extension points to provide more reliable and mor
 pg_hint_plan.
 
 Upon establishing a server connection, the Postgres interface automatically detects which hinting backend is available on
-the server and adjusts its hinting dialect used in :meth:`~postbound.postgres.PostgresHintService.generate_hints`
+the server and adjusts its hinting dialect used in :meth:`~postbound.postgres.PostgresHinting.generate_hints`
 accordingly. If for some reason you want to change the current hinting dialect, you can do so via the
-:attr:`~postbound.postgres.PostgresHintService.backend` attribute available via
-:meth:`~postbound.postgres.PostgresInterface.hinting`.
+:attr:`~postbound.postgres.PostgresHinting.backend` attribute available via
+:meth:`~postbound.postgres.PostgresDatabase.hinting`.

@@ -387,7 +387,7 @@ def merge_checks(checks: OptimizationPreCheck | Iterable[OptimizationPreCheck], 
 
 
 class ImplicitQueryPreCheck(OptimizationPreCheck):
-    """Check to assert that an input query is a `ImplicitSqlQuery`."""
+    """Check to assert that an input query uses an implicit *FROM* clause, i.e. that it has a simple *FROM* clause."""
 
     def __init__(self) -> None:
         super().__init__("implicit-query")

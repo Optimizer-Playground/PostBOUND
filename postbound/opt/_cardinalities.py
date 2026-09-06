@@ -22,8 +22,8 @@ class PreciseCardinalities(CardinalityEstimator):
 
     These cardinalities are determined by actually executing the intermediate query plan and counting the number of result
     tuples. To speed up this potentially very costly computation, the estimator can store already calculated cardinalities in
-    an intermediate cache. Notice that this cache is different from the query cache provided by the `Database` interface. The
-    reason for this distinction is simple: the query result cache assumes static databases. If it connects to the same logical
+    an intermediate cache. Notice that this cache is different from the `ResultCache` that can be wrapped around a `Database`.
+    The reason for this distinction is simple: the result cache assumes static databases. If it connects to the same logical
     database at two different points in time (potentially after a data shift), the cached results will be out-of-date. On the
     other hand, the cardinality cache is transient and local to each estimator. Therefore, it will always calculate the current
     results, even when a data shift is simulated. Even when the same estimator is used while simulating a data shift, the cache

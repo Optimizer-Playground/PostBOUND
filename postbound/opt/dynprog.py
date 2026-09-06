@@ -538,7 +538,7 @@ class PostgresDynProg(PlanEnumerator):
         This is enabled by default.
     add_path_hook : Optional[AddPathHook], optional
         Optional function to implement custom path addition logic. See documentation on `AddPathHook` for more details.
-    target_db : Optional[PostgresInterface], optional
+    target_db : Optional[PostgresDatabase], optional
         The database on which the plans should be executed. This has to be a Postgres instance. If omitted, the database is
         inferred from the `DatabasePool`.
     verbose : bool, optional

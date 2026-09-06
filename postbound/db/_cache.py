@@ -1,3 +1,10 @@
+"""Provides `ResultCache`, a transparent result-set cache that wraps an arbitrary `Database`.
+
+Prior to the database rework, result caching was built directly into `Database`. It has since been extracted into this
+module, so that caching becomes an opt-in decision (wrap the database you want to cache) rather than a built-in default
+that every backend has to implement and every user has to reason about.
+"""
+
 from __future__ import annotations
 
 import atexit
@@ -60,8 +67,54 @@ _caches: dict[tuple[Database, Path | None], ResultCache] = {}
 
 
 class ResultCache(Database):
+    """Transparently caches the result sets of `execute_query` calls made against a wrapped `Database`.
+
+    A `ResultCache` behaves like any other `Database`: `schema`, `statistics`, `hinting` and `optimizer` all delegate
+    directly to the wrapped database. Only `execute_query` is intercepted -- the query is stringified and used as a
+    cache key, so repeated calls with the same query text are served from an in-memory dictionary instead of hitting
+    the live database system again.
+
+    If an `offline_cache` path is supplied, the cache also persists across process boundaries: existing entries are
+    read from that JSON file when the cache is created and the full (possibly extended) cache content is written back
+    to the same file via `atexit` once the process terminates.
+
+    This is most useful for wrapping compute-intensive, read-only queries such as those issued by `PreciseStatistics`,
+    since it turns the assumption that the database is immutable during a PostBOUND run into an actual, shared
+    performance benefit.
+
+    Parameters
+    ----------
+    db : Database
+        The database whose results should be cached.
+    offline_cache : Path, optional
+        A JSON file to persist the cache to. If omitted, the cache only lives in memory for the lifetime of this
+        `ResultCache` instance.
+
+    See Also
+    --------
+    ResultCache.create_cache : Preferred way to obtain a `ResultCache`, reusing an existing instance if possible.
+    """
+
     @staticmethod
     def create_cache(db: Database, *, offline_cache: Path | None = None) -> ResultCache:
+        """Provides a `ResultCache` for the given database, reusing an already existing cache if one is available.
+
+        Repeated calls with the same `db` and `offline_cache` combination return the exact same `ResultCache`
+        instance. This ensures that all callers within a process actually share the same in-memory cache contents,
+        rather than each maintaining their own (and potentially racing on the same `offline_cache` file).
+
+        Parameters
+        ----------
+        db : Database
+            The database whose results should be cached.
+        offline_cache : Path, optional
+            A JSON file to persist the cache to. See `ResultCache` for details.
+
+        Returns
+        -------
+        ResultCache
+            The (possibly newly created) cache instance for the given database and offline file.
+        """
         existing_cache = _caches.get((db, offline_cache))
         if existing_cache is not None:
             return existing_cache
@@ -92,6 +145,11 @@ class ResultCache(Database):
         return self._db.optimizer()
 
     def execute_query(self, query: SqlQuery | str, *, raw: bool = False) -> Any:
+        """Executes the query on the wrapped database, or serves it from the cache if it was executed before.
+
+        The cache key is the string representation of `query`. See `Database.execute_query` for the semantics of
+        `raw`.
+        """
         stringified_query = str(query) if isinstance(query, SqlQuery) else query
 
         cached_res = self._cache.get(stringified_query)
@@ -105,7 +163,7 @@ class ResultCache(Database):
     def database_name(self) -> str:
         return self._db.database_name()
 
-    def database_system_version(self) -> Version:
+    def dbms_version(self) -> Version:
         return self._db.dbms_version()
 
     def describe(self) -> jsondict:
@@ -119,6 +177,12 @@ class ResultCache(Database):
 
     def close(self) -> None:
         self._db.close()
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, type(self)) and self._db == other._db and self.offline_file == other.offline_file
+
+    def __hash__(self) -> int:
+        return hash((self._db, self.offline_file))
 
     def _dump_cache(self) -> None:
         assert self.offline_file is not None

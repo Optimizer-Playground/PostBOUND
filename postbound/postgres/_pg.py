@@ -62,7 +62,6 @@ from ..db import (
     MostCommonValues,
     OptimizerInterface,
     PreciseStatistics,
-    QueryCacheWarning,
     ResultSet,
     StatisticsCatalog,
     UnsupportedDatabaseFeatureError,
@@ -231,8 +230,6 @@ class PostgresDatabase(Database):
         Identifier for the Postgres server. This will be the name that is shown in the server logs and process lists.
     client_encoding : str, optional
         The client encoding to use for the connection, by default *UTF8*
-    cache_enabled : bool, optional
-        Whether to enable caching of database queries, by default *False*
     debug : bool, optional
         Whether additional debug information should be printed during database interaction. Defaults to *False*.
     """
@@ -282,7 +279,47 @@ class PostgresDatabase(Database):
         raw: bool = False,
         timeout: float | None = None,
     ) -> Any:
-        # NB: some of the execution logic is duplicated in TimeoutQueryExecutor.execute_query.
+        """Executes the given query and returns the associated result set.
+
+        In addition to `Database.execute_query`, the Postgres implementation can apply optimizer hints to the query
+        before executing it and can abort the execution after a timeout.
+
+        Parameters
+        ----------
+        query : SqlQuery | str
+            The query to execute. If it contains a `Hint` with `preparatory_statements`, these will be executed
+            beforehand.
+        plan : Optional[QueryPlan], optional
+            A complete query execution plan to enforce. If this is given, the other hinting parameters should be *None*.
+        join_order : Optional[JoinTree], optional
+            The sequence in which the individual joins should be executed.
+        physical_operators : Optional[PhysicalOperatorAssignment], optional
+            The physical operators that should be used for the query execution.
+        plan_parameters : Optional[PlanParameterization], optional
+            Additional parameters and metadata for the native optimizer, most importantly cardinality estimates.
+        raw : bool, optional
+            Whether the result set should be returned as-is. By default, the result set is simplified. Raw mode skips this
+            step.
+        timeout : Optional[float], optional
+            Aborts the query execution if it takes longer than this number of seconds. By default, the query is allowed to
+            run to completion.
+
+        Returns
+        -------
+        Any
+            The result set of the query. See `Database.execute_query` for details on the simplification logic.
+
+        Raises
+        ------
+        TimeoutError
+            If a `timeout` was given and the query did not finish in time.
+
+        See Also
+        --------
+        Database.execute_query
+        postbound.db.HintService.generate_hints : For the semantics of the hinting parameters
+        """
+        # NB: some of the execution logic is duplicated in _TimeoutQueryExecutor.execute_query.
         # Make sure to keep both implementations in sync.
         query = self._apply_query_hints(
             query,
@@ -481,7 +518,7 @@ class PostgresDatabase(Database):
     def obtain_new_local_connection(self) -> psycopg.Connection:
         """Provides a new database connection to be used exclusively be the client.
 
-        The current connection maintained by the `PostgresInterface` is not affected by obtaining a new connection in any
+        The current connection maintained by the `PostgresDatabase` is not affected by obtaining a new connection in any
         way.
 
         Returns
@@ -865,7 +902,7 @@ class PostgresSchema(DatabaseSchema):
 
     Parameters
     ----------
-    postgres_db : PostgresInterface
+    postgres_db : PostgresDatabase
         The database for which schema information should be retrieved
     """
 
@@ -1146,18 +1183,18 @@ _DTypeArrayConverters = {
 class PostgresStatistics(StatisticsCatalog):
     """Statistics implementation for Postgres systems.
 
+    Statistics are read from the native Postgres catalogs (mostly *pg_class* and *pg_stats*). Postgres does not
+    maintain min/max values for columns. Depending on `enable_emulation_fallback`, requesting them either falls back to
+    `PreciseStatistics` or raises an `UnsupportedDatabaseFeatureError`.
+
     Parameters
     ----------
-    postgres_db : PostgresInterface
+    postgres_db : PostgresDatabase
         The database instance for which the statistics should be retrieved
-    emulated : bool, optional
-        Whether the statistics interface should operate in emulation mode. To enable reproducibility, this is *True*
-        by default
-    enable_emulation_fallback : bool, optional
-        Whether emulation should be used for unsupported statistics when running in native mode, by default True
-    cache_enabled : Optional[bool], optional
-        Whether emulated statistics queries should be subject to caching, by default True. Set to *None* to use the
-        caching behavior of the `db`
+
+    See Also
+    --------
+    postbound.db.enable_emulation_fallback
     """
 
     def __init__(self, postgres_db: PostgresDatabase) -> None:
@@ -2082,7 +2119,7 @@ class PostgresHinting(HintService):
 
     Parameters
     ----------
-    postgres_db : PostgresInterface
+    postgres_db : PostgresDatabase
         A postgres database with an active hinting backend (pg_hint_plan or pg_lab)
 
     Raises
@@ -2322,7 +2359,7 @@ class PostgresHinting(HintService):
             raise ValueError(f"No supported hinting backend found for backend with PID {connection_pid}")
 
     def __repr__(self) -> str:
-        return f"PostgresHintService(db={self._postgres_db} backend={self._backend})"
+        return f"PostgresHinting(db={self._postgres_db} backend={self._backend})"
 
     def __str__(self) -> str:
         return repr(self)
@@ -2333,7 +2370,7 @@ class PostgresOptimizer(OptimizerInterface):
 
     Parameters
     ----------
-    postgres_instance : PostgresInterface
+    postgres_instance : PostgresDatabase
         The database whose optimizer should be introspected
     """
 
@@ -2372,8 +2409,8 @@ class PostgresOptimizer(OptimizerInterface):
 
     def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
         # We should be graceful and handle both simplified and unsimplified
-        # versions of the execute_query() output. This only works because PostgresExplainPlan
-        # is also cooperative and excepts a dictionary and a list-of-dictionary input as well
+        # versions of the execute_query() output. This only works because PostgresPlan
+        # is also cooperative and accepts a dictionary and a list-of-dictionary input as well
         # Therefore, we can aggressively unwrap a list, which either yields a dictionary (in
         # case of simplified result sets), or a tuple-of-list-of-dictionary (in case of a raw
         # result set).
@@ -2568,10 +2605,12 @@ def _timeout_query_worker(
     status_pipe: mp_conn.Connection,
     **kwargs,
 ) -> None:
-    """Internal function to the `TimeoutQueryExecutor` to run individual queries.
+    """Internal function to the `_TimeoutQueryExecutor` to run individual queries.
 
-    Query results are sent via the `result_send` pipe, not as a return value. In case of any errors, these are sent via the
-    `err_send` pipe. Therefore, it is best to check the `err_send` pipe first, before reading from the `result_send` pipe.
+    All communication with the parent process happens through the `status_pipe`, not via a return value. The worker
+    reports its progress by sending a sequence of events (`_BackendConnectedEvent`, `_QueryReadyEvent`,
+    `_QueryFinishedEvent` and finally `_ResultEvent`). If anything goes wrong, a `_WorkerErrorEvent` is sent instead.
+    See `_TimeoutQueryExecutor.execute_query` for a description of the full protocol.
 
     Parameters
     ----------
@@ -2580,14 +2619,10 @@ def _timeout_query_worker(
     pg_config : dict
         Pickable representation of the current Postgres connection. This is used to re-establish the connection in the parallel
         worker.
-    result_send : mp_conn.Connection
-        Pipe connection to send the query result
-    err_send : mp_conn.Connection
-        Pipe connection to send any errors that occurred during the query execution
-    backend_send : mp_conn.Connection
-        Pipe connection to send the backend PID
+    status_pipe : mp_conn.Connection
+        Pipe connection to send the progress events and the final result to the parent process
     kwargs : Any
-        Additional parameters to pass to the `PostgresInterface.execute_query` method.
+        Additional parameters to pass to the `PostgresDatabase.execute_query` method.
     """
     pg_instance: PostgresDatabase | None = None
     try:
@@ -2605,10 +2640,10 @@ def _timeout_query_worker(
         elif isinstance(query, UserString):
             query = str(query)
 
-        # NB: The query execution logic is a slightly modified version of the one in PostgresInterface.execute_query
+        # NB: The query execution logic is a slightly modified version of the one in PostgresDatabase.execute_query
         # Make sure to keep them in sync.
         # We duplicate the logic here rather than calling the method directly to make the timeout measurement as accurate
-        # as possible. By just delegating to execute_query(), we would also include stuff like caching checks and result
+        # as possible. By just delegating to execute_query(), we would also include stuff like hint application and result
         # simplification in the timeout measurement, which is not desired.
 
         try:
@@ -2664,10 +2699,10 @@ def _timeout_query_worker(
 
 
 class _TimeoutQueryExecutor:
-    """The TimeoutQueryExecutor provides a mechanism to execute queries with a timeout attached.
+    """The `_TimeoutQueryExecutor` provides a mechanism to execute queries with a timeout attached.
 
     If the query takes longer than the designated timeout, its execution is cancelled. The query execution itself is delegated
-    to the `PostgresInterface`, so all its rules still apply. At the same time, using the timeout executor service can
+    to the `PostgresDatabase`, so all its rules still apply. At the same time, using the timeout executor service can
     invalidate some of the state that is exposed by the database interface (see *Warnings* below). Therefore, the relevant
     variables should be refreshed once the timeout executor was used.
 
@@ -2676,7 +2711,7 @@ class _TimeoutQueryExecutor:
 
     Parameters
     ----------
-    postgres_instance : Optional[PostgresInterface], optional
+    postgres_instance : Optional[PostgresDatabase], optional
         Database to execute the queries. If omitted, this is inferred from the `DatabasePool`.
 
     Warnings
@@ -2693,7 +2728,7 @@ class _TimeoutQueryExecutor:
             fallback = DatabasePool.get_instance().current_database()
             if not isinstance(fallback, PostgresDatabase):
                 raise ValueError(
-                    "Cannot create TimeoutQueryExecutor: No Postgres instance was supplied and the current database is not a "
+                    "Cannot create _TimeoutQueryExecutor: No Postgres instance was supplied and the current database is not a "
                     "Postgres instance."
                 )
             self._pg_instance = fallback
@@ -2710,12 +2745,12 @@ class _TimeoutQueryExecutor:
         timeout : float
             Maximum query execution time in seconds.
         **kwargs
-            Additional parameters to pass to the `PostgresInterface.execute_query` method.
+            Additional parameters to pass to the `PostgresDatabase.execute_query` method.
 
         Returns
         -------
         Any
-            The query result if it terminated timely. Rules from `PostgresInterface.execute_query` apply.
+            The query result if it terminated timely. Rules from `PostgresDatabase.execute_query` apply.
 
         Raises
         ------
@@ -2724,13 +2759,9 @@ class _TimeoutQueryExecutor:
 
         See Also
         --------
-        PostgresInterface.execute_query
-        PostgresInterface.reset_connection
+        PostgresDatabase.execute_query
+        PostgresDatabase.reset_connection
         """
-        cached_query: bool = kwargs.get("cache_enabled", False) and query in self._pg_instance._query_cache
-        if cached_query:
-            return self._pg_instance._query_cache[str(query)]
-
         self._init_watchdog()
 
         # We implement the timeout mechanism in a separate worker process. The main process keeps track of the progress of that
@@ -2793,13 +2824,6 @@ class _TimeoutQueryExecutor:
                 raise result.error
             case _:
                 raise StateError("Unexpected result status", result.status)
-
-        if not timed_out and kwargs.get("cache_enabled", False):
-            warnings.warn(
-                "Cannot cache query results that were obtained with a timeout.",
-                category=QueryCacheWarning,
-                stacklevel=2,
-            )
 
         if timed_out:
             raise TimeoutError(query)
@@ -2958,22 +2982,25 @@ def connect(
         A Psycopg-compatible connect string for the database. Supplying this parameter overwrites any other connection
         information
     config_file : str | Path, optional
-        A file containing a Psycopg-compatible connect string for the database. This is the default and preferred method of
-        connecting to a Postgres database. Defaults to *.psycopg_connection*
+        A file containing a Psycopg-compatible connect string for the database. This is the preferred method of connecting
+        to a Postgres database. If this is empty (the default), the *.psycopg_connection* file in the current working
+        directory is tried instead.
         See the section on config_file formats for supported file types. The appropriate parser is selected based on the
         file extension.
     encoding : str, optional
         The client enconding of the connection. Defaults to *UTF8*.
     refresh : bool, optional
         If true, a new connection to the database will always be established, even if a connection to the same database is
-        already pooled. The registration key will be suffixed to prevent collisions. By default, the current connection is
-        re-used. If that is the case, no further information (e.g. config strings) is read and only the `name` is accessed.
+        already pooled. The new connection replaces the pooled one. By default, the pooled connection is re-used. If that
+        is the case, no further information (e.g. config strings) is read.
     private : bool, optional
         If true, skips registration of the new instance on the `DatabasePool`. Registration is performed by default.
+    debug : bool, optional
+        Whether additional debug information should be printed during database interaction. Defaults to *False*.
 
     Returns
     -------
-    PostgresInterface
+    PostgresDatabase
         The Postgres database object
 
     Raises

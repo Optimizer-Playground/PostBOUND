@@ -11,18 +11,18 @@ usually terminates with transforming the original input query to a logically equ
 the necessary modifications for optimization.
 
 The central entrypoint to all database interaction is the abstract `Database` class. This class is inherited by all supported
-database systems (currently PostgreSQL and MySQL). Each `Database` instace provides some basic functionality on its own (such
-as the ability to execute queries), but delegates most of the work to specific and tailored interfaces. For example, the
-`DatabaseSchema` models all access to the logical schema of a database and the `OptimizerInterface` encapsulates the
-functionality to retrieve cost estimates or phyiscal query execution plans. All of these interfaces are once again abstract and
+database systems (currently PostgreSQL, DuckDB and MySQL). Each `Database` instance provides some basic functionality on its
+own (such as the ability to execute queries), but delegates most of the work to specific and tailored interfaces. For example,
+the `DatabaseSchema` models all access to the logical schema of a database and the `OptimizerInterface` encapsulates the
+functionality to retrieve cost estimates or physical query execution plans. All of these interfaces are once again abstract and
 implemented according to the specifics of the actual database system.
 
 Take a look at the individual interfaces for further information about their functionality and intended usage.
 
-This module provide direct access to the Postgres interface along with a shortcut method to retrieve the current database
-(aptly called `current_database`). In the background, this method delegates to the `DatabasePool`.
-If you want to use the MySQL interface, make sure to install PostBOUND with MySQL support enabled and import `mysql` from
-the `db` package.
+This module also provides a shortcut method to retrieve the current database (aptly called `current_database`). In the
+background, this method delegates to the `DatabasePool`.
+The concrete database backends themselves are provided by dedicated top-level modules/packages: `postbound.postgres`,
+`postbound.duckdb` and `postbound.mysql` (the latter requires PostBOUND to be installed with MySQL support enabled).
 """
 
 from __future__ import annotations
@@ -44,7 +44,6 @@ from ._db import (
     MostCommonValues,
     OptimizerInterface,
     PrewarmingSupport,
-    QueryCacheWarning,
     ResultRow,
     ResultSet,
     StatisticsCatalog,
@@ -90,7 +89,6 @@ __all__ = [
     "OptimizerInterface",
     "PreciseStatistics",
     "PrewarmingSupport",
-    "QueryCacheWarning",
     "ResultCache",
     "ResultRow",
     "ResultSet",

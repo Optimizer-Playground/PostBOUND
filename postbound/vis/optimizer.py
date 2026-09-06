@@ -12,7 +12,7 @@ from .. import relalg, transform, util
 from .._core import TableReference
 from .._hints import JoinTree
 from .._qep import QueryPlan
-from ..db import Database, DatabasePool
+from ..db import Database, DatabasePool, PreciseStatistics, ResultCache
 from ..qal import SelectStatement
 from . import trees
 
@@ -92,7 +92,7 @@ def annotate_filter_cards(table: TableReference, *, query: SelectStatement, data
     database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])
     count_query = transform.as_count_star_query(filter_query)
-    card = database.execute_query(count_query, cache_enabled=True)
+    card = ResultCache.create_cache(database).execute_query(count_query)
     return f"[{card} rows]"
 
 
@@ -120,8 +120,9 @@ def annotate_cards(table: TableReference, *, query: SelectStatement, database: D
     database = database if database is not None else DatabasePool.get_instance().current_database()
     filter_query = transform.extract_query_fragment(query, [table])
     count_query = transform.as_count_star_query(filter_query)
-    filter_card = database.execute_query(count_query, cache_enabled=True)
-    total_card = database.statistics().total_rows(table, emulated=True, cache_enabled=True)
+    cached_db = ResultCache.create_cache(database)
+    filter_card = cached_db.execute_query(count_query)
+    total_card = PreciseStatistics.create_cached(database).total_rows(table)
     return f"|R| = {total_card} |σ(R)| = {filter_card}"
 
 

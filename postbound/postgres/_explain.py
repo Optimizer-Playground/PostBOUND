@@ -143,17 +143,20 @@ class PostgresExplain:
     parent_relationship : str | None, default None
         Describes the role that this node plays in relation to its parent. Common values are *inner* which denotes that
         this is the inner child of a join and *outer* which denotes the opposite.
-    parallel_workers : int | float, default NaN
+    launched_workers : int, default 0
         For parallel operators in *EXPLAIN ANALYZE* plans, this is the actual number of worker processes that were started.
         Notice that in total there is one additional worker. This process takes care of spawning the other workers and
         managing them, but can also take part in the input processing.
-    sort_keys : list[str]
+    planned_workers : int, default 0
+        For parallel operators, this is the number of worker processes that the optimizer intended to start. The actual
+        number of workers can be lower, e.g. if not enough worker slots were available at execution time.
+    sort_keys : str, default ""
         The columns that are used to sort the tuples that are produced by this node. This is most important for sort nodes,
         but can also be present on other nodes.
     shared_blocks_read : float, default NaN
         For *EXPLAIN ANALYZE* plans with *BUFFERS* enabled, this is the number of blocks/pages that where retrieved from
         disk while executing this node, including the reads of all its child nodes.
-    shared_blocks_buffered : float, default NaN
+    shared_blocks_cached : float, default NaN
         For *EXPLAIN ANALYZE* plans with *BUFFERS* enabled, this is the number of blocks/pages that where retrieved from
         the shared buffer while executing this node, including the hits of all its child nodes.
     temp_blocks_read : float, default NaN
@@ -164,8 +167,15 @@ class PostgresExplain:
         tables, sorts) that where written by this node, including writes of all its child nodes.
     plan_width : float, default NaN
         The average width of the tuples that are produced by this node.
-    children : list[PostgresExplainNode]
+    subplan_name : str | None, default None
+        For nodes that form a named subplan (e.g. *SubPlan 1*), this is that name.
+    cte_name : str | None, default None
+        For nodes that produce or scan a CTE, this is the name of that CTE.
+    children : list[PostgresExplain]
         All child / input nodes for the current node
+    explain_data : dict
+        The raw *EXPLAIN* dictionary that this node was parsed from. This is retained to give access to any attributes
+        that PostBOUND does not model explicitly.
     """
 
     @staticmethod
@@ -268,7 +278,7 @@ class PostgresExplain:
 
         The analyze variant does not only obtain the plan, but actually executes it. This enables the comparison of the
         optimizer's estimates to the actual values. If a plan is an *EXPLAIN ANALYZE* plan, some attributes of this node
-        receive actual values. These include `execution_time`, `true_cardinality`, `loops` and `parallel_workers`.
+        receive actual values. These include `execution_time`, `true_cardinality`, `loops` and `launched_workers`.
 
 
         Returns
@@ -307,7 +317,7 @@ class PostgresExplain:
 
         Returns
         -------
-        Sequence[PostgresExplainNode]
+        Sequence[PostgresExplain]
             The children of the current node in a unified format
         """
         if len(self.children) < 2:
@@ -507,7 +517,7 @@ class PostgresExplain:
 class PostgresPlan:
     """Models an entire *EXPLAIN* plan produced by Postgres
 
-    In contrast to `PostgresExplainNode`, this includes additional parameters (planning time and execution time) for the entire
+    In contrast to `PostgresExplain`, this includes additional parameters (planning time and execution time) for the entire
     plan, rather than just portions of it.
 
     This class supports all methods that are specified on the general `QueryPlan` and returns the correct data for its actual
@@ -526,7 +536,7 @@ class PostgresPlan:
     execution_time : float
         The time in seconds the query execution engine needed to calculate the result set of the query. This does not account
         for network time to transmit the result set.
-    query_plan : PostgresExplainNode
+    query_plan : PostgresExplain
         The actual plan
     """
 
@@ -550,7 +560,7 @@ class PostgresPlan:
 
         The analyze variant does not only obtain the plan, but actually executes it. This enables the comparison of the
         optimizer's estimates to the actual values. If a plan is an *EXPLAIN ANALYZE* plan, some attributes of this node
-        receive actual values. These include `execution_time`, `true_cardinality`, `loops` and `parallel_workers`.
+        receive actual values. These include `execution_time`, `true_cardinality`, `loops` and `launched_workers`.
 
 
         Returns
@@ -572,7 +582,7 @@ class PostgresPlan:
 
         See Also
         --------
-        PostgresExplainNode.as_qep
+        PostgresExplain.as_qep
         """
         return self._normalized_plan
 
@@ -586,7 +596,7 @@ class PostgresPlan:
 
         See Also
         --------
-        PostgresExplainNode.inspect
+        PostgresExplain.inspect
         """
         return self.query_plan.inspect()
 

@@ -76,8 +76,8 @@ Postgres Query Plans
 
 When working with Postgres, there are three basic ways to access query plans:
 
-1. You can retrieve the raw plan JSON using a plain :meth:`~postbound.postgres.PostgresInterface.execute_query`
-2. You can parse a raw plan into a :class:`~postbound.postgres.PostgresExplainPlan`, which is pretty
+1. You can retrieve the raw plan JSON using a plain :meth:`~postbound.postgres.PostgresDatabase.execute_query`
+2. You can parse a raw plan into a :class:`~postbound.postgres.PostgresPlan`, which is pretty
    much a 1:1 model of the raw plan with more expressive attribute access and some high-level access methods
 3. You can convert an explain into a proper normalized :class:`~postbound.QueryPlan` object
 
@@ -89,7 +89,7 @@ The conversion between the different formats works as follows:
     explain_query = pb.transform.as_explain(query)
     raw_plan = pg_instance.execute_query(explain_query)
     raw_plan
-    postgres_plan = pb.postgres.PostgresExplainPlan(raw_plan)
+    postgres_plan = pb.postgres.PostgresPlan(raw_plan)
     print(postgres_plan.inspect())
     qep = postgres_plan.as_qep()
     print(qep.inspect())

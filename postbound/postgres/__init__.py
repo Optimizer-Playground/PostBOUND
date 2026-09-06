@@ -3,7 +3,7 @@
 In many ways the Postgres implementation can be thought of as the reference or blueprint implementation of the database
 interface. This is due to two main reasons: first up, Postgres' capabilities follow a traditional architecture and its
 features cover most of the general aspects of query optimization (i.e. supported operators, join orders and statistics).
-Secondly, and on a more pragmatic note Potsgres was the first database system that was supported by PostBOUND and therefore
+Secondly, and on a more pragmatic note Postgres was the first database system that was supported by PostBOUND and therefore
 a lot of the original Postgres interfaces eventually evolved into the more abstract database-independent interfaces.
 """
 

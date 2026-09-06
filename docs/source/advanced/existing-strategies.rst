@@ -6,7 +6,7 @@ years.
 These can be used to compare your novel idea against existing approaches.
 In addition to the actual research strategies, there are also some "pseudo-strategies" such as using the native optimizer
 of a database system or just randomly deciding.
-All strategies are directly available form the :mod:`postbound.opt` package, e.g. as `pb.opt.ues` for the UES optimizer.
+All strategies are directly available form the :mod:`postbound.opt` package, e.g. as `pb.opt.dynprog` for the dynamic programming-based optimizer.
 Internally, the algorithms are available as lazy imports. This prevents unnecessary dependencies from being installed with
 PostBOUND. For example, many learned estimators require Pytorch for their implementation. Lazy imports ensure that you do not
 need to install Pytorch if you do not want to use such an estimator.
@@ -23,16 +23,15 @@ Currently, the following optimizers are implemented:
 
 .. warning::
 
-    We currently in the process of moving all optimizers from related work (i.e. UES and TONIC) to a separate
-    "optimizer playground" library. Once this process is complete, these optimizers will no longer be available in the main
-    PostBOUND library.
+    The optimizers from related work (i.e. UES and TONIC) have been moved to a separate "optimizer playground" library and
+    are no longer part of the main PostBOUND library. They are still listed below for reference.
 
 +-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
 | Name            | Description                                                                                                                                                                 | Reference        | Package                                          |
 +=================+=============================================================================================================================================================================+==================+==================================================+
-| UES             | Upper-bound driven join order optimizer. Bounds are derived from base statistics, specifically most-common values.                                                          | [Hertzschuch21]_ | :mod:`ues <postbound.opt.ues>`.                  |
+| UES             | Upper-bound driven join order optimizer. Bounds are derived from base statistics, specifically most-common values.                                                          | [Hertzschuch21]_ | *moved out of PostBOUND*                         |
 +-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| TONIC           | Learned physical operator selection. Operators are selected based on past experience and optional pretraining. Learning utilizes a prefix tree instead of a neural network. | [Hertzschuch22]_ | :mod:`tonic <postbound.opt.tonic>`               |
+| TONIC           | Learned physical operator selection. Operators are selected based on past experience and optional pretraining. Learning utilizes a prefix tree instead of a neural network. | [Hertzschuch22]_ | *moved out of PostBOUND*                         |
 +-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
 | DP              | Dynamic programming-based join order optimizer, with an alternative algorithm that mimics the actual Postgres enumerator.                                                   |                  | :mod:`dynprog <postbound.opt.dynprog>`           |
 +-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+

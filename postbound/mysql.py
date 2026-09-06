@@ -67,13 +67,13 @@ from .db import (
     Database,
     DatabasePool,
     DatabaseSchema,
-    StatisticsCatalog,
     HintService,
     Histogram,
     HistogramApproximation,
     MostCommonValues,
     OptimizerInterface,
     PreciseStatistics,
+    StatisticsCatalog,
     UnsupportedDatabaseFeatureError,
     simplify_result_set,
 )
@@ -146,8 +146,6 @@ class MysqlInterface(Database):
         system_name : str, optional
             The name of the current database. Typically, this can be used to query the `DatabasePool` for this very
             instance. Defaults to ``"MySQL"``.
-        cache_enabled : bool, optional
-            Whether or not caching of complicated database queries should be enabled by default. Defaults to ``True``.
         """
         self.connection_args = connection_args
         self._cnx = mysql.connector.connect(**connection_args.parameters())
@@ -259,6 +257,12 @@ class MysqlInterface(Database):
         assert result_set is not None
 
         return json.loads(result_set[0])  # type: ignore - mysql-connector shenanigans
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, type(self)) and self.connection_args == other.connection_args
+
+    def __hash__(self) -> int:
+        return hash(self.connection_args)
 
 
 class MysqlSchemaInterface(DatabaseSchema):
@@ -412,7 +416,7 @@ class MysqlStatisticsInterface(StatisticsCatalog):
             )
         return PreciseStatistics(self._db).null_frac(column)
 
-    def min_max_(self, column: ColumnReference) -> tuple[Any, Any]:
+    def min_max(self, column: ColumnReference) -> tuple[Any, Any]:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
                 self._db, "min/max value statistics. Set db.enable_emulation_fallback to activate."
@@ -429,7 +433,7 @@ class MysqlStatisticsInterface(StatisticsCatalog):
     def histogram(self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni") -> Histogram:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
-                self._db, "null_fraction statistics. Set db.enable_emulation_fallback to activate."
+                self._db, "histogram statistics. Set db.enable_emulation_fallback to activate."
             )
         return PreciseStatistics(self._db).histogram(column, n_bins=100, interpolation=interpolation)
 
