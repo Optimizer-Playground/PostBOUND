@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import math
 import re
+from collections.abc import Collection, Iterable, Sequence
 from enum import Enum
 from numbers import Number
 from typing import (
@@ -1120,6 +1121,48 @@ class ColumnReference:
         imply modify `is_bound` to return a TypeGuard and have to use an additional method. Ugh.
         """
         return col.is_bound()
+
+    @overload
+    @staticmethod
+    def all_bound(cols: list[ColumnReference]) -> TypeGuard[list[BoundColumnReference]]: ...
+
+    @overload
+    @staticmethod
+    def all_bound(cols: tuple[ColumnReference, ...]) -> TypeGuard[tuple[BoundColumnReference, ...]]: ...
+
+    @overload
+    @staticmethod
+    def all_bound(cols: set[ColumnReference]) -> TypeGuard[set[BoundColumnReference]]: ...
+
+    @overload
+    @staticmethod
+    def all_bound(cols: frozenset[ColumnReference]) -> TypeGuard[frozenset[BoundColumnReference]]: ...
+
+    @overload
+    @staticmethod
+    def all_bound[V](cols: dict[ColumnReference, V]) -> TypeGuard[dict[BoundColumnReference, V]]: ...
+
+    @overload
+    @staticmethod
+    def all_bound(cols: Sequence[ColumnReference]) -> TypeGuard[Sequence[BoundColumnReference]]: ...
+
+    @overload
+    @staticmethod
+    def all_bound(cols: Collection[ColumnReference]) -> TypeGuard[Collection[BoundColumnReference]]: ...
+
+    @overload
+    @staticmethod
+    def all_bound(cols: Iterable[ColumnReference]) -> TypeGuard[Iterable[BoundColumnReference]]: ...
+
+    @staticmethod
+    def all_bound(cols):
+        """Checks whether all columns in the given collection are bound to (any) table.
+
+        The columns do not need to be bound to the same table, just any table.
+
+        This method expands `assert_bound` to different collections of columns.
+        """
+        return all(col.is_bound() for col in cols)
 
     def __init__(self, name: str, table: TableReference | None = None) -> None:
         if not name:
