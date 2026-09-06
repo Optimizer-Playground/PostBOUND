@@ -39,9 +39,9 @@ from .._stages import (
     CardinalityEstimator,
     CompleteOptimizationAlgorithm,
     CostModel,
-    JoinOrderOptimization,
+    JoinOrdering,
+    OperatorSelection,
     ParameterGeneration,
-    PhysicalOperatorSelection,
 )
 from ..db import Database, DatabaseServerError, DatabaseUserError
 from ..postgres import PostgresDatabase
@@ -427,7 +427,7 @@ class NativeCardinalityEstimator(CardinalityEstimator):
         self._target_db = target_db
 
 
-class NativeJoinOrderOptimizer(JoinOrderOptimization):
+class NativeJoinOrderOptimizer(JoinOrdering):
     """Obtains the join order for an input query by using the optimizer of an actual database system.
 
     Parameters
@@ -448,7 +448,7 @@ class NativeJoinOrderOptimizer(JoinOrderOptimization):
         return {"name": "native", "database_system": self.db_instance.describe()}
 
 
-class NativePhysicalOperatorSelection(PhysicalOperatorSelection):
+class NativePhysicalOperatorSelection(OperatorSelection):
     """Obtains the physical operators for an input query by using the optimizer of an actual database system.
 
     Since this process normally is the second stage in the optimization pipeline, the operators are selected according to a

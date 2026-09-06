@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from .._hints import JoinTree, PhysicalOperatorAssignment, PlanParameterization
 from .._stages import (
-    JoinOrderOptimization,
+    JoinOrdering,
+    OperatorSelection,
     ParameterGeneration,
-    PhysicalOperatorSelection,
 )
 from ..qal import SqlQuery
 
 
-class EmptyJoinOrderOptimizer(JoinOrderOptimization):
+class EmptyJoinOrderOptimizer(JoinOrdering):
     """Dummy implementation of the join order optimizer that does not actually optimize anything."""
 
     def __init__(self) -> None:
@@ -24,7 +24,7 @@ class EmptyJoinOrderOptimizer(JoinOrderOptimization):
         return {"name": "no_ordering"}
 
 
-class EmptyPhysicalOperatorSelection(PhysicalOperatorSelection):
+class EmptyPhysicalOperatorSelection(OperatorSelection):
     """Dummy implementation of operator optimization that does not actually optimize anything."""
 
     def select_physical_operators(self, query: SqlQuery, join_order: JoinTree | None) -> PhysicalOperatorAssignment:

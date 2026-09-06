@@ -384,7 +384,7 @@ class CompleteOptimizationAlgorithm(OptimizationStage, abc.ABC):
         raise NotImplementedError
 
 
-class JoinOrderOptimization(OptimizationStage, abc.ABC):
+class JoinOrdering(OptimizationStage, abc.ABC):
     """The join order optimization generates a complete join order for an input query.
 
     This is the first step in a multi-stage optimizer design.
@@ -433,23 +433,7 @@ class JoinOrderOptimization(OptimizationStage, abc.ABC):
         raise NotImplementedError
 
 
-class JoinOrderOptimizationError(RuntimeError):
-    """Error to indicate that something went wrong while optimizing the join order.
-
-    Parameters
-    ----------
-    query : SqlQuery
-        The query for which the optimization failed
-    message : str, optional
-        A message containing more details about the specific error. Defaults to an empty string.
-    """
-
-    def __init__(self, query: SqlQuery, message: str = "") -> None:
-        super().__init__(message if message else f"Join order optimization failed for query {query}")
-        self.query = query
-
-
-class PhysicalOperatorSelection(OptimizationStage, abc.ABC):
+class OperatorSelection(OptimizationStage, abc.ABC):
     """The physical operator selection assigns scan and join operators to the tables of the input query.
 
     This is the second stage in the two-phase optimization process, and takes place after the join order has been
@@ -940,8 +924,8 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
         self,
         database: Database | None = None,
         *,
-        join_order_optimizer: JoinOrderOptimization | None = None,
-        operator_selection: PhysicalOperatorSelection | None = None,
+        join_order_optimizer: JoinOrdering | None = None,
+        operator_selection: OperatorSelection | None = None,
         plan_parameterization: ParameterGeneration | None = None,
     ) -> None:
         super().__init__()
@@ -961,7 +945,7 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
 
     def stage(
         self,
-    ) -> JoinOrderOptimization | PhysicalOperatorSelection | ParameterGeneration:
+    ) -> JoinOrdering | OperatorSelection | ParameterGeneration:
         """Provides the actually specified stage.
 
         Returns
@@ -1008,7 +992,7 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
 
 
 def as_complete_algorithm(
-    stage: JoinOrderOptimization | PhysicalOperatorSelection | ParameterGeneration,
+    stage: JoinOrdering | OperatorSelection | ParameterGeneration,
     *,
     database: Database | None = None,
 ) -> CompleteOptimizationAlgorithm:
@@ -1034,8 +1018,8 @@ def as_complete_algorithm(
     CompleteOptimizationAlgorithm
         A emulated optimization algorithm for the optimization stage
     """
-    join_order_optimizer = stage if isinstance(stage, JoinOrderOptimization) else None
-    operator_selection = stage if isinstance(stage, PhysicalOperatorSelection) else None
+    join_order_optimizer = stage if isinstance(stage, JoinOrdering) else None
+    operator_selection = stage if isinstance(stage, OperatorSelection) else None
     parameter_generation = stage if isinstance(stage, ParameterGeneration) else None
     return _CompleteAlgorithmEmulator(
         database,
@@ -1043,3 +1027,10 @@ def as_complete_algorithm(
         operator_selection=operator_selection,
         plan_parameterization=parameter_generation,
     )
+
+
+class OptimizationError(RuntimeError):
+    """Raised when an optimization stage encounters an error during the optimization process."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)

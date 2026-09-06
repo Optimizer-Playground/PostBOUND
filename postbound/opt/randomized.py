@@ -18,9 +18,9 @@ from .._hints import (
 from .._qep import QueryPlan
 from .._stages import (
     CompleteOptimizationAlgorithm,
-    JoinOrderOptimization,
+    JoinOrdering,
+    OperatorSelection,
     OptimizationPreCheck,
-    PhysicalOperatorSelection,
 )
 from ..db import Database, DatabasePool
 from ..qal import QueryTypeError, SqlQuery, is_select_query
@@ -271,7 +271,7 @@ class RandomJoinOrderGenerator:
             yield _sample_join_graph(query, join_graph, base_table=base_table)
 
 
-class RandomJoinOrderOptimizer(JoinOrderOptimization):
+class RandomJoinOrderOptimizer(JoinOrdering):
     """Optimization stage that produces a randomized join order.
 
     This class acts as a wrapper around a `RandomJoinOrderGenerator` for the join optimization interface. The setup of the
@@ -427,7 +427,7 @@ class RandomOperatorGenerator:
         return self.allowed_join_ops | self.allowed_scan_ops
 
 
-class RandomOperatorOptimizer(PhysicalOperatorSelection):
+class RandomOperatorOptimizer(OperatorSelection):
     """Optimization stage that produces a randomized operator assignment.
 
     This class acts as a wrapper around a `RandomOperatorGenerator` for the operator optimization interface. The setup of the

@@ -19,10 +19,10 @@ from ._stages import (
     CompleteOptimizationAlgorithm,
     CostModel,
     IncrementalOptimizationStep,
-    JoinOrderOptimization,
+    JoinOrdering,
+    OperatorSelection,
     OptimizationStage,
     ParameterGeneration,
-    PhysicalOperatorSelection,
     PlanEnumerator,
 )
 from .db import Database, DatabasePool, ResultSet
@@ -692,8 +692,8 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
     def __init__(self, target_db: Database) -> None:
         self._target_db = target_db
         self._pre_check: OptimizationPreCheck | None = EmptyPreCheck()
-        self._join_order_enumerator: JoinOrderOptimization | None = None
-        self._physical_operator_selection: PhysicalOperatorSelection | None = None
+        self._join_order_enumerator: JoinOrdering | None = None
+        self._physical_operator_selection: OperatorSelection | None = None
         self._plan_parameterization: ParameterGeneration | None = None
         self._build = False
 
@@ -730,7 +730,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         return self._pre_check
 
     @property
-    def join_order_enumerator(self) -> JoinOrderOptimization | None:
+    def join_order_enumerator(self) -> JoinOrdering | None:
         """The selected join order optimization algorithm.
 
         Returns
@@ -741,7 +741,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         return self._join_order_enumerator
 
     @property
-    def physical_operator_selection(self) -> PhysicalOperatorSelection | None:
+    def physical_operator_selection(self) -> OperatorSelection | None:
         """The selected operator selection algorithm.
 
         Returns
@@ -782,7 +782,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         self._build = False
         return self
 
-    def setup_join_order_optimization(self, enumerator: JoinOrderOptimization) -> Self:
+    def setup_join_order_optimization(self, enumerator: JoinOrdering) -> Self:
         """Configures the pipeline to obtain an optimized join order.
 
         The actual strategy can either produce a purely logical join order, or an initial physical query execution plan
@@ -805,7 +805,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         self._build = False
         return self
 
-    def setup_physical_operator_selection(self, selector: PhysicalOperatorSelection) -> Self:
+    def setup_physical_operator_selection(self, selector: OperatorSelection) -> Self:
         """Configures the algorithm to assign physical operators to the query.
 
         This algorithm receives the input query as well as the join order (if there is one) as input. In a special
@@ -852,13 +852,13 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
 
     def use(
         self,
-        component: JoinOrderOptimization | PhysicalOperatorSelection | ParameterGeneration,
+        component: JoinOrdering | OperatorSelection | ParameterGeneration,
     ) -> Self:
         """Shortcut method to setup the pipeline. Delegates to the appropriate setup_XXX method."""
         match component:
-            case JoinOrderOptimization():
+            case JoinOrdering():
                 return self.setup_join_order_optimization(component)
-            case PhysicalOperatorSelection():
+            case OperatorSelection():
                 return self.setup_physical_operator_selection(component)
             case ParameterGeneration():
                 return self.setup_plan_parameterization(component)
@@ -1243,7 +1243,7 @@ class OptimizationSettings(Protocol):
     def build_complete_optimizer(self) -> CompleteOptimizationAlgorithm | None:
         return None
 
-    def build_join_order_optimizer(self) -> JoinOrderOptimization | None:
+    def build_join_order_optimizer(self) -> JoinOrdering | None:
         """The algorithm that is used to obtain the optimized join order.
 
         Returns
@@ -1254,7 +1254,7 @@ class OptimizationSettings(Protocol):
         """
         return None
 
-    def build_physical_operator_selection(self) -> PhysicalOperatorSelection | None:
+    def build_physical_operator_selection(self) -> OperatorSelection | None:
         """The algorithm that is used to determine the physical operators.
 
         Returns

@@ -11,7 +11,7 @@ from tests import regression_suite
 pg_connect_dir = "."
 
 
-class DummyJoinOrdering(pb.JoinOrderOptimization):
+class DummyJoinOrdering(pb.JoinOrdering):
     def optimize_join_order(self, query: pb.SqlQuery) -> pb.JoinTree:
         join_tree = pb.JoinTree()
         for table in query.tables():
@@ -19,7 +19,7 @@ class DummyJoinOrdering(pb.JoinOrderOptimization):
         return join_tree
 
 
-class DummyOperatorSelection(pb.PhysicalOperatorSelection):
+class DummyOperatorSelection(pb.OperatorSelection):
     def select_physical_operators(
         self, query: pb.SqlQuery, join_order: pb.JoinTree | None
     ) -> pb.PhysicalOperatorAssignment:

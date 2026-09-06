@@ -25,10 +25,10 @@ from ._pipelines import (
 from ._stages import (
     CompleteOptimizationAlgorithm,
     CostModel,
-    JoinOrderOptimization,
+    JoinOrdering,
+    OperatorSelection,
     OptimizationStage,
     ParameterGeneration,
-    PhysicalOperatorSelection,
     PlanEnumerator,
 )
 from .db import (
@@ -327,7 +327,7 @@ def _wrap_optimization_stage(stage: OptimizationStage) -> OptimizationPipeline:
         case CompleteOptimizationAlgorithm():
             pipeline = IntegratedOptimizationPipeline(target_db)
             pipeline.setup_optimization_algorithm(stage).build()
-        case JoinOrderOptimization() | PhysicalOperatorSelection() | ParameterGeneration():
+        case JoinOrdering() | OperatorSelection() | ParameterGeneration():
             pipeline = MultiStageOptimizationPipeline(target_db)
             pipeline.use(stage).build()
         case PlanEnumerator() | CostModel():
