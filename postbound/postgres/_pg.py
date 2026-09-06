@@ -2931,10 +2931,10 @@ def _read_connection_from_file(config_file: Path) -> str:
 
 
 def connect(
+    config_file: str | Path = "",
     *,
     application_name: str = "PostBOUND",
     connect_string: str = "",
-    config_file: str | Path = "",
     encoding: str = "UTF8",
     refresh: bool = False,
     private: bool = False,
@@ -2945,13 +2945,16 @@ def connect(
     This function obtains a connection to a Postgres database by trying the following methods in order:
 
     1. if the connect-string is supplied directly via the `connect_string` parameter, this is used
-    2. the connect string is read from the `config_file` if this parameter is supplied. This file has to be located in the
-       current working directory, but absolute and relative paths are supported. If the file does not exist, an error is
-       raised.
-    3. the connect string is read from the default connection file *.psycopg_connection* in the current working directory
-    4. the connection parameters are read from the standard Postgres environment variables (e.g. *PGDATABASE*, *PGHOST*, ...).
-       This method is triggered via the presence of the *PGDATABASE* environment variable. Note that this method is generally
-       discouraged due to its implicit and non-obvious nature. A warning is emitted if this method is used.
+    2. the connect string is read from the `config_file` if this parameter is supplied. This file has to be located in
+       the current working directory, but absolute and relative paths are supported. If the file does not exist, an
+       error is raised.
+    3. the connect string is read from the default connection file *.psycopg_connection* in the current working
+       directory. This method is triggered via the presence of the file. Note that this method is generally discouraged
+       due to its implicit and non-obvious nature. A warning is emitted if this method is used.
+    4. the connection parameters are read from the standard Postgres environment variables (e.g. *PGDATABASE*,
+       *PGHOST*, ...). This method is triggered via the presence of the *PGDATABASE* environment variable. Note that
+       this method is generally discouraged due to its implicit and non-obvious nature. A warning is emitted if this
+       method is used.
 
     If none of these methods worked, an error is raised.
 
@@ -2967,32 +2970,32 @@ def connect(
       psycopg-compatible connect string
     - INI files (*.ini*): The file must contain exactly one section. All key-value pairs in this section are treated as
       connection parameters.
-    - TOML files (*.toml*): The file is parsed as a TOML document. All top-level key-value pairs are treated as connection
-      parameters.
+    - TOML files (*.toml*): The file is parsed as a TOML document. All top-level key-value pairs are treated as
+      connection parameters.
     - JSON files (*.json*): The file is parsed as a JSON document. All top
       level key-value pairs are treated as connection parameters.
-    - YAML files (*.yml* or *.yaml*): The file is parsed as a YAML document. All top-level key-value pairs are treated as
-      connection parameters. This requires the PyYAML package to be installed.
+    - YAML files (*.yml* or *.yaml*): The file is parsed as a YAML document. All top-level key-value pairs are treated
+      as connection parameters. This requires the PyYAML package to be installed.
 
     Parameters
     ----------
+    config_file : str | Path, optional
+        A file containing a Psycopg-compatible connect string for the database. This is the preferred method of
+        connecting to a Postgres database. If this is empty (the default), the *.psycopg_connection* file in the
+        current working directory is tried instead.
+        See the section on config_file formats for supported file types. The appropriate parser is selected based on
+        the file extension.
     application_name : str, optional
         Identifier for the Postgres server. This will be the name that is shown in the server logs and process lists.
     connect_string : str, optional
         A Psycopg-compatible connect string for the database. Supplying this parameter overwrites any other connection
-        information
-    config_file : str | Path, optional
-        A file containing a Psycopg-compatible connect string for the database. This is the preferred method of connecting
-        to a Postgres database. If this is empty (the default), the *.psycopg_connection* file in the current working
-        directory is tried instead.
-        See the section on config_file formats for supported file types. The appropriate parser is selected based on the
-        file extension.
+        information.
     encoding : str, optional
         The client enconding of the connection. Defaults to *UTF8*.
     refresh : bool, optional
-        If true, a new connection to the database will always be established, even if a connection to the same database is
-        already pooled. The new connection replaces the pooled one. By default, the pooled connection is re-used. If that
-        is the case, no further information (e.g. config strings) is read.
+        If true, a new connection to the database will always be established, even if a connection to the same database
+        is already pooled. The new connection replaces the pooled one. By default, the pooled connection is re-used. If
+        that is the case, no further information (e.g. config strings) is read.
     private : bool, optional
         If true, skips registration of the new instance on the `DatabasePool`. Registration is performed by default.
     debug : bool, optional
@@ -3006,13 +3009,13 @@ def connect(
     Raises
     ------
     ValueError
-        If neither a config file nor a connect string was given, or if the connect file should be used but does not exist
+        If neither a config file nor a connect string was given, or if the connect file should be used but does not
+        exist.
 
     References
     ----------
-
-    .. Psyopg v3: https://www.psycopg.org/psycopg3/ This is used internally by the Postgres interface to interact with the
-       database
+    .. Psyopg v3: https://www.psycopg.org/psycopg3/ This is used internally by the Postgres interface to interact with
+       the database
     .. Postgres environment variables: https://www.postgresql.org/docs/current/libpq-envars.html
     """
     if connect_string:
@@ -3029,6 +3032,7 @@ def connect(
             )
         connect_string = _read_connection_from_file(config_file)
     elif Path(".psycopg_connection").is_file():
+        warnings.warn("Using default config file '.psycopg_connection' in current working directory.", stacklevel=2)
         with open(".psycopg_connection") as f:
             connect_string = f.readline().strip()
     elif os.getenv("PGDATABASE"):
