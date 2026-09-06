@@ -56,7 +56,7 @@ from ..qal import SqlQuery
 from ..util import Version, dicts, jsondict, stats
 
 
-class DuckDBInterface(Database):
+class DuckDBDatabase(Database):
     """Database implementation for DuckDB backends.
 
     The connection is established through *quacklab*, a DuckDB fork that adds the hinting extension points that
@@ -246,11 +246,11 @@ class DuckDBSchema(DatabaseSchema):
 
     Parameters
     ----------
-    db : DuckDBInterface
+    db : DuckDBDatabase
         The database instance whose schema should be inspected
     """
 
-    def __init__(self, db: DuckDBInterface) -> None:
+    def __init__(self, db: DuckDBDatabase) -> None:
         super().__init__(db, prep_placeholder="?")
         self._tables: set[TableReference] = set()
 
@@ -423,7 +423,7 @@ class DuckDBStatistics(StatisticsCatalog):
 
     Parameters
     ----------
-    db : DuckDBInterface
+    db : DuckDBDatabase
         The database instance for which the statistics should be retrieved
 
     See Also
@@ -431,7 +431,7 @@ class DuckDBStatistics(StatisticsCatalog):
     postbound.db.enable_emulation_fallback
     """
 
-    def __init__(self, db: DuckDBInterface) -> None:
+    def __init__(self, db: DuckDBDatabase) -> None:
         super().__init__()
         self._db = db
 
@@ -613,11 +613,11 @@ class DuckDBOptimizer(OptimizerInterface):
 
     Parameters
     ----------
-    db : DuckDBInterface
+    db : DuckDBDatabase
         The database instance whose optimizer should be queried
     """
 
-    def __init__(self, db: DuckDBInterface) -> None:
+    def __init__(self, db: DuckDBDatabase) -> None:
         self._db = db
 
     def query_plan(self, query: SqlQuery | str) -> QueryPlan:
@@ -762,11 +762,11 @@ class DuckDBHintService(HintService):
 
     Parameters
     ----------
-    db : DuckDBInterface
+    db : DuckDBDatabase
         The database instance for which the hints should be generated
     """
 
-    def __init__(self, db: DuckDBInterface) -> None:
+    def __init__(self, db: DuckDBDatabase) -> None:
         self._db = db
 
     def generate_hints(
@@ -942,9 +942,9 @@ class DuckDBHintService(HintService):
         return " ".join(table.identifier() for table in intermediate)
 
 
-def _reconnect(name: str, *, pool: DatabasePool) -> DuckDBInterface:
+def _reconnect(name: str, *, pool: DatabasePool) -> DuckDBDatabase:
     current_conn = pool.retrieve_database(name)
-    assert isinstance(current_conn, DuckDBInterface)
+    assert isinstance(current_conn, DuckDBDatabase)
 
     try:
         # check if the connection is still active
@@ -965,7 +965,7 @@ def connect(
     read_only: bool = False,
     refresh: bool = False,
     private: bool = False,
-) -> DuckDBInterface:
+) -> DuckDBDatabase:
     """Connects to a DuckDB database file.
 
     After the connection has been established, it is registered automatically on the current `DatabasePool` instance.
@@ -986,7 +986,7 @@ def connect(
 
     Returns
     -------
-    DuckDBInterface
+    DuckDBDatabase
         The DuckDB database object
     """
     db_pool = DatabasePool.get_instance()
@@ -995,7 +995,7 @@ def connect(
         return _reconnect(db_key, pool=db_pool)
 
     db = Path(db)
-    duckdb_instance = DuckDBInterface(db, read_only=read_only)
+    duckdb_instance = DuckDBDatabase(db, read_only=read_only)
 
     if not private:
         db_pool.register_database(db_key, duckdb_instance)

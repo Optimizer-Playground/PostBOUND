@@ -12,8 +12,8 @@ that select them.
 """
 
 from ._duckdb import (
+    DuckDBDatabase,
     DuckDBHintService,
-    DuckDBInterface,
     DuckDBOptimizer,
     DuckDBSchema,
     DuckDBStatistics,
@@ -22,8 +22,8 @@ from ._duckdb import (
 )
 
 __all__ = [
+    "DuckDBDatabase",
     "DuckDBHintService",
-    "DuckDBInterface",
     "DuckDBOptimizer",
     "DuckDBSchema",
     "DuckDBStatistics",

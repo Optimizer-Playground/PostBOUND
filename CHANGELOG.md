@@ -43,7 +43,7 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 🏥 Fixes
 
-- Fixed `ResultCache` and `DuckDBInterface` being impossible to instantiate: both still declared the pre-rename
+- Fixed `ResultCache` and `DuckDBDatabase` being impossible to instantiate: both still declared the pre-rename
   `database_system_version()` and were missing `__eq__`/`__hash__`, so they remained abstract.
 - Fixed `MysqlStatisticsInterface.min_max()` being named `min_max_`, which left the abstract method unimplemented.
   `MysqlInterface` was missing `__eq__`/`__hash__` for the same reason.
@@ -431,11 +431,11 @@ the framework. Currently, these are planned for version 0.22.0.
 - The `OptimizerInterface` (e.g. `pg_instance.optimizer()`) now provides a `parse_plan` method to parse an existing
   system-specific query plan to the generalized `QueryPlan`. This can be used as follows:
 
-  ```python
-  explain_query = pb.transform.as_explain(query)
-  raw_plan = database.execute_query(explain_query)
-  plan = database.optimizer().parse_plan(raw_plan)
-  ```
+    ```python
+    explain_query = pb.transform.as_explain(query)
+    raw_plan = database.execute_query(explain_query)
+    plan = database.optimizer().parse_plan(raw_plan)
+    ```
 
 - `execute_workload()` now supports many new output formats for writing the progressive output.
   Currently supported are: CSV, Parquet, JSON, HDF
@@ -464,14 +464,14 @@ the framework. Currently, these are planned for version 0.22.0.
 - The Postgres `execute_query()` method now accepts hint parameters and automatically applies them. For example, the
   following can now be done without explicit hinting:
 
-  ```python
-  query, plan = ...  # whatever
-  pg_instance.execute_query(query, plan=plan)
+    ```python
+    query, plan = ...  # whatever
+    pg_instance.execute_query(query, plan=plan)
 
-  # this is equivalent to
-  hinted_query = pg_instance.hinting().generate_hints(query, plan)
-  pg_instance.execute_query(hinted_query)
-  ```
+    # this is equivalent to
+    hinted_query = pg_instance.hinting().generate_hints(query, plan)
+    pg_instance.execute_query(hinted_query)
+    ```
 
 - The Postgres interface now has a `rollback()` method to put connections back into a valid state.
 - The Postgres statistics interface now consistently supports table references with a schema.
@@ -504,13 +504,13 @@ the framework. Currently, these are planned for version 0.22.0.
 - Updated all database setup scripts for Postgres and DuckDB. Since our data server that hosted the raw input data
   crashed once again and broke all download links, we now moved the entire setup to Zenodo. Hopefully, this setup is
   more stable. There are several practical implications of this change:
-  1. Instead of distributing raw CSV data, we now provide pre-build database images for Postgres and DuckDB. This should
-     lower the setup time significantly
-  2. The JOB-complex and JOB-light workloads now use a different indexing scheme. Instead of queries 1, 2, 3, ... we now
-     label them similar to Stats, i.e. q-1, q-2, ...
-  3. The DuckDB workload-setup.py script was removed - as a consequence of 1., we no longer need to create the database
-     files, but distribute them directly.
-  4. The SSB queries can currently not be loaded from the workloads module.
+    1. Instead of distributing raw CSV data, we now provide pre-build database images for Postgres and DuckDB. This should
+       lower the setup time significantly
+    2. The JOB-complex and JOB-light workloads now use a different indexing scheme. Instead of queries 1, 2, 3, ... we now
+       label them similar to Stats, i.e. q-1, q-2, ...
+    3. The DuckDB workload-setup.py script was removed - as a consequence of 1., we no longer need to create the database
+       files, but distribute them directly.
+    4. The SSB queries can currently not be loaded from the workloads module.
 
 ## 💀 Breaking changes
 
