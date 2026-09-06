@@ -61,7 +61,7 @@ from .qal import (
     JoinTableSource,
     MathExpression,
     NotPredicate,
-    OrderByExpression,
+    Ordering,
     OrPredicate,
     PredicateVisitor,
     QuantifierExpression,
@@ -3399,7 +3399,7 @@ class _ImplicitRelalgParser:
             [target.expression for target in self._query.select_clause.targets],
         )
 
-    def _add_ordering(self, ordering: Sequence[OrderByExpression], *, input_node: RelNode) -> RelNode:
+    def _add_ordering(self, ordering: Sequence[Ordering], *, input_node: RelNode) -> RelNode:
         sorting: list[tuple[SqlExpression, SortDirection]] = []
         final_fragment = input_node
 

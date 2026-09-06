@@ -36,7 +36,7 @@ from ._qal import (
     MathExpression,
     NotPredicate,
     OrderBy,
-    OrderByExpression,
+    Ordering,
     OrPredicate,
     QuantifierExpression,
     Select,
@@ -799,7 +799,7 @@ def _expression_prettifier[T: SqlExpression](
                 else None
             )
 
-            replaced_order_exprs: list[OrderByExpression] = []
+            replaced_order_exprs: list[Ordering] = []
             for order in ordering or []:
                 replaced_expr = _expression_prettifier(
                     order.column,
@@ -807,7 +807,7 @@ def _expression_prettifier[T: SqlExpression](
                     inline_hints=inline_hints,
                     indentation=indentation,
                 )
-                replaced_order_exprs.append(OrderByExpression(replaced_expr, order.ascending, order.nulls_first))
+                replaced_order_exprs.append(Ordering(replaced_expr, order.ascending, order.nulls_first))
             replaced_ordering = OrderBy(replaced_order_exprs) if replaced_order_exprs else None
 
             return target(

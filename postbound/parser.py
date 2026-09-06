@@ -44,7 +44,6 @@ from .qal import (
     AbstractPredicate,
     ArrayAccessExpression,
     ArrayExpression,
-    BaseProjection,
     BetweenPredicate,
     BinaryOperator,
     BinaryPredicate,
@@ -69,7 +68,8 @@ from .qal import (
     MathExpression,
     MathOperator,
     OrderBy,
-    OrderByExpression,
+    Ordering,
+    Projection,
     QuantifierExpression,
     QuantifierOperator,
     Select,
@@ -321,7 +321,7 @@ class QueryNamespace:
                 self._produced_columns.add(colname)
                 continue
 
-            # Must be BaseProjection of a SELECT clause
+            # Must be Projection of a SELECT clause
             if projection.target_name:
                 # If we have an alias on the projection, we need to use this alias to reference to the column in the future
                 self._output_shape.append(projection.target_name)
@@ -1342,11 +1342,11 @@ def _pglast_parse_select(pglast_data: dict, *, namespace: QueryNamespace, query_
             return select_star
         # if this is not a SELECT * query, we can continue with the regular parsing
 
-    targets: list[BaseProjection] = []
+    targets: list[Projection] = []
     for target in targetlist:
         expression = _pglast_parse_expression(target["ResTarget"]["val"], namespace=namespace, query_txt=query_txt)
         alias = target["ResTarget"].get("name", "")
-        projection = BaseProjection(expression, alias)
+        projection = Projection(expression, alias)
         targets.append(projection)
 
     clause = Select(targets, distinct=distinct)
@@ -1691,7 +1691,7 @@ def _pglast_parse_orderby(order_clause: list[dict], *, namespace: QueryNamespace
     OrderBy
         The parsed *ORDER BY* clause.
     """
-    orderings: list[OrderByExpression] = []
+    orderings: list[Ordering] = []
 
     for item in order_clause:
         expression = item["SortBy"]
@@ -1717,7 +1717,7 @@ def _pglast_parse_orderby(order_clause: list[dict], *, namespace: QueryNamespace
             case _:
                 raise ParserError("Unknown nulls placement: " + expression["sortby_nulls"])
 
-        order_expression = OrderByExpression(sort_key, ascending=sort_ascending, nulls_first=put_nulls_first)
+        order_expression = Ordering(sort_key, ascending=sort_ascending, nulls_first=put_nulls_first)
         orderings.append(order_expression)
 
     return OrderBy(orderings)

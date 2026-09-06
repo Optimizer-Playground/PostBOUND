@@ -5698,8 +5698,8 @@ class CommonTableExpression(ModifierClause):
         return f"WITH{recursive_str} {query_str}"
 
 
-class BaseProjection:
-    """The `BaseProjection` forms the fundamental building block of a *SELECT* clause.
+class Projection:
+    """The `Projection` forms the fundamental building block of a *SELECT* clause.
 
     Each *SELECT* clause is composed of at least one base projection. Each projection can be an arbitrary
     `SqlExpression` (rules and restrictions of the SQL standard are not enforced here). In addition, each projection
@@ -5720,7 +5720,7 @@ class BaseProjection:
     """
 
     @staticmethod
-    def count_star(target_name: str = "") -> BaseProjection:
+    def count_star(target_name: str = "") -> Projection:
         """Shortcut method to create a ``COUNT(*)`` projection.
 
         Parameters
@@ -5730,24 +5730,24 @@ class BaseProjection:
 
         Returns
         -------
-        BaseProjection
+        Projection
             The projection
         """
-        return BaseProjection(
+        return Projection(
             FunctionExpression("count", [StarExpression()]),
             target_name=target_name,
         )
 
     @staticmethod
-    def star() -> BaseProjection:
+    def star() -> Projection:
         """Shortcut method to create a ``*`` (as in ``SELECT * FROM R``) projection.
 
         Returns
         -------
-        BaseProjection
+        Projection
             The projection
         """
-        return BaseProjection(StarExpression())
+        return Projection(StarExpression())
 
     @staticmethod
     def create_count(
@@ -5755,28 +5755,28 @@ class BaseProjection:
         *,
         target_name: str = "",
         distinct: bool = False,
-    ) -> BaseProjection:
+    ) -> Projection:
         """Shorthand to create a projection with a COUNT() aggregation."""
         fn = FunctionExpression.create_count(column, distinct=distinct)
-        return BaseProjection(fn, target_name)
+        return Projection(fn, target_name)
 
     @staticmethod
-    def create_min(column: ColumnReference | SqlExpression, *, target_name: str = "") -> BaseProjection:
+    def create_min(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Projection:
         """Shorthand to create a projection with a MIN() aggregation."""
         fn = FunctionExpression.create_min(column)
-        return BaseProjection(fn, target_name)
+        return Projection(fn, target_name)
 
     @staticmethod
-    def create_max(column: ColumnReference | SqlExpression, *, target_name: str = "") -> BaseProjection:
+    def create_max(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Projection:
         """Shorthand to create a projection with a MAX() aggregation."""
         fn = FunctionExpression.create_max(column)
-        return BaseProjection(fn, target_name)
+        return Projection(fn, target_name)
 
     @staticmethod
-    def create_sum(column: ColumnReference | SqlExpression, *, target_name: str = "") -> BaseProjection:
+    def create_sum(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Projection:
         """Shorthand to create a projection with a SUM() aggregation."""
         fn = FunctionExpression.create_sum(column)
-        return BaseProjection(fn, target_name)
+        return Projection(fn, target_name)
 
     @staticmethod
     def create_window(
@@ -5786,7 +5786,7 @@ class BaseProjection:
         ordering: OrderBy | None = None,
         filter_condition: AbstractPredicate | None = None,
         target_name: str = "",
-    ) -> BaseProjection:
+    ) -> Projection:
         """Shorthand to create a projection with a window function."""
         window = WindowExpression(
             fn,
@@ -5794,7 +5794,7 @@ class BaseProjection:
             ordering=ordering,
             filter_condition=filter_condition,
         )
-        return BaseProjection(window, target_name)
+        return Projection(window, target_name)
 
     @staticmethod
     def create_function(
@@ -5805,17 +5805,17 @@ class BaseProjection:
         distinct: bool = False,
         filter_where: AbstractPredicate | None = None,
         target_name: str = "",
-    ) -> BaseProjection:
+    ) -> Projection:
         """Shorthand to create a project for an (arbitrary) function.
 
         All parameters (except for the target name) are passed to the corresponding
         `FunctionExpression`, see its documentation for details.
         """
         expr = FunctionExpression(fn, args, keyword_args=kwargs, distinct=distinct, filter_where=filter_where)
-        return BaseProjection(expr, target_name)
+        return Projection(expr, target_name)
 
     @staticmethod
-    def column(col: ColumnReference, target_name: str = "") -> BaseProjection:
+    def column(col: ColumnReference, target_name: str = "") -> Projection:
         """Shortcut method to create a projection for a specific column.
 
         Parameters
@@ -5827,10 +5827,10 @@ class BaseProjection:
 
         Returns
         -------
-        BaseProjection
+        Projection
             The projection
         """
-        return BaseProjection(ColumnExpression(col), target_name)
+        return Projection(ColumnExpression(col), target_name)
 
     def __init__(self, expression: SqlExpression, target_name: str = ""):
         if not expression:
@@ -5912,11 +5912,11 @@ class Select(BaseClause):
     This is the only required part of a query. Everything else is optional and can be left out. (Notice that PostBOUND
     is focused on SPJ-queries, hence there are no *INSERT*, *UPDATE*, or *DELETE* queries)
 
-    A *SELECT* clause simply consists of a number of individual projections (see `BaseProjection`), its `targets`.
+    A *SELECT* clause simply consists of a number of individual projections (see `Projection`), its `targets`.
 
     Parameters
     ----------
-    targets : BaseProjection | Sequence[BaseProjection]
+    targets : Projection | Sequence[Projection]
         The individual projection(s) that form the *SELECT* clause
     distinct : Iterable[SqlExpression] | bool, optional
         Whether a duplicate elimination should be performed. By default, this is *False* indicating no duplicate elimination.
@@ -5944,7 +5944,7 @@ class Select(BaseClause):
         Select
             The clause
         """
-        return Select(BaseProjection.count_star(target_name))
+        return Select(Projection.count_star(target_name))
 
     @staticmethod
     def star(*, distinct: Iterable[SqlExpression] | bool = False) -> Select:
@@ -5962,7 +5962,7 @@ class Select(BaseClause):
         Select
             The clause
         """
-        return Select(BaseProjection.star(), distinct=distinct)
+        return Select(Projection.star(), distinct=distinct)
 
     @staticmethod
     def create_for(
@@ -5973,7 +5973,7 @@ class Select(BaseClause):
         """Full factory method to accompany `star` and `count_star` factory methods.
 
         Unlike calling `__init__` directly, this method also accepts bare `ColumnReference` instances and wraps them
-        into the appropriate `BaseProjection` automatically.
+        into the appropriate `Projection` automatically.
 
         Parameters
         ----------
@@ -5991,7 +5991,7 @@ class Select(BaseClause):
         """
         columns = util.enlist(columns)
         target_columns = [
-            BaseProjection.column(column) if isinstance(column, ColumnReference) else BaseProjection(column)
+            Projection.column(column) if isinstance(column, ColumnReference) else Projection(column)
             for column in columns
         ]
         return Select(target_columns, distinct=distinct)
@@ -6008,26 +6008,43 @@ class Select(BaseClause):
         """
         if column is None:
             return Select.count_star()
-        return Select(BaseProjection.create_count(column, target_name=target_name))
+        return Select(Projection.create_count(column, target_name=target_name))
 
     @staticmethod
     def create_min(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Select:
         """Shorthand to create a SELECT clause with a single MIN() expression."""
-        return Select(BaseProjection.create_min(column, target_name=target_name))
+        return Select(Projection.create_min(column, target_name=target_name))
 
     @staticmethod
     def create_max(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Select:
         """Shorthand to create a SELECT clause with a single MAX() expression."""
-        return Select(BaseProjection.create_max(column, target_name=target_name))
+        return Select(Projection.create_max(column, target_name=target_name))
 
     @staticmethod
     def create_sum(column: ColumnReference | SqlExpression, *, target_name: str = "") -> Select:
         """Shorthand to create a SELECT clause with a single SUM() expression."""
-        return Select(BaseProjection.create_sum(column, target_name=target_name))
+        return Select(Projection.create_sum(column, target_name=target_name))
+
+    @staticmethod
+    def create_aliased(
+        aliases: Mapping[str, ColumnReference | SqlExpression], *, distinct: Iterable[SqlExpression] | bool = False
+    ) -> Select:
+        """Shorthand to create a SELECT clause with multiple aliased expressions.
+
+        Each alias is given as a key in the `aliases` mapping, and the corresponding value is the expression that
+        should be aliased.
+        """
+        targets = [
+            Projection(expr, target_name=alias)
+            if isinstance(expr, SqlExpression)
+            else Projection.column(expr, target_name=alias)
+            for alias, expr in aliases.items()
+        ]
+        return Select(targets, distinct=distinct)
 
     def __init__(
         self,
-        targets: BaseProjection | SqlExpression | Sequence[BaseProjection | SqlExpression],
+        targets: Projection | SqlExpression | Sequence[Projection | SqlExpression],
         *,
         distinct: Iterable[SqlExpression] | bool = False,
     ) -> None:
@@ -6035,12 +6052,12 @@ class Select(BaseClause):
             raise ValueError("At least one target must be specified")
 
         match targets:
-            case BaseProjection():
+            case Projection():
                 self._targets = (targets,)
             case SqlExpression():
-                self._targets = (BaseProjection(targets),)
+                self._targets = (Projection(targets),)
             case Sequence():
-                self._targets = tuple(t if isinstance(t, BaseProjection) else BaseProjection(t) for t in targets)
+                self._targets = tuple(t if isinstance(t, Projection) else Projection(t) for t in targets)
             case _:
                 raise ValueError(f"Unexpected targets value: {targets}")
 
@@ -6063,12 +6080,12 @@ class Select(BaseClause):
     __match_args__ = ("targets", "distinct", "distinct_on")
 
     @property
-    def targets(self) -> Sequence[BaseProjection]:
+    def targets(self) -> Sequence[Projection]:
         """Get all projections.
 
         Returns
         -------
-        Sequence[BaseProjection]
+        Sequence[Projection]
             The projections in the order in which they were originally specified
         """
         return self._targets
@@ -6083,7 +6100,11 @@ class Select(BaseClause):
 
     def is_star(self) -> bool:
         """Checks, whether the clause is simply *SELECT \\**."""
-        return len(self._targets) == 1 and self._targets[0] == BaseProjection.star()
+        return len(self._targets) == 1 and self._targets[0] == Projection.star()
+
+    def is_count_star(self) -> bool:
+        """Checks, whether the clause is simply *SELECT COUNT(\\*)*."""
+        return len(self._targets) == 1 and self._targets[0] == Projection.count_star()
 
     def is_distinct(self) -> bool:
         """Checks, whether this is a *SELECT DISTINCT* clause (including a *DISTINCT ON*)."""
@@ -6111,12 +6132,12 @@ class Select(BaseClause):
             case _:
                 raise RuntimeError("Invalid distinct type, something is severly broken")
 
-    def star_expressions(self) -> Iterable[BaseProjection]:
+    def star_expressions(self) -> Iterable[Projection]:
         """Provides all * and R.* expressions.
 
         Returns
         -------
-        Iterable[BaseProjection]
+        Iterable[Projection]
             The star expressions. Can be empty if no star expressions are used.
         """
         return [target for target in self.targets if target.is_star()]
@@ -6172,7 +6193,7 @@ class Select(BaseClause):
     def __len__(self) -> int:
         return len(self.targets)
 
-    def __iter__(self) -> Iterator[BaseProjection]:
+    def __iter__(self) -> Iterator[Projection]:
         return iter(self.targets)
 
     __hash__ = SqlClause.__hash__
@@ -6936,6 +6957,9 @@ class JoinTableSource(TableSource):
         return left_columns + right_columns + condition_columns
 
     def predicates(self) -> QueryPredicates | None:
+        if self._join_type != JoinType.InnerJoin:
+            raise ValueError("Predicates can only be extracted from inner joins")
+
         all_predicates: list[AbstractPredicate] = []
 
         left_predicates = self._left.predicates()
@@ -7297,8 +7321,8 @@ class Having(BaseClause):
         return f"HAVING {self.condition}"
 
 
-class OrderByExpression:
-    """The `OrderByExpression` is the fundamental building block for an *ORDER BY* clause.
+class Ordering:
+    """The `Ordering` is the fundamental building block for an *ORDER BY* clause.
 
     Each expression consists of the actual column (which might be an arbitrary `SqlExpression`, rules and restrictions
     by the SQL standard are not enforced here) as well as information regarding the ordering of the column. Setting
@@ -7322,9 +7346,9 @@ class OrderByExpression:
         *,
         ascending: bool | None = None,
         nulls_first: bool | None = None,
-    ) -> OrderByExpression:
-        """Shorthand method to create an `OrderByExpression` for a specific column reference."""
-        return OrderByExpression(
+    ) -> Ordering:
+        """Shorthand method to create an `Ordering` for a specific column reference."""
+        return Ordering(
             ColumnExpression(column),
             ascending=ascending,
             nulls_first=nulls_first,
@@ -7407,11 +7431,11 @@ class OrderBy(ModifierClause):
     """The *ORDER BY* clause specifies how result rows should be sorted.
 
     This clause has a similar structure like a `Select` clause and simply consists of an arbitrary number of
-    `OrderByExpression` objects.
+    `Ordering` objects.
 
     Parameters
     ----------
-    expressions : Iterable[OrderByExpression] | OrderByExpression
+    expressions : Iterable[Ordering] | Ordering
         The terms that should be used to determine the ordering. At least one expression is required
 
     Raises
@@ -7436,11 +7460,9 @@ class OrderBy(ModifierClause):
                 flattened.append(col)
             else:
                 flattened.extend(col)
-        return OrderBy(
-            [OrderByExpression.create_for(col, ascending=ascending, nulls_first=nulls_first) for col in flattened]
-        )
+        return OrderBy([Ordering.create_for(col, ascending=ascending, nulls_first=nulls_first) for col in flattened])
 
-    def __init__(self, expressions: Iterable[OrderByExpression] | OrderByExpression) -> None:
+    def __init__(self, expressions: Iterable[Ordering] | Ordering) -> None:
         if not expressions:
             raise ValueError("At least one ORDER BY expression required")
         self._expressions = tuple(util.enlist(expressions))
@@ -7450,12 +7472,12 @@ class OrderBy(ModifierClause):
     __match_args__ = ("expressions",)
 
     @property
-    def expressions(self) -> Sequence[OrderByExpression]:
+    def expressions(self) -> Sequence[Ordering]:
         """Get the expressions that form this *ORDER BY* clause.
 
         Returns
         -------
-        Sequence[OrderByExpression]
+        Sequence[Ordering]
             The individual terms that make up the ordering in exactly the sequence in which they were specified (which
             is the only valid sequence since all other orders could change the ordering of the result set).
         """
@@ -7476,7 +7498,7 @@ class OrderBy(ModifierClause):
     def __len__(self) -> int:
         return len(self._expressions)
 
-    def __iter__(self) -> Iterator[OrderByExpression]:
+    def __iter__(self) -> Iterator[Ordering]:
         return iter(self._expressions)
 
     __hash__ = SqlClause.__hash__

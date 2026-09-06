@@ -14,12 +14,12 @@ from pathlib import Path
 
 from .._core import Cardinality, ColumnReference, TableReference, UnboundColumnError, VirtualTableError
 from ..qal import (
-    BaseProjection,
     From,
     GroupBy,
     Limit,
     OrderBy,
-    OrderByExpression,
+    Ordering,
+    Projection,
     Select,
     Where,
     as_predicate,
@@ -122,7 +122,7 @@ class PreciseStatistics(StatisticsCatalog):
         if column.table.virtual:
             raise VirtualTableError(column.table)
 
-        select_clause = Select(BaseProjection.create_count(column, distinct=True))
+        select_clause = Select(Projection.create_count(column, distinct=True))
         from_clause = From.create_for(column.table)
         sql = as_query(select_clause, from_clause)
 
@@ -153,7 +153,7 @@ class PreciseStatistics(StatisticsCatalog):
         if column.table.virtual:
             raise VirtualTableError(column.table)
 
-        select_clause = Select([BaseProjection.create_min(column), BaseProjection.create_max(column)])
+        select_clause = Select([Projection.create_min(column), Projection.create_max(column)])
         from_clause = From.create_for(column.table)
         sql = as_query(select_clause, from_clause)
 
@@ -170,11 +170,11 @@ class PreciseStatistics(StatisticsCatalog):
         if column.table.virtual:
             raise VirtualTableError(column.table)
 
-        select_clause = Select([BaseProjection.column(column), BaseProjection.create_count(column, target_name="n")])
+        select_clause = Select([Projection.column(column), Projection.create_count(column, target_name="n")])
         from_clause = From.create_for(column.table)
         group_clause = GroupBy.create_for(column)
         order_clause = OrderBy(
-            [OrderByExpression.create_for(ColumnReference("n"), ascending=False), OrderByExpression.create_for(column)]
+            [Ordering.create_for(ColumnReference("n"), ascending=False), Ordering.create_for(column)]
         )
         limit_clause = Limit(limit=k) if k is not None and k > 0 else None
         sql = as_query(select_clause, from_clause, group_clause, order_clause, limit_clause)
@@ -199,7 +199,7 @@ class PreciseStatistics(StatisticsCatalog):
         if column.table.virtual:
             raise VirtualTableError(column.table)
 
-        select_clause = Select([BaseProjection.column(column), BaseProjection.create_count(column, target_name="n")])
+        select_clause = Select([Projection.column(column), Projection.create_count(column, target_name="n")])
         from_clause = From.create_for(column.table)
         group_clause = GroupBy.create_for(column)
         order_clause = OrderBy.create_for(column)

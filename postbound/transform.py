@@ -33,7 +33,7 @@ from .qal import (
     ArrayAccessExpression,
     ArrayExpression,
     BaseClause,
-    BaseProjection,
+    Projection,
     BetweenPredicate,
     BinaryOperator,
     BinaryPredicate,
@@ -62,7 +62,7 @@ from .qal import (
     ModifierClause,
     NotPredicate,
     OrderBy,
-    OrderByExpression,
+    Ordering,
     OrPredicate,
     PredicateVisitor,
     QuantifierExpression,
@@ -1337,7 +1337,7 @@ def _replace_expressions_in_clause(
             return CommonTableExpression(replaced_queries, recursive=recursive)
 
         case Select(targets):
-            replaced_targets = [BaseProjection(replacement(proj.expression), proj.target_name) for proj in targets]
+            replaced_targets = [Projection(replacement(proj.expression), proj.target_name) for proj in targets]
             return Select(replaced_targets, distinct=clause.distinct_specifier())
 
         case From(tables):
@@ -1358,7 +1358,7 @@ def _replace_expressions_in_clause(
 
         case OrderBy(expressions):
             replaced_expr = [
-                OrderByExpression(replacement(expr.column), expr.ascending, expr.nulls_first) for expr in expressions
+                Ordering(replacement(expr.column), expr.ascending, expr.nulls_first) for expr in expressions
             ]
             return OrderBy(replaced_expr)
 
@@ -1950,7 +1950,7 @@ def rename_columns_in_clause(clause, available_renamings: Mapping[ColumnReferenc
         return CommonTableExpression(renamed_ctes, recursive=clause.recursive)
     if isinstance(clause, Select):
         renamed_targets = [
-            BaseProjection(
+            Projection(
                 rename_columns_in_expression(proj.expression, available_renamings),
                 proj.target_name,
             )
@@ -1971,7 +1971,7 @@ def rename_columns_in_clause(clause, available_renamings: Mapping[ColumnReferenc
         return Having(rename_columns_in_predicate(clause.condition, available_renamings))
     elif isinstance(clause, OrderBy):
         renamed_cols = [
-            OrderByExpression(
+            Ordering(
                 rename_columns_in_expression(col.column, available_renamings),
                 col.ascending,
                 col.nulls_first,
@@ -2036,11 +2036,11 @@ class _TableReferenceRenamer(
         return CommonTableExpression(ctes, recursive=clause.recursive)
 
     def visit_select_clause(self, clause, *args, **kwargs) -> Select:
-        projections: list[BaseProjection] = []
+        projections: list[Projection] = []
 
         for proj in clause:
             renamed_expression = proj.expression.accept_visitor(self)
-            projections.append(BaseProjection(renamed_expression, proj.target_name))
+            projections.append(Projection(renamed_expression, proj.target_name))
 
         return Select(projections, distinct=clause.distinct_specifier())
 
@@ -2069,11 +2069,11 @@ class _TableReferenceRenamer(
         return Having(renamed_predicate)
 
     def visit_orderby_clause(self, clause: OrderBy, *args, **kwargs) -> OrderBy:
-        renamed_orderings: list[OrderByExpression] = []
+        renamed_orderings: list[Ordering] = []
 
         for ordering in clause:
             renamed_expression = ordering.column.accept_visitor(self)
-            renamed_orderings.append(OrderByExpression(renamed_expression, ordering.ascending, ordering.nulls_first))
+            renamed_orderings.append(Ordering(renamed_expression, ordering.ascending, ordering.nulls_first))
 
         return OrderBy(renamed_orderings)
 
