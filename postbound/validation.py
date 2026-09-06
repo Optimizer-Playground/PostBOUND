@@ -8,7 +8,6 @@ The `OptimizationPreCheck` defines the abstract interface that all checks should
 
 from __future__ import annotations
 
-import abc
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -27,23 +26,19 @@ from .qal import (
     CompoundOperator,
     CompoundPredicate,
     DirectTableSource,
+    From,
     FunctionTableSource,
     JoinTableSource,
+    JoinType,
+    Select,
     SqlQuery,
     SubqueryTableSource,
     TableSource,
+    TableSourceVisitor,
     ValuesTableSource,
+    Where,
+    is_select_query,
 )
-
-ImplicitFromClauseFailure = "NO_IMPLICIT_FROM_CLAUSE"
-EquiJoinFailure = "NON_EQUI_JOIN"
-InnerJoinFailure = "NON_INNER_JOIN"
-ConjunctiveJoinFailure = "NON_CONJUNCTIVE_JOIN"
-SubqueryFailure = "SUBQUERY"
-DependentSubqueryFailure = "DEPENDENT_SUBQUERY"
-CrossProductFailure = "CROSS_PRODUCT"
-VirtualTablesFailure = "VIRTUAL_TABLES"
-JoinPredicateFailure = "BAD_JOIN_PREDICATE"
 
 
 @dataclass
@@ -210,7 +205,7 @@ class UnsupportedSystemError(RuntimeError):
         self.reason = reason
 
 
-class OptimizationPreCheck(abc.ABC):
+class OptimizationPreCheck:
     """The pre-check interface.
 
     This is the type that all concrete pre-checks must implement. It contains two check methods that correpond to the checks
@@ -261,7 +256,6 @@ class OptimizationPreCheck(abc.ABC):
         """
         return PreCheckResult.with_all_passed()
 
-    @abc.abstractmethod
     def describe(self) -> dict:
         """Provides a JSON-serializable representation of the specific check, as well as important parameters.
 
@@ -272,9 +266,9 @@ class OptimizationPreCheck(abc.ABC):
 
         See Also
         --------
-        postbound.postbound.OptimizationPipeline.describe
+        OptimizationPipeline.describe
         """
-        raise NotImplementedError
+        return {"name": self.name}
 
     def __contains__(self, item: object) -> bool:
         return item == self
@@ -393,9 +387,9 @@ class ImplicitQueryPreCheck(OptimizationPreCheck):
         super().__init__("implicit-query")
 
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
-        passed = query.has_simple_from()
-        failure_reason = "" if passed else ImplicitFromClauseFailure
-        return PreCheckResult(passed, failure_reason)
+        if query.has_simple_from():
+            return PreCheckResult.with_all_passed()
+        return PreCheckResult.with_failure("Query does not have a simple FROM clause")
 
     def describe(self) -> dict:
         return {"name": "implicit_query"}
@@ -408,9 +402,9 @@ class CrossProductPreCheck(OptimizationPreCheck):
         super().__init__("no-cross-products")
 
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
-        no_cross_products = nx.is_connected(query.predicates().join_graph())
-        failure_reason = "" if no_cross_products else CrossProductFailure
-        return PreCheckResult(no_cross_products, failure_reason)
+        if nx.is_connected(query.predicates().join_graph()):
+            return PreCheckResult.with_all_passed()
+        return PreCheckResult.with_failure("Query contains cross products")
 
     def describe(self) -> dict:
         return {"name": "no_cross_products"}
@@ -423,9 +417,9 @@ class VirtualTablesPreCheck(OptimizationPreCheck):
         super().__init__("no-virtual-tables")
 
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
-        no_virtual_tables = all(not table.virtual for table in query.tables())
-        failure_reason = "" if no_virtual_tables else VirtualTablesFailure
-        return PreCheckResult(no_virtual_tables, failure_reason)
+        if any(table.virtual for table in query.tables()):
+            return PreCheckResult.with_failure("Query contains virtual tables")
+        return PreCheckResult.with_all_passed()
 
     def describe(self) -> dict:
         return {"name": "no_virtual_tables"}
@@ -445,7 +439,7 @@ class EquiJoinPreCheck(OptimizationPreCheck):
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         join_predicates = query.predicates().joins()
         all_passed = all(self._perform_predicate_check(join_pred) for join_pred in join_predicates)
-        failure_reason = "" if all_passed else EquiJoinFailure
+        failure_reason = "" if all_passed else "Query contains non-equi-joins"
         return PreCheckResult(all_passed, failure_reason)
 
     def describe(self) -> dict:
@@ -551,7 +545,11 @@ class InnerJoinPreCheck(OptimizationPreCheck):
             case SubqueryTableSource(subquery):
                 return self.check_supported_query(subquery)
             case JoinTableSource(left, right, _, join_type):
-                checks = [PreCheckResult.with_failure(InnerJoinFailure)] if join_type != "INNER" else []
+                checks = (
+                    [PreCheckResult.with_failure("Query contains non-inner joins")]
+                    if join_type != JoinType.InnerJoin
+                    else []
+                )
                 checks.extend([self._check_table_source(left), self._check_table_source(right)])
                 return PreCheckResult.merge(checks)
             case _:
@@ -566,7 +564,9 @@ class SubqueryPreCheck(OptimizationPreCheck):
 
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         return (
-            PreCheckResult.with_all_passed() if not query.subqueries() else PreCheckResult.with_failure(SubqueryFailure)
+            PreCheckResult.with_all_passed()
+            if not query.subqueries()
+            else PreCheckResult.with_failure("Query contains subqueries")
         )
 
     def describe(self) -> dict:
@@ -581,7 +581,7 @@ class DependentSubqueryPreCheck(OptimizationPreCheck):
 
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         passed = not any(subquery.is_dependent() for subquery in query.subqueries())
-        failure_reason = "" if passed else DependentSubqueryFailure
+        failure_reason = "" if passed else "Query contains dependent subqueries"
         return PreCheckResult(passed, failure_reason)
 
     def describe(self) -> dict:
@@ -667,3 +667,76 @@ class CustomCheck(OptimizationPreCheck):
         if self._db_check is None:
             return PreCheckResult.with_all_passed()
         return self._db_check(database_instance)
+
+
+class _TableSourceCheck(TableSourceVisitor[bool]):
+    def visit_direct_source(self, src: DirectTableSource, *args, **kwargs) -> bool:
+        return True
+
+    def visit_subquery_source(self, src: SubqueryTableSource, *args, **kwargs) -> bool:
+        return False
+
+    def visit_values_source(self, src: ValuesTableSource, *args, **kwargs) -> bool:
+        return False
+
+    def visit_function_source(self, src: FunctionTableSource, *args, **kwargs) -> bool:
+        return False
+
+    def visit_join_source(self, src: JoinTableSource, *args, **kwargs) -> bool:
+        if src.join_type not in (JoinType.InnerJoin, JoinType.CrossJoin):
+            return False
+
+        return src.lhs.accept_visitor(self) and src.rhs.accept_visitor(self)
+
+
+class SPJCheck(OptimizationPreCheck):
+    """The SPJ check functions as an all-in-one check to assert that a query is a simple SPJ query.
+
+    It asserts the following:
+
+    1. the query is indeed a SELECT query, either SELECT * or SELECT COUNT(*)
+    2. the query only performs inner equi joins and no cross products
+    3. the query only joins simple tables (no subqueries, no values, no functions)
+    4. all predicates are simple (no function calls, etc.)
+    5. the query only has a SELECT, FROM, and (optional) WHERE clause
+
+    See Also
+    --------
+    SimpleFilter
+    SimpleJoin
+    """
+
+    def __init__(self) -> None:
+        super().__init__("spj-check")
+
+    def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
+        if not is_select_query(query):
+            return PreCheckResult.with_failure("Query is not a SELECT query")
+
+        if query.from_clause is None:
+            return PreCheckResult.with_failure("Query has no FROM clause")
+
+        if not query.select_clause.is_star() and not query.select_clause.is_count_star():
+            return PreCheckResult.with_failure("SELECT clause has complex contents")
+
+        supported_clauses = [Select, From, Where]
+        remaining_clauses = query.clauses(skip=supported_clauses)
+        if remaining_clauses:
+            unsupported = ", ".join(type(clause).__name__ for clause in remaining_clauses)
+            return PreCheckResult.with_failure(f"Query has unsupported clauses: {unsupported}")
+
+        if not all(check for check in _TableSourceCheck().visit_from_clause(query.from_clause)):
+            return PreCheckResult.with_failure("FROM clause has complex contents")
+
+        predicates = query.predicates()
+        if not predicates.all_simple():
+            return PreCheckResult.with_failure("Query has complex predicates")
+
+        if not nx.is_connected(predicates.join_graph()):
+            return PreCheckResult.with_failure("Query contains cross products")
+
+        for join in predicates.joins():
+            if not isinstance(join, BinaryPredicate) or join.operator != BinaryOperator.Equal:
+                return PreCheckResult.with_failure("Query contains non-equi joins")
+
+        return PreCheckResult.with_all_passed()
