@@ -1,28 +1,78 @@
-"""The `db` module provides tools to interact with various database instances.
+"""The *db* module provides tools to interact with physical database instances.
 
-Generally speaking, the interactions are bidirectional: on the one hand, common database concepts like retrieving statistical
-information, introspecting the logical schema or obtaining physical query execution plans are enabled through abstract
-interfaces and can be used by the optimizer modules. On the other hand, the `db` modules provides tools to enforce optimization
-decisions made as part of an optimization pipeline or other modules when executing the query on the actual database system.
+The central `Database` abstraction allows to execute queries and retrieve information from the specific target database
+independent of the underlying physical database. Users can interact with the interface without considering the peculiarities of
+differnt database systems.
 
-Recall that PostBOUND does not interact with the query optimizer directly and instead relies on system-specific hints or other
-special properties of the target database system to influence the optimizer behaviour. Therefore, the optimization process
-usually terminates with transforming the original input query to a logically equivalent query that at the same time contains
-the necessary modifications for optimization.
+In particular, the database abstraction provides the following core functionality:
 
-The central entrypoint to all database interaction is the abstract `Database` class. This class is inherited by all supported
-database systems (currently PostgreSQL, DuckDB and MySQL). Each `Database` instance provides some basic functionality on its
-own (such as the ability to execute queries), but delegates most of the work to specific and tailored interfaces. For example,
-the `DatabaseSchema` models all access to the logical schema of a database and the `OptimizerInterface` encapsulates the
-functionality to retrieve cost estimates or physical query execution plans. All of these interfaces are once again abstract and
-implemented according to the specifics of the actual database system.
+- Execution of arbitrary SQL queries (`Database.execute_query`)
+- Unified access to the database schema and statistics catalog (via `DatabaseSchema` and `StatisticsCatalog`)
+- Functionality to retrieve information from a query optimizer, such as execution plans or cost estimates
+  (in `OptimizerInterface`)
+- Query hinting to enforce optimizer decisions during query execution on the native database engine (via `HintService`)
 
-Take a look at the individual interfaces for further information about their functionality and intended usage.
+Consult the documentation of the indivdual classes for more details.
 
-This module also provides a shortcut method to retrieve the current database (aptly called `current_database`). In the
-background, this method delegates to the `DatabasePool`.
-The concrete database backends themselves are provided by dedicated top-level modules/packages: `postbound.postgres`,
-`postbound.duckdb` and `postbound.mysql` (the latter requires PostBOUND to be installed with MySQL support enabled).
+Connection Management
+---------------------
+
+PostBOUND provides a connection pool for database instances. By convention, calling the (system-specific) `connect` function
+will first attempt to retrieve a connection for the same physical database from the pool. If no such connection exists, a new
+connection is established.
+
+Typically, the pool contains just a single database instance. In this case, the `DatabasePool` can be used to retrieve the
+current database connection. There also exists a module-level `current_database` utility that provides the same functionality.
+
+If pooling is not desired, the `connect` functions provide a ``private`` argument to suppress it (once again by convention).
+
+Supported Systems
+-----------------
+
+PostBOUND ships database backends for PostgreSQL and DuckDB out of the box. Both are available in dedicated top-level modules.
+In addition, there is rudimentary support for MySQL, but this backend is not actively maintained.
+
+Users can implement their own database backends for specific systems by subclassing `Database` and the other relevant classes.
+
+Query Execution
+---------------
+
+Each `Database` provides a central method to execute arbitrary SQL queries: `execute_query`. This method runs the given query
+in a blocking manner and returns the result set. As a convenience, the result set is simplified by default. This means that
+instead of returning sets/rows with just a single element, the element is returned directly. For example, the result of the
+query ``SELECT count(*) FROM title`` will return the count directly as an integer, rather than as ``[(count,)]``.
+If a result set is required in any case, it can be enforced by passing `raw=True` to the method.
+
+In addition to this basic execution functionality, some database systems also provide support for timeouts, prewarming of the
+shared buffer pool, or measuring the execution time of a query. These features are specified using different mixin protocols.
+See `TimeoutSupport`, `PrewarmingSupport`, and `StopwatchSupport` for more information.
+
+All queries are assumed to be read-only with respect to the actual data, i.e., they should not modify the underlying data
+schema, but can change configuration of the database. Violating this assumption may lead to wrong results. For example, the
+database schema might cache the available tables. If a new table is created, the cache will not be updated accordingly. As a
+rule of thumb, whenever a query modifies the underlying data schema, the connection to the database should be re-established.
+
+If complex queries with stable results need to be executed frequently, the `ResultCache` can be used to store the results of a
+query and prevent re-execution of the query. The cache functions as a wrapper around a `Database` instance and can be used in
+the same way as a regular database instance.
+
+Statistics Catalog
+------------------
+
+Database statistics are highly system-specific and often not all statistics are available on a given database system. PostBOUND
+tries it best to unify access and availability of different statistics via the `StatisticsCatalog` interface. This interfaces
+provides commonly-used statistics such as distinct value counts or histograms. If a statistic is not available on a database
+system, the catalog will try to emulate it by issuing an equivalent query to the database.
+
+If this is not desired, the `enable_emulation_fallback` flag can be set to *False*. In this case, the catalog will raise an
+error if the database system does not support a specific statistic.
+
+One key property of statistic emulation is that it is always exact. In contrast, most systems only compute approximate
+statistics. As a consequence, emulated statistics benefit systems that only maintain a very small subset of statistics, such as
+DuckDB (because most statistics are emulated and therefore exact). To "level the field" between different database systems,
+the `PreciseStatistics` service can be used. It computes all statistics in an exact manner, regardless of the underlying
+database system. Further, this service can be combined with a `ResultCache` to avoid re-executing the same (expensive) queries
+for statistics computation.
 """
 
 from __future__ import annotations

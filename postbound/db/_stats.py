@@ -56,17 +56,17 @@ def _infer_histogram_bounds[T](
 class PreciseStatistics(StatisticsCatalog):
     """A statistics catalog that computes all statistics on live data instead of reading a native catalog.
 
-    Each statistic is derived by issuing an equivalent SQL query against the database. For example, the number of
-    distinct values of a column is obtained by running a *SELECT COUNT(DISTINCT column) FROM table* query. Since these
-    queries operate on the actual data, the resulting statistics are always exact and up-to-date -- in contrast to a
-    native statistics catalog, which is typically based on samples and can be stale.
+    Each statistic is derived by issuing an equivalent SQL query against the database. For example, the number of distinct
+    values of a column is obtained by running a *SELECT COUNT(DISTINCT column) FROM table* query. Since these queries operate
+    on the actual data, the resulting statistics are always exact and up-to-date - unlike a native statistics catalog, which is
+    typically based on samples and can be stale.
 
-    That exactness is a double-edged sword: it makes experiments reproducible, but it also means that an optimizer
-    running on `PreciseStatistics` might perform better than the same optimizer running on the native catalog of the
-    same system, simply because it receives better input. Keep this in mind when comparing across database systems.
+    That exactness is a double-edged sword: it makes experiments reproducible, but it also means that an optimizer running on
+    `PreciseStatistics` might perform better than the same optimizer running on the native catalog of the same system, simply
+    because it receives better input. Keep this in mind when comparing across database systems.
 
-    Because computing statistics this way can be expensive, consider using `create_cached` (or wrapping `db` in a
-    `ResultCache` manually) so that repeated requests for the same statistic do not re-execute the underlying query.
+    Because computing exact statistics can be expensive, consider using `create_cached` so that repeated requests for the same
+    statistic do not re-execute the underlying query.
 
     Parameters
     ----------
@@ -76,7 +76,8 @@ class PreciseStatistics(StatisticsCatalog):
     See Also
     --------
     PreciseStatistics.create_cached : Constructs a `PreciseStatistics` on top of a cached database.
-    postbound.db.enable_emulation_fallback : Controls whether native catalogs fall back to this implementation.
+    postbound.db.enable_emulation_fallback :
+        Controls whether native catalogs fall back to this implementation for missing statistics.
     """
 
     @staticmethod

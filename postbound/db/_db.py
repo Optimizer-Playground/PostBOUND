@@ -281,19 +281,11 @@ class Database(ABC):
     of expensive queries should be avoided (e.g. for emulated statistics, see `StatisticsCatalog`), wrap the database in
     a `ResultCache` instead.
 
-    Each database management system will need to implement this basic interface to enable PostBOUND to access the
-    necessary information.
-
     Parameters
     ----------
     system_name : str
         The name of the database system for which the connection is established. This is only really important to
         distinguish different instances of the interface in a convenient manner.
-
-    Notes
-    -----
-    When the `__init__` method is called, the connection to the specific database system has to be established already,
-    i.e. calling any of the public methods should provide a valid result.
     """
 
     def __init__(self, system_name: str) -> None:
@@ -301,14 +293,7 @@ class Database(ABC):
 
     @abstractmethod
     def schema(self) -> DatabaseSchema:
-        """Provides access to the underlying schema information of the database.
-
-        Returns
-        -------
-        DatabaseSchema
-            An object implementing the schema interface for the actual database system. This should normally be
-            completely stateless.
-        """
+        """Provides access to the underlying schema information of the database."""
         raise NotImplementedError
 
     @abstractmethod
@@ -319,13 +304,6 @@ class Database(ABC):
         is much more complicated than it might seem at first. See the documentation of `StatisticsCatalog` for more
         details, in particular on how unsupported statistics are handled and how the `PreciseStatistics` wrapper can be
         used to emulate statistics that a database system does not maintain natively.
-
-        Repeated calls to this method are guaranteed to provide the same object.
-
-        Returns
-        -------
-        StatisticsCatalog
-            The statistics interface. Repeated calls to this method are guaranteed to provide the same object.
         """
         raise NotImplementedError
 
@@ -343,11 +321,6 @@ class Database(ABC):
     @abstractmethod
     def optimizer(self) -> OptimizerInterface:
         """Provides access to optimizer-related functionality of the database system.
-
-        Returns
-        -------
-        OptimizerInterface
-            The optimizer interface. This should normally be completely stateless.
 
         Raises
         ------
@@ -548,6 +521,8 @@ A foreign key references has a foreign key column `fk_col` (the first element) t
 
 @dataclass
 class ColumnInfo:
+    """A compact representation of key properties of a specific column."""
+
     column: BoundColumnReference
     table: TableReference
 
@@ -559,6 +534,11 @@ class ColumnInfo:
 
 @dataclass
 class TableInfo(Mapping[BoundColumnReference, ColumnInfo]):
+    """A compact representation of key properties of a specific table.
+
+    *TableInfo*  supports ``__getitem__`` access to retrieve the `ColumnInfo` for a specific column.
+    """
+
     table: TableReference
     columns: Sequence[ColumnInfo]
 
@@ -1827,30 +1807,22 @@ class Histogram[T: _HistElem]:
 class StatisticsCatalog(ABC):
     """The statistics interface provides unified access to table-level and column-level statistics.
 
-    There are two main challenges when implementing a generalized statistics interface for different database systems.
-    The first one is the non-deterministic creation and maintenance of statistics by most database systems. This means
-    that creating two identical databases on the same database system on the same machine might still yield different
-    statistical values. This is because database systems oftentimes create statistics from random samples of column
-    values to speed up computation. However, such variability hurts our efforts to enable reproducible experiments
-    since different performances metrics might not be due to differences in the optimization algorithms but due to bad
-    luck when creating the statistics (whether it is a good sign if an algorithm is that fragile to deviations in
-    statistics is another question). The second main challenge is that different database systems maintain different
-    statistics. Even though many statistics are considered quite "basic" by the research community, not all systems
-    developers deemed all statistics necessary for their optimizer. Once again, this can severly hinder the application
-    of an optimization algorithm if it relies on a basic statistic that just happens to not be available on the desired
-    target database system.
+    Different database systems maintain different sets of statistics for their specific optimizers. Therefore, this interface
+    focuses on the most commonly available and most basic statistics. Because even this subset is not available across all
+    supported backends, the catalog allows for *emulation* of statistics: if a statistic is not supported by a specific
+    database system, an equivalent SQL query that computes the required statistic is executed.
 
-    Concrete implementations of this interface delegate all requests to the corresponding statistics catalog of the
-    database system (this is sometimes called *native* mode). If the requested statistic is not maintained by the
-    target database system, the behavior depends on the module-level `enable_emulation_fallback` flag: if it is
-    *True* (the default), the statistic is instead computed live by issuing an equivalent SQL query (e.g. a statistic
-    on the number of distinct values of a column is emulated by running a *SELECT COUNT(DISTINCT column) FROM table*
-    query). Otherwise, an `UnsupportedDatabaseFeatureError` is raised.
+    As a consequence of this process, emulated statistics are always exact, while statistics that are maintained by the
+    database system are usually only estimates. If this discrepancy is relevant for a specific use case, there are two options:
+    1) statistics emulation can be disabled globally, in which case systems raise an error if a statistic is not supported.
+    2) `PreciseStatistics` can be used instead, which emulates all statistics and thus provides exact values for all statistics.
 
-    The `PreciseStatistics` class provides a database-independent implementation that always computes statistics this
-    way, i.e. it can be used to force emulation even for database systems that maintain a specific statistic natively.
-    Since such live computation can be costly, consider wrapping the underlying `Database` in a `ResultCache` first
-    (see `PreciseStatistics.create_cached`).
+    Statistic emulation is not triggered when a database system in principle maintains a statistic, but it does not have a value
+    for a specific table or column. In this case, *None* is returned to indicate that the statistic is absent.
+
+    See Also
+    --------
+    PreciseStatistics : A statistics catalog that emulates all statistics and thus provides exact values for all statistics.
     """
 
     @abstractmethod

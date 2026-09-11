@@ -250,13 +250,6 @@ class PostgresDatabase(Database):
         self._client_encoding = client_encoding
         self._init_connection()
 
-        self._db_stats = PostgresStatistics(self)
-        self._db_schema = PostgresSchema(self)
-        self._hinting_backend = PostgresHinting(self)
-
-        self._timeout_executor = _TimeoutQueryExecutor(self)
-        self._last_query_runtime = math.nan
-
         super().__init__(system_name)
 
     def schema(self) -> PostgresSchema:
@@ -811,6 +804,14 @@ class PostgresDatabase(Database):
         self._connection.adapters.register_loader("interval", _PsycopgIntervalLoader)
 
         self._cursor: psycopg.Cursor = self._connection.cursor()
+
+        self._db_stats = PostgresStatistics(self)
+        self._db_schema = PostgresSchema(self)
+        self._hinting_backend = PostgresHinting(self)
+
+        self._timeout_executor = _TimeoutQueryExecutor(self)
+        self._last_query_runtime = math.nan
+
         return self.backend_pid()
 
     def _apply_query_hints(

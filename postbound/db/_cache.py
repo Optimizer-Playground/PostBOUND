@@ -1,10 +1,3 @@
-"""Provides `ResultCache`, a transparent result-set cache that wraps an arbitrary `Database`.
-
-Prior to the database rework, result caching was built directly into `Database`. It has since been extracted into this
-module, so that caching becomes an opt-in decision (wrap the database you want to cache) rather than a built-in default
-that every backend has to implement and every user has to reason about.
-"""
-
 from __future__ import annotations
 
 import atexit
@@ -70,17 +63,16 @@ class ResultCache(Database):
     """Transparently caches the result sets of `execute_query` calls made against a wrapped `Database`.
 
     A `ResultCache` behaves like any other `Database`: `schema`, `statistics`, `hinting` and `optimizer` all delegate
-    directly to the wrapped database. Only `execute_query` is intercepted -- the query is stringified and used as a
-    cache key, so repeated calls with the same query text are served from an in-memory dictionary instead of hitting
-    the live database system again.
+    directly to the wrapped database. Only `execute_query` is intercepted: if the same query has been executed before, the
+    cached result set is returned instead of running the query again.
 
     If an `offline_cache` path is supplied, the cache also persists across process boundaries: existing entries are
     read from that JSON file when the cache is created and the full (possibly extended) cache content is written back
-    to the same file via `atexit` once the process terminates.
+    to the same file (via *atexit*) once the process terminates.
 
-    This is most useful for wrapping compute-intensive, read-only queries such as those issued by `PreciseStatistics`,
-    since it turns the assumption that the database is immutable during a PostBOUND run into an actual, shared
-    performance benefit.
+    The cache is most useful for wrapping compute-intensive, read-only queries such as those issued by `PreciseStatistics`.
+    New instances should be obtained via `ResultCache.create_cache` to ensure that the same cache is reused across the process.
+    Using the constructor directly with the same underlying offline cache will result in some cache updates being lost.
 
     Parameters
     ----------
@@ -145,11 +137,6 @@ class ResultCache(Database):
         return self._db.optimizer()
 
     def execute_query(self, query: SqlQuery | str, *, raw: bool = False) -> Any:
-        """Executes the query on the wrapped database, or serves it from the cache if it was executed before.
-
-        The cache key is the string representation of `query`. See `Database.execute_query` for the semantics of
-        `raw`.
-        """
         stringified_query = str(query) if isinstance(query, SqlQuery) else query
 
         cached_res = self._cache.get(stringified_query)
