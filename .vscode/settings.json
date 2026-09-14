@@ -24,5 +24,6 @@
   },
 
   "ruff.importStrategy": "fromEnvironment",
-  "ty.importStrategy": "fromEnvironment"
+  "ty.importStrategy": "fromEnvironment",
+  "editor.rulers": [121]
 }
