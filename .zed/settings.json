@@ -12,6 +12,7 @@
         "source.organizeImports.ruff": true,
         "source.fixAll.ruff": true,
       },
+      "format_on_save": "on",
     },
   },
   "wrap_guides": [121],
