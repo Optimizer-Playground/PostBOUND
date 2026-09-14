@@ -30,7 +30,7 @@ from ..qal import (
     AbstractPredicate,
     AndPredicate,
     ColumnExpression,
-    QueryPredicates,
+    PredicateTree,
     SelectStatement,
 )
 from ..util import LogicError, jsondict
@@ -133,7 +133,7 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
             supported_scan_ops = {op for op in supported_scan_ops if target_db.hinting().supports_hint(op)}
             supported_join_ops = {op for op in supported_join_ops if target_db.hinting().supports_hint(op)}
 
-        self.predicates: QueryPredicates | None = None
+        self.predicates: PredicateTree | None = None
 
         self._target_db = target_db
         self._scan_ops = supported_scan_ops
@@ -228,7 +228,7 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
 
         The access paths do not contain a cost or cardinality estimates, yet. These information must be added by the caller.
         """
-        filter_condition = query.predicates().filters_for(table)
+        filter_condition = query.filters_for(table)
         required_columns = _collect_used_columns(query, table, schema=self._target_db.schema())
         can_idx_only_scan = len(required_columns) <= 1  # check for <= 1 to include cross products with select star
         candidate_indexes = {column: self._target_db.schema().indexes_on(column) for column in required_columns}
@@ -301,7 +301,6 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
             The final query plan that represents the cheapest join path for the given query.
         """
 
-        predicates = query.predicates()
         candidate_tables = query.tables()
 
         for current_level in range(2, len(candidate_tables) + 1):
@@ -319,7 +318,7 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
                     cardinality_estimator=cardinality_estimator,
                 )
                 for join in current_intermediates
-                if predicates.joins_tables(join)  # we do not consider cross products
+                if query.joins_tables(join)  # we do not consider cross products
             }
             dp_table.update(access_paths)
 
@@ -365,7 +364,7 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
                 # product. Since we do not consider cross products, we can skip this split.
                 continue
 
-            join_condition = query.predicates().joins_between(outer, inner)
+            join_condition = query.joins_between(outer, inner)
 
             if JoinOperator.NestedLoopJoin in self._join_ops:
                 candidate_plans.append(
@@ -578,7 +577,7 @@ class PostgresDynProg(PlanEnumerator):
             supported_join_ops = {op for op in supported_join_ops if target_db.hinting().supports_hint(op)}
 
         self.query: SelectStatement | None = None
-        self.predicates: QueryPredicates | None = None
+        self.predicates: PredicateTree | None = None
         self.cost_model: CostModel | None = None
         self.cardinality_estimator: CardinalityEstimator | None = None
         self.join_rel_level: JoinRelLevel | None = None

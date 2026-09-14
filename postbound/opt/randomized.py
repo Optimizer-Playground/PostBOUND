@@ -180,7 +180,7 @@ class RandomJoinOrderGenerator:
         if not is_select_query(query):
             raise QueryTypeError.expected_select(query)
 
-        join_graph = query.predicates().join_graph()
+        join_graph = query.join_graph()
         if len(join_graph.nodes) == 0:
             return
         elif len(join_graph.nodes) == 1:

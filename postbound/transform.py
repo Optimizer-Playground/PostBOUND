@@ -33,7 +33,6 @@ from .qal import (
     ArrayAccessExpression,
     ArrayExpression,
     BaseClause,
-    Projection,
     BetweenPredicate,
     BinaryOperator,
     BinaryPredicate,
@@ -65,6 +64,7 @@ from .qal import (
     Ordering,
     OrPredicate,
     PredicateVisitor,
+    Projection,
     QuantifierExpression,
     Select,
     SelectStatement,
@@ -585,11 +585,11 @@ def move_into_subquery(
 
     subquery_predicates: list[AbstractPredicate] = []
     for table in tables:
-        filter_predicate = predicates.filters_for(table)
-        if not filter_predicate:
+        filter_predicate = predicates.filters_for(table) if predicates is not None else None
+        if filter_predicate is None:
             continue
         subquery_predicates.append(filter_predicate)
-    join_predicates = predicates.joins_between(tables, tables)
+    join_predicates = predicates.joins_between(tables, tables) if predicates is not None else None
     if join_predicates:
         subquery_predicates.append(join_predicates)
 
@@ -648,6 +648,9 @@ def add_ec_predicates(query: SelectStatement) -> SelectStatement:
         query = explicit_to_implicit(query)
 
     predicates = query.predicates()
+    if predicates is None:
+        return query
+
     joins = predicates.joins()
     if not all(isinstance(join, BinaryPredicate) for join in joins):
         raise ValueError(f"Cannot add equivalence class predicates for non-binary joins: {joins}")

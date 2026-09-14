@@ -202,7 +202,7 @@ class NativeCostModel(CostModel):
         # Our join partner has to be a table that is not already part of the plan. Based on these tables, we need to determine
         # all tables that have a suitable join condition with the tables that are already part of the plan.
         free_tables = query.tables() - plan.tables()
-        candidate_joins = query.predicates().joins_between(free_tables, plan.tables())
+        candidate_joins = query.joins_between(free_tables, plan.tables())
         if not candidate_joins:
             warnings.warn(
                 "Could not find a suitable consumer of the materialized table. Returning infinite costs.",
@@ -311,7 +311,7 @@ class NativeCostModel(CostModel):
         # Our join partner has to be a table that is not already part of the plan. Based on these tables, we need to determine
         # all tables that have a suitable join condition with our cache key.
         free_tables = query.tables() - plan.tables()
-        candidate_joins = query.predicates().joins_between(free_tables, column.table)
+        candidate_joins = query.joins_between(free_tables, column.table)
         if not candidate_joins:
             warnings.warn(
                 "Could not find a suitable consumer of the materialized table. Returning infinite costs.",

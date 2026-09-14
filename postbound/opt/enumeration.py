@@ -147,7 +147,7 @@ class ExhaustiveJoinOrderEnumerator:
             self._linear_join_orders(query)
             return
 
-        join_graph = query.predicates().join_graph()
+        join_graph = query.join_graph()
         if len(join_graph.nodes) == 0:
             return
         elif len(join_graph.nodes) == 1:
@@ -183,7 +183,7 @@ class ExhaustiveJoinOrderEnumerator:
         Generator[JoinTree]
             A generator that produces all possible join orders for the input query.
         """
-        join_graph = query.predicates().join_graph()
+        join_graph = query.join_graph()
         direction = "inner" if self._tree_structure == "left-deep" else "outer"
 
         for join_path in nx_utils.nx_frontier_walks(join_graph):

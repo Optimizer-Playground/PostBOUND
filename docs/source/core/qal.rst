@@ -91,7 +91,7 @@ Working with joins and filters
 
 A core part of query optimization tasks is to analyze which join conditions and filter predicates are present in the query.
 You can either analyze queries manually and traverse the :class:`~postbound.qal.Where` clause. At the same time, the query
-abstraction also provides :class:`~postbound.qal.QueryPredicates` for a more high-level access:
+abstraction also provides :class:`~postbound.qal.PredicateTree` for a more high-level access:
 
 .. ipython:: python
 
@@ -161,10 +161,10 @@ Compare this output to the listing of the full AST above.
 
 .. attention::
 
-    :class:`~postbound.qal.QueryPredicates` also has a convenience method :meth:`~postbound.qal.QueryPredicates.simplify`
+    :class:`~postbound.qal.PredicateTree` also has a convenience method :meth:`~postbound.qal.PredicateTree.simplify`
     that returns simplified version of all predicates that can actually be simplified. However, if some predicates are more
     complicated than the simplification can handle, these are silently dropped form the result. Never forget to check
-    :meth:`~postbound.qal.QueryPredicates.all_simple` first to be sure you don't lose any important predicates!
+    :meth:`~postbound.qal.PredicateTree.all_simple` first to be sure you don't lose any important predicates!
 
 Many query optimizers derive **equivalence classes** from the query predicates to detect more worthwhile joins that are not
 explicitly listed in the query. You can do the same (currently somewhat clunkily) by adding all predicates that can be

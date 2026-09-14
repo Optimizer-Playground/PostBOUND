@@ -1,4 +1,4 @@
-"""The *db* module provides tools to interact with physical database instances.
+"""The **database** module provides tools to interact with physical database instances.
 
 The central `Database` abstraction allows to execute queries and retrieve information from the specific target database
 independent of the underlying physical database. Users can interact with the interface without considering the peculiarities of

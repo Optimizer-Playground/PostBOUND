@@ -402,7 +402,7 @@ class CrossProductPreCheck(OptimizationPreCheck):
         super().__init__("no-cross-products")
 
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
-        if nx.is_connected(query.predicates().join_graph()):
+        if nx.is_connected(query.join_graph()):
             return PreCheckResult.with_all_passed()
         return PreCheckResult.with_failure("Query contains cross products")
 
@@ -428,7 +428,7 @@ class VirtualTablesPreCheck(OptimizationPreCheck):
 class EquiJoinPreCheck(OptimizationPreCheck):
     """Check to assert that a query only contains equi-joins.
 
-    This does not restrict the filters in any way. The determination of joins is based on `QueryPredicates.joins`.
+    This does not restrict the filters in any way. The determination of joins is based on `PredicateTree.joins`.
     """
 
     def __init__(self, *, allow_conjunctions: bool = False, allow_nesting: bool = False) -> None:
@@ -437,7 +437,7 @@ class EquiJoinPreCheck(OptimizationPreCheck):
         self._allow_nesting = allow_nesting
 
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
-        join_predicates = query.predicates().joins()
+        join_predicates = query.joins()
         all_passed = all(self._perform_predicate_check(join_pred) for join_pred in join_predicates)
         failure_reason = "" if all_passed else "Query contains non-equi-joins"
         return PreCheckResult(all_passed, failure_reason)
@@ -729,6 +729,9 @@ class SPJCheck(OptimizationPreCheck):
             return PreCheckResult.with_failure("FROM clause has complex contents")
 
         predicates = query.predicates()
+        if predicates is None:
+            return PreCheckResult.with_all_passed()
+
         if not predicates.all_simple():
             return PreCheckResult.with_failure("Query has complex predicates")
 

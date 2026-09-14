@@ -273,11 +273,10 @@ def _make_simple_plan(
     if query is None:
         return QueryPlan(operator, children=children, estimated_cardinality=cardinality)
 
-    predicates = query.predicates()
     filter_condition = (
-        predicates.joins_between(join_tree.outer_child.tables(), join_tree.inner_child.tables())
+        query.joins_between(join_tree.outer_child.tables(), join_tree.inner_child.tables())
         if join_tree.is_join()
-        else predicates.filters_for(join_tree.base_table)
+        else query.filters_for(join_tree.base_table)
     )
     return QueryPlan(
         operator,
@@ -357,11 +356,10 @@ def _make_custom_plan(
             parallel_workers=par_workers,
         )
     else:
-        predicates = query.predicates()
         filter_condition = (
-            predicates.joins_between(join_tree.outer_child.tables(), join_tree.inner_child.tables())
+            query.joins_between(join_tree.outer_child.tables(), join_tree.inner_child.tables())
             if join_tree.is_join()
-            else predicates.filters_for(join_tree.base_table)
+            else query.filters_for(join_tree.base_table)
         )
         plan = QueryPlan(
             operator,
