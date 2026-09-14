@@ -22,11 +22,12 @@ parts of queries, such as individual clauses or expressions.
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Literal, cast, overload
 
 from . import util
 from ._core import ColumnReference, TableReference
+from .db import DatabasePool, DatabaseSchema
 from .qal import (
     AbstractPredicate,
     AndPredicate,
@@ -92,6 +93,7 @@ from .qal import (
     build_query,
     determine_join_equivalence_classes,
     generate_predicates_for_equivalence_classes,
+    is_select_query,
     is_set_query,
 )
 
@@ -184,8 +186,38 @@ class _ImplicitFromClauseRewriter(TableSourceVisitor[tuple[Collection[TableSourc
                 raise ValueError(f"Unknown join clause: {src}")
 
 
-def explicit_to_implicit(query: SelectStatement) -> SelectStatement:
-    """Transforms a query with an explicit FROM clause to a query with an implicit FROM clause."""
+@overload
+def explicit_to_implicit(query: SelectStatement) -> SelectStatement: ...
+
+
+@overload
+def explicit_to_implicit(query: SetQuery) -> SetQuery: ...
+
+
+@overload
+def explicit_to_implicit(query: SqlQuery) -> SqlQuery: ...
+
+
+def explicit_to_implicit(query):
+    """Transforms a query with an explicit FROM clause to a query with an implicit FROM clause.
+
+    For set queries, the individual queries are transformed recursively. The set operation itself is not changed.
+    """
+
+    if isinstance(query, SetQuery):
+        lhs_query = explicit_to_implicit(query.lhs)
+        rhs_query = explicit_to_implicit(query.rhs)
+        return SetQuery(
+            lhs_query,
+            rhs_query,
+            set_operation=query.set_operation,
+            cte_clause=query.cte_clause,
+            orderby_clause=query.orderby_clause,
+            limit_clause=query.limit_clause,
+            hints=query.hints,
+            explain_clause=query.explain,
+        )
+
     if query.from_clause is None or query.has_simple_from():
         return query
 
@@ -2448,3 +2480,359 @@ def merge_tables(query, tables: Iterable[TableReference], *, target: TableRefere
     for tab in tables:
         merged = rename_table(merged, from_table=tab, target_table=target)
     return merged
+
+
+def _determine_output_shape(
+    query: SqlQuery, *, cte_shapes: Mapping[TableReference, Sequence[Projection]], schema: DatabaseSchema
+) -> Sequence[Projection]:
+    if isinstance(query, SetQuery):
+        # For set queries we can just use the output shape of the left-hand side, since all set operations require the
+        # same output shape on both sides.
+        return _determine_output_shape(query.lhs, cte_shapes=cte_shapes, schema=schema)
+
+    if not is_select_query(query):
+        raise ValueError(f"Cannot determine output shape of query: {query}")
+
+    if query.from_clause is None:
+        return []
+
+    raw_shapes = _ResultSetShape(cte_shapes, schema).visit_from_clause(query.from_clause, cte_shapes=cte_shapes)
+    from_shapes = {tab: list(cols) for shape in raw_shapes for tab, cols in shape.items()}
+
+    output_shape: list[Projection] = []
+    for projection in query.select_clause:
+        if projection.target_name:
+            output_shape.append(projection)
+            continue
+
+        match projection.expression:
+            case ColumnExpression():
+                output_shape.append(projection)
+
+            case StarExpression(tab) if tab is not None:
+                output_shape.extend(col for col in from_shapes[tab])
+            case StarExpression():
+                output_shape.extend(col for col in util.flatten(from_shapes.values()))
+
+            case _:
+                anonymous = ColumnReference("?column?")
+                output_shape.append(Projection.column(anonymous))
+
+    return output_shape
+
+
+class _ResultSetShape(TableSourceVisitor[Mapping[TableReference, Sequence[Projection]]]):
+    def __init__(self, cte_shapes: Mapping[TableReference, Sequence[Projection]], schema: DatabaseSchema) -> None:
+        self._cte_shapes = cte_shapes
+        self._schema = schema
+
+    def visit_direct_source(
+        self, src: DirectTableSource, *args, **kwargs
+    ) -> Mapping[TableReference, Sequence[Projection]]:
+        if src.table.virtual:
+            target_cols = self._cte_shapes[src.table]
+            return {src.table: target_cols}
+
+        return {src.table: [Projection.column(col) for col in self._schema.columns(src.table)]}
+
+    def visit_subquery_source(
+        self, src: SubqueryTableSource, *args, **kwargs
+    ) -> Mapping[TableReference, Sequence[Projection]]:
+        if src.target_table is None:
+            return {}
+
+        subquery_shape = _determine_output_shape(src.query, cte_shapes=self._cte_shapes, schema=self._schema)
+        return {src.target_table: subquery_shape}
+
+    def visit_values_source(
+        self, src: ValuesTableSource, *args, **kwargs
+    ) -> Mapping[TableReference, Sequence[Projection]]:
+        if not src.cols:
+            return {}
+        if src.table is None:
+            return {}
+
+        return {src.table: [Projection.column(col) for col in src.cols]}
+
+    def visit_function_source(
+        self, src: FunctionTableSource, *args, **kwargs
+    ) -> Mapping[TableReference, Sequence[Projection]]:
+        raise ValueError(f"Cannot determine output shape of function table source: {src}")
+
+    def visit_join_source(self, src: JoinTableSource, *args, **kwargs) -> Mapping[TableReference, Sequence[Projection]]:
+        left_shape = src.lhs.accept_visitor(self, *args, **kwargs)
+        right_shape = src.rhs.accept_visitor(self, *args, **kwargs)
+
+        return {**left_shape, **right_shape}
+
+
+@overload
+def expand_select_star(query: SelectStatement, *, schema: DatabaseSchema | None = None) -> SelectStatement: ...
+
+
+@overload
+def expand_select_star(query: SetQuery, *, schema: DatabaseSchema | None = None) -> SetQuery: ...
+
+
+@overload
+def expand_select_star(query: SqlQuery, *, schema: DatabaseSchema | None = None) -> SqlQuery: ...
+
+
+def expand_select_star(query: SqlQuery, *, schema: DatabaseSchema | None = None):
+    """Replaces all SELECT \\* statements in a query with the actual columns that are selected.
+
+    Access to the database schema is required to determine which columns are provided by each table. If the schema is not given
+    explicitly, it is inferred from the database pool.
+    """
+
+    if isinstance(query, SetQuery):
+        expanded_lhs = expand_select_star(query.lhs, schema=schema)
+        expanded_rhs = expand_select_star(query.rhs, schema=schema)
+
+        match query.set_clause:
+            case UnionClause(_, _, union_all):
+                expanded_set_clause = UnionClause(expanded_lhs, expanded_rhs, union_all=union_all)
+            case IntersectClause():
+                expanded_set_clause = IntersectClause(expanded_lhs, expanded_rhs)
+            case ExceptClause():
+                expanded_set_clause = ExceptClause(expanded_lhs, expanded_rhs)
+            case unknown:
+                raise ValueError(f"Unknown set clause: {unknown}")
+
+        return replace_clause(query, expanded_set_clause)
+
+    schema = schema or DatabasePool.get_current().schema()
+
+    #
+    # The computation of the CTE shapes should not be expressed as a comprehension since a later CTE can reference the
+    # output shape of an earlier CTE.
+    #
+    # Consider the following example query:
+    #
+    #   WITH
+    #       a AS (SELECT 42 as foo, 24 as bar),
+    #       b AS (SELECT * FROM a)
+    #   SELECT * FROM b
+    #
+    # The output shape of b would be (foo, bar)
+    cte_shapes: dict[TableReference, Sequence[Projection]] = {}
+    for cte in query.cte_clause or []:
+        cte_shapes[cte.target_table] = _determine_output_shape(cte.query, cte_shapes=cte_shapes, schema=schema)
+
+    expanded_projections = _determine_output_shape(query, cte_shapes=cte_shapes, schema=schema)
+    return replace_clause(query, Select(expanded_projections, distinct=query.select_clause.distinct_specifier()))
+
+
+class _JoinRewriter(TableSourceVisitor[TableSource]):
+    def __init__(self, cte_shapes: Mapping[TableReference, Sequence[Projection]], schema: DatabaseSchema) -> None:
+        self._cte_shapes = cte_shapes
+        self._schema = schema
+
+    def visit_direct_source(self, src: DirectTableSource, *args, **kwargs) -> DirectTableSource:
+        return src
+
+    def visit_subquery_source(self, src: SubqueryTableSource, *args, **kwargs) -> SubqueryTableSource:
+        return src
+
+    def visit_values_source(self, src: ValuesTableSource, *args, **kwargs) -> ValuesTableSource:
+        return src
+
+    def visit_function_source(self, src: FunctionTableSource, *args, **kwargs) -> FunctionTableSource:
+        return src
+
+    def visit_join_source(self, src: JoinTableSource, *args, **kwargs) -> JoinTableSource:
+        nat_joins = (
+            JoinType.NaturalInnerJoin,
+            JoinType.NaturalOuterJoin,
+            JoinType.NaturalLeftJoin,
+            JoinType.NaturalRightJoin,
+        )
+        if src.join_type not in nat_joins:
+            return src
+
+        anon_placeholder = "?column?"
+
+        lhs_proj = src.lhs.accept_visitor(_ResultSetShape(self._cte_shapes, self._schema))
+        lhs_aliases: dict[str, TableReference] = {}
+        for tab, projections in lhs_proj.items():
+            for proj in projections:
+                identifier = proj.identifier(placeholder=anon_placeholder)
+                if identifier == "?column?":
+                    continue
+
+                if identifier in lhs_aliases:
+                    raise ValueError(
+                        f"Cannot re-write: Ambiguous column reference in LHS of NATURAL JOIN: {identifier}"
+                    )
+                lhs_aliases[identifier] = tab
+
+        rhs_proj = src.rhs.accept_visitor(_ResultSetShape(self._cte_shapes, self._schema))
+        rhs_aliases: dict[str, TableReference] = {}
+        for tab, projections in rhs_proj.items():
+            for proj in projections:
+                identifier = proj.identifier(placeholder=anon_placeholder)
+                if identifier == "?column?":
+                    continue
+
+                if identifier in rhs_aliases:
+                    raise ValueError(
+                        f"Cannot re-write: Ambiguous column reference in RHS of NATURAL JOIN: {identifier}"
+                    )
+                rhs_aliases[identifier] = tab
+
+        col_overlap = set(lhs_aliases.keys()) & set(rhs_aliases.keys())
+        predicates: list[BinaryPredicate] = []
+        for col in col_overlap:
+            lhs_col = ColumnReference(col, lhs_aliases[col])
+            rhs_col = ColumnReference(col, rhs_aliases[col])
+            join_pred = as_predicate(lhs_col, "=", rhs_col)
+            predicates.append(join_pred)
+
+        final_condition = CompoundPredicate.create_and(predicates)
+
+        match src.join_type:
+            case JoinType.NaturalInnerJoin:
+                updated_type = JoinType.InnerJoin
+            case JoinType.NaturalOuterJoin:
+                updated_type = JoinType.OuterJoin
+            case JoinType.NaturalLeftJoin:
+                updated_type = JoinType.LeftJoin
+            case JoinType.NaturalRightJoin:
+                updated_type = JoinType.RightJoin
+
+        return JoinTableSource(src.lhs, src.rhs, join_condition=final_condition, join_type=updated_type)
+
+
+@overload
+def expand_natural_joins(query: SelectStatement, *, schema: DatabaseSchema | None = None) -> SelectStatement: ...
+
+
+@overload
+def expand_natural_joins(query: SetQuery, *, schema: DatabaseSchema | None = None) -> SetQuery: ...
+
+
+@overload
+def expand_natural_joins(query: SqlQuery, *, schema: DatabaseSchema | None = None) -> SqlQuery: ...
+
+
+def expand_natural_joins(query: SqlQuery, *, schema: DatabaseSchema | None = None):
+    """Replaces all *NATURAL JOIN* statements in a query with the explicit join predicates.
+
+    Access to the database schema is required to determine which columns are provided by each table. If the schema is not given
+    explicitly, it is inferred from the database pool.
+    """
+    if isinstance(query, SetQuery):
+        expanded_lhs = expand_natural_joins(query.lhs, schema=schema)
+        expanded_rhs = expand_natural_joins(query.rhs, schema=schema)
+
+        match query.set_clause:
+            case UnionClause(_, _, union_all):
+                expanded_set_clause = UnionClause(expanded_lhs, expanded_rhs, union_all=union_all)
+            case IntersectClause():
+                expanded_set_clause = IntersectClause(expanded_lhs, expanded_rhs)
+            case ExceptClause():
+                expanded_set_clause = ExceptClause(expanded_lhs, expanded_rhs)
+            case unknown:
+                raise ValueError(f"Unknown set clause: {unknown}")
+
+        return replace_clause(query, expanded_set_clause)
+
+    if not query.from_clause:
+        return query
+
+    schema = schema or DatabasePool.get_current().schema()
+
+    # see comment on `expand_select_star` for why this is not expressed as a comprehension
+    cte_shapes: dict[TableReference, Sequence[Projection]] = {}
+    for cte in query.cte_clause or []:
+        cte_shapes[cte.target_table] = _determine_output_shape(cte.query, cte_shapes=cte_shapes, schema=schema)
+
+    rewritten_sources = _JoinRewriter(cte_shapes, schema).visit_from_clause(query.from_clause, cte_shapes=cte_shapes)
+    return replace_clause(query, From(rewritten_sources))
+
+
+@overload
+def normalize_query(query: SelectStatement, *, schema: DatabaseSchema | None = None) -> SelectStatement: ...
+
+
+@overload
+def normalize_query(query: SetQuery, *, schema: DatabaseSchema | None = None) -> SetQuery: ...
+
+
+@overload
+def normalize_query(query: SqlQuery, *, schema: DatabaseSchema | None = None) -> SqlQuery: ...
+
+
+def normalize_query(query: SqlQuery, *, schema: DatabaseSchema | None = None):
+    """Transforms a query into a normalized form.
+
+    This function is intended as a "one-stop-shop" to transform arbitrary queries into a standardized form.
+
+    The following transformation are applied:
+
+    - All *NATURAL JOIN* statements are replaced with explicit join predicates.
+    - All implicit joins are re-written to explicit joins.
+    - All predicates are moved to the WHERE clause (or HAVING clause for aggregates).
+    - All predicates are flattened into a single AND predicate.
+    - All SELECT \\* statements are replaced with the actual columns that are selected.
+    - All range filters are replaced with explicit BETWEEN predicates if they form a closed range.
+    - All equality join predicates that are implied by the existing predicates are added to the WHERE clause.
+
+    Currently, transformations are also applied to CTEs, but not to subqueries. This might change in the future.
+
+    The transformation fails, if the query contains any non-inner joins.
+    """
+
+    updated_withs = [
+        WithQuery(normalize_query(cte.query, schema=schema), cte.target_table, materialized=cte.materialized)
+        for cte in query.cte_clause or []
+    ]
+    updated_cte = (
+        CommonTableExpression(updated_withs, recursive=query.cte_clause.recursive) if query.cte_clause else None
+    )
+
+    if isinstance(query, SetQuery):
+        updated_lhs = normalize_query(query.lhs, schema=schema)
+        updated_rhs = normalize_query(query.rhs, schema=schema)
+        return SetQuery(
+            updated_lhs,
+            updated_rhs,
+            set_operation=query.set_operation,
+            cte_clause=updated_cte,
+            orderby_clause=query.orderby_clause,
+            limit_clause=query.limit_clause,
+            explain_clause=query.explain,
+            hints=query.hints,
+        )
+
+    if not isinstance(query, SelectStatement):
+        raise ValueError(f"Cannot normalize query. Unknown query type: {query}")
+
+    no_natural = expand_natural_joins(query, schema=schema)
+
+    # We re-write to implicit joins after we expanded the natural joins because these still retain the JOIN ON syntax.
+    # Now we can get rid of them
+    implicit_query = explicit_to_implicit(no_natural)
+
+    # Once all our predicates are in one place, we can infer additional predicates. We use explicit BETWEEN filters for
+    # any combination of predicates of the form col >= v1 AND col <= v2
+    # Similarly, we add all equality join predicates that are implied by the existing predicates.
+    between_query = infer_between_predicates(implicit_query)
+    ec_query = add_ec_predicates(between_query)
+
+    # Now that all joins are in the WHERE clause, we can flatten the predicate hierarchies. Afterwards, we do not need
+    # to modify them anymore.
+    clauses_to_update: list[BaseClause] = []
+    if ec_query.where_clause:
+        updated_where = Where(flatten_and_predicate(ec_query.where_clause.root))
+        clauses_to_update.append(updated_where)
+    if ec_query.having_clause:
+        updated_having = Having(flatten_and_predicate(ec_query.having_clause.condition))
+        clauses_to_update.append(updated_having)
+    flattened = replace_clause(ec_query, clauses_to_update)
+
+    # Lastly, we can eliminate all SELECT * statements. This step is orthogonal to the other transformations, so we
+    # could have also done this in between or before.
+    no_star = expand_select_star(flattened, schema=schema)
+
+    return no_star
