@@ -44,6 +44,7 @@ from .qal import (
     AbstractPredicate,
     ArrayAccessExpression,
     ArrayExpression,
+    AutoJoins,
     BetweenPredicate,
     BinaryOperator,
     BinaryPredicate,
@@ -1437,23 +1438,32 @@ def _pglast_parse_from_entry(pglast_data: dict, *, namespace: QueryNamespace, qu
             match join_expr["jointype"]:
                 case "JOIN_INNER" if "quals" in join_expr:
                     join_type = JoinType.InnerJoin
-                case "JOIN_INNER" if "quals" not in join_expr:
+
+                case "JOIN_INNER" if "isNatural" in join_expr:
+                    join_type = JoinType.NaturalInnerJoin
+                case "JOIN_LEFT" if "isNatural" in join_expr:
+                    join_type = JoinType.NaturalLeftJoin
+                case "JOIN_RIGHT" if "isNatural" in join_expr:
+                    join_type = JoinType.NaturalOuterJoin
+                case "JOIN_FULL" if "isNatural" in join_expr:
+                    join_type = JoinType.NaturalOuterJoin
+
+                case "JOIN_INNER":
                     join_type = JoinType.CrossJoin
+
                 case "JOIN_LEFT":
                     join_type = JoinType.LeftJoin
                 case "JOIN_RIGHT":
                     join_type = JoinType.RightJoin
-                case "JOIN_OUTER":
-                    join_type = JoinType.OuterJoin
-                case "JOIN_FULL":
+                case "JOIN_OUTER" | "JOIN_FULL":
                     join_type = JoinType.OuterJoin
                 case _:
                     raise ParserError("Unknown join type: " + join_expr["jointype"])
 
             left = _pglast_parse_from_entry(join_expr["larg"], namespace=namespace, query_txt=query_txt)
             right = _pglast_parse_from_entry(join_expr["rarg"], namespace=namespace, query_txt=query_txt)
-            if join_type == JoinType.CrossJoin:
-                return JoinTableSource(left, right, join_type=JoinType.CrossJoin)
+            if join_type in AutoJoins:
+                return JoinTableSource(left, right, join_type=join_type)
 
             join_condition = _pglast_parse_predicate(join_expr["quals"], namespace=namespace, query_txt=query_txt)
 
