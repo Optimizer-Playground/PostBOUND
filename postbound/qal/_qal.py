@@ -5855,6 +5855,24 @@ class Projection:
     def columns(self) -> set[ColumnReference]:
         return self.expression.columns()
 
+    def identifier(self, *, placeholder: str = "") -> str:
+        """Provides the identifier that can be used to access the column in the result set.
+
+        The identifier is determined as follows:
+
+        1. if the projection has been aliased, the alias is used
+        2. if the projection is a plain column reference, the column name is used
+        3. the placeholder is used
+        4. if no placeholder is provided, the generic "?column?" is used
+        """
+        if self._target_name:
+            return self._target_name
+
+        if isinstance(self._expression, ColumnExpression):
+            return self._expression.column.name
+
+        return placeholder or "?column?"
+
     def itercolumns(self) -> Iterable[ColumnReference]:
         return self.expression.itercolumns()
 
@@ -6240,6 +6258,32 @@ class TableSource(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def bound_tables(self) -> set[TableReference]:
+        """Provides all tables that are bound in this table source hierarchy.
+
+        Bound tables in this context means tables whose columns can be accessed in the rest of the query. For example,
+        for a direct table source, this will be the table itself. For function table sources, this will be the function's
+        output alias, etc.
+
+        In contrast to `tables`, this method ignores tables that are referenced within subqueries and only provides the
+        output alias of the subquery.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def predicates(self) -> PredicateTree | None:
+        """Provides all predicates that are contained in the source.
+
+        For plain table sources this will be *None*, but for subquery sources, etc. all predicates are returned.
+
+        Returns
+        -------
+        PredicateTree | None
+            The predicates or *None* if the source does not allow predicates or simply does not contain any.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def iterexpressions(self) -> Iterable[SqlExpression]:
         """Provides access to all directly contained expressions in the source.
 
@@ -6267,19 +6311,6 @@ class TableSource(ABC):
         -------
         Iterable[ColumnReference]
             All columns exactly in the order in which they are used
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def predicates(self) -> PredicateTree | None:
-        """Provides all predicates that are contained in the source.
-
-        For plain table sources this will be *None*, but for subquery sources, etc. all predicates are returned.
-
-        Returns
-        -------
-        PredicateTree | None
-            The predicates or *None* if the source does not allow predicates or simply does not contain any.
         """
         raise NotImplementedError
 
@@ -6329,6 +6360,12 @@ class DirectTableSource(TableSource):
     def tables(self) -> set[TableReference]:
         return {self._table}
 
+    def predicates(self) -> PredicateTree | None:
+        return None
+
+    def bound_tables(self) -> set[TableReference]:
+        return {self._table}
+
     def columns(self) -> set[ColumnReference]:
         return set()
 
@@ -6337,9 +6374,6 @@ class DirectTableSource(TableSource):
 
     def itercolumns(self) -> Iterable[ColumnReference]:
         return []
-
-    def predicates(self) -> PredicateTree | None:
-        return None
 
     def accept_visitor(self, visitor: TableSourceVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_direct_source(self, *args, **kwargs)
@@ -6491,14 +6525,17 @@ class SubqueryTableSource(TableSource):
     def columns(self) -> set[ColumnReference]:
         return self._subquery_expression.columns()
 
+    def predicates(self) -> PredicateTree | None:
+        return self._subquery_expression.query.predicates()
+
+    def bound_tables(self) -> set[TableReference]:
+        return set() if self._target_table is None else {self._target_table}
+
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return [self._subquery_expression]
 
     def itercolumns(self) -> Iterable[ColumnReference]:
         return self._subquery_expression.itercolumns()
-
-    def predicates(self) -> PredicateTree | None:
-        return self._subquery_expression.query.predicates()
 
     def accept_visitor(self, visitor: TableSourceVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_subquery_source(self, *args, **kwargs)
@@ -6637,14 +6674,17 @@ class ValuesTableSource(TableSource):
             return self._columns
         return [ColumnReference(f"column_{i}", self._table) for i in range(len(self._values[0]))]
 
+    def predicates(self) -> PredicateTree | None:
+        return None
+
+    def bound_tables(self) -> set[TableReference]:
+        return {self._table} if self._table else set()
+
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return util.flatten(row for row in self._values)
 
     def itercolumns(self) -> Iterable[ColumnReference]:
         return self._columns
-
-    def predicates(self) -> PredicateTree | None:
-        return None
 
     def accept_visitor(self, visitor: TableSourceVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_values_source(self, *args, **kwargs)
@@ -6735,14 +6775,17 @@ class FunctionTableSource(TableSource):
     def columns(self) -> set[ColumnReference]:
         return self._function.columns()
 
+    def predicates(self) -> PredicateTree | None:
+        return None
+
+    def bound_tables(self) -> set[TableReference]:
+        return {self._alias} if self._alias else set()
+
     def iterexpressions(self) -> Iterable[SqlExpression]:
         return [self._function]
 
     def itercolumns(self) -> Iterable[ColumnReference]:
         return self._function.itercolumns()
-
-    def predicates(self) -> PredicateTree | None:
-        return None
 
     def accept_visitor(self, visitor: TableSourceVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_function_source(self, *args, **kwargs)
@@ -6833,12 +6876,12 @@ class JoinTableSource(TableSource):
         join_type: JoinType = JoinType.InnerJoin,
     ) -> None:
         if join_condition is None and join_type not in AutoJoins:
-            raise ValueError("Join condition is required for this join type: " + str(join_type))
+            raise ValueError(f"Join condition is required for this join type: {join_type}")
 
         self._left = left
         self._right = right
         self._join_condition = join_condition
-        self._join_type = join_type if join_condition else JoinType.CrossJoin
+        self._join_type = join_type
         self._hash_val = hash((self._left, self._right, self._join_condition, self._join_type))
 
     __slots__ = (
@@ -6927,18 +6970,6 @@ class JoinTableSource(TableSource):
         condition_columns = self._join_condition.columns() if self._join_condition else set()
         return self._left.columns() | self._right.columns() | condition_columns
 
-    def iterexpressions(self) -> Iterable[SqlExpression]:
-        left_expressions = list(self._left.iterexpressions())
-        right_expressions = list(self._right.iterexpressions())
-        condition_expressions = list(self._join_condition.iterexpressions()) if self._join_condition else []
-        return left_expressions + right_expressions + condition_expressions
-
-    def itercolumns(self) -> Iterable[ColumnReference]:
-        left_columns = list(self._left.itercolumns())
-        right_columns = list(self._right.itercolumns())
-        condition_columns = list(self._join_condition.itercolumns()) if self._join_condition else []
-        return left_columns + right_columns + condition_columns
-
     def predicates(self) -> PredicateTree | None:
         if self._join_type != JoinType.InnerJoin:
             raise ValueError("Predicates can only be extracted from inner joins")
@@ -6955,6 +6986,21 @@ class JoinTableSource(TableSource):
             all_predicates.append(self._join_condition)
 
         return PredicateTree(CompoundPredicate.create_and(all_predicates)) if all_predicates else None
+
+    def bound_tables(self) -> set[TableReference]:
+        return self._left.bound_tables() | self._right.bound_tables()
+
+    def iterexpressions(self) -> Iterable[SqlExpression]:
+        left_expressions = list(self._left.iterexpressions())
+        right_expressions = list(self._right.iterexpressions())
+        condition_expressions = list(self._join_condition.iterexpressions()) if self._join_condition else []
+        return left_expressions + right_expressions + condition_expressions
+
+    def itercolumns(self) -> Iterable[ColumnReference]:
+        left_columns = list(self._left.itercolumns())
+        right_columns = list(self._right.itercolumns())
+        condition_columns = list(self._join_condition.itercolumns()) if self._join_condition else []
+        return left_columns + right_columns + condition_columns
 
     def accept_visitor(self, visitor: TableSourceVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_join_source(self, *args, **kwargs)
