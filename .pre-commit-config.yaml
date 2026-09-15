@@ -7,6 +7,7 @@
 # `rev:`, which could drift from the pins in pyproject.toml. Going through uv means the hook
 # and your editor use the exact same binary from uv.lock.
 default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-push]
 minimum_pre_commit_version: "4.0.0"
 
 repos:
@@ -25,6 +26,7 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
       - id: check-case-conflict
+      - id: check-shebang-scripts-are-executable
 
   - repo: local
     hooks:
