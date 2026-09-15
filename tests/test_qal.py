@@ -15,8 +15,7 @@ from typing import ClassVar
 
 import postbound as pb
 from postbound import BoundColumnReference, ColumnReference, TableReference
-
-from . import regression_suite
+from tests import regression_suite
 
 pg_connect_dir = "."
 
