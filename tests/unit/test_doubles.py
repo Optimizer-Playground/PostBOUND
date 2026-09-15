@@ -154,23 +154,11 @@ def test_static_schema_lookup_column_composes_production_logic(schema: StaticSch
     assert resolved == TITLE
 
 
-def test_base_lookup_column_cannot_resolve_an_unqualified_column(schema: StaticSchema) -> None:
-    """Documents a real limitation of the *default* `DatabaseSchema.lookup_column`.
-
-    The method advertises ``column: ColumnReference | str`` and is meant to find which table owns an
-    unqualified column. But it tests membership with ``column in self.columns(candidate)``, and `columns()`
-    yields `BoundColumnReference`s -- so a plain string never matches, and neither does an unbound
-    `ColumnReference`. Only an already-bound column matches, by which point the answer is known.
-
-    That is why `PostgresSchema` and `MysqlSchemaInterface` both override it. Nothing here depends on the
-    current behaviour being *correct*; this test exists so that fixing it is a deliberate, visible change
-    rather than a silent one.
-    """
-    assert schema.lookup_column("production_year", [TITLE, MOVIE_INFO]) is None
-    assert schema.lookup_column(ColumnReference("production_year"), [TITLE, MOVIE_INFO]) is None
-
-    with pytest.raises(ValueError, match="not found in any of the candidate tables"):
-        schema.lookup_column("production_year", [TITLE], expect_match=True)
+def test_base_lookup_column_resolves_an_unqualified_column(schema: StaticSchema) -> None:
+    """`lookup_column` fetches the first matching table from the leaf lookups."""
+    assert schema.lookup_column("production_year", [TITLE, MOVIE_INFO]) is TITLE
+    assert schema.lookup_column(ColumnReference("production_year"), [TITLE, MOVIE_INFO]) is TITLE
+    assert schema.lookup_column("production_year", [TITLE], expect_match=True) is TITLE
 
 
 def test_static_schema_table_info_composes_production_logic(schema: StaticSchema) -> None:

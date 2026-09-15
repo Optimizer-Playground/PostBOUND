@@ -784,8 +784,10 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
         **Hint for implementors:** the default implementation of this method (transitively) relies on the
         *information_schema.columns* view.
         """
+        column = column.name if isinstance(column, ColumnReference) else column
+
         for candidate in candidate_tables:
-            candidate_cols = self.columns(candidate)
+            candidate_cols = {col.name for col in self.columns(candidate)}
             if column in candidate_cols:
                 return candidate
 
