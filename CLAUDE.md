@@ -17,11 +17,11 @@ system Python does not have the dependencies. All commands are run **from the re
 ```sh
 uv sync                                     # install/refresh the dev environment (incl. all extras)
 uv run pre-commit install                   # enable the git hooks -- do this once after cloning
-uv run python -m unittest discover -s tests -t .        # full test suite
-uv run python -m unittest tests.test_qal -v             # single module
-uv run python -m unittest tests.test_qal.SomeTest.test_x # single test
-uv run python -m examples.example-01-basic-workflow      # examples are modules, not scripts
-uv run python -m tools.generate-workload --help          # same for tools/*.py
+uv run pytest                               # offline test suite (tier 0, the default)
+uv run pytest --tier 2                      # ... plus tests needing a live database
+uv run pytest tests/test_qal.py -v          # single module
+uv run pytest tests/test_qal.py::SomeTest::test_x  # single test
+uv run python -m tools.generate-workload --help          # tools are modules, not scripts
 ```
 
 Formatting, linting and type checking (all enforced by the pre-commit hooks):
@@ -41,11 +41,20 @@ cd docs && uv run --group doc sphinx-build -M html source build
 
 ### Tests and database connections
 
-Most integration tests are guarded by `tests/regression_suite.skip_if_no_db(<config_file>)`, which skips the test if the
-connection file is missing or the server is unreachable — so a bare run silently skips ~30 tests. Postgres connection
-files live in the repo root as `.psycopg_connection_<workload>` (e.g. `.psycopg_connection_job`,
-`.psycopg_connection_stats`); `tools/set-workload.sh` switches the active one. Two extra opt-in env vars gate the
-slowest checks: `COMPARE_RESULT_SETS` and `CHECK_JOB_SANITY`.
+Tests run under **pytest**. Existing `unittest.TestCase` classes are collected unchanged; **new tests are written as
+plain functions**, since fixtures and `parametrize` do not work inside a `TestCase`.
+
+Tests are grouped into cumulative **tiers** by the environment they need, selected with `--tier` (see
+`tests/conftest.py`): **0** = pure code plus test doubles, no server or network (the default, budget < 10 s);
+**1** = `embedded`, DuckDB in-memory and recorded transcripts; **2** = `live_db`, a real server; **3** = `slow`,
+full workload sweeps. Only tier 0 is enforced automatically, as a `pre-push` hook beside ruff/ty. Requesting a tier
+whose environment is missing **fails** rather than silently passing, and every run prints what it skipped and why.
+
+Tests needing a server declare it via `tests/regression_suite.skip_if_no_db(<config_file>)`, which only attaches a
+marker — the connectivity probe is deferred to collection time, so an offline run never opens a connection. Postgres
+connection files live in the repo root as `.psycopg_connection_<workload>` (e.g. `.psycopg_connection_job`,
+`.psycopg_connection_stats`), resolved relative to the repo root rather than the CWD; `tools/set-workload.sh` switches
+the active one.
 
 Workload queries are *not* in the repo — `postbound/workloads.py` downloads them on first use into `$HOME/.postbound/`.
 

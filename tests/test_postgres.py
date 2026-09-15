@@ -1,5 +1,6 @@
-import os
 import unittest
+
+import pytest
 
 import postbound as pb
 from postbound.postgres import PostgresConfiguration, PostgresSetting
@@ -24,6 +25,7 @@ PGHintPlanRestrictions = PostgresConfiguration(
 
 
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
+@pytest.mark.live_db
 class QueryExecutionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
@@ -63,6 +65,7 @@ class QueryExecutionTests(unittest.TestCase):
         self.assertEqual(result, 79851)
 
 
+@pytest.mark.live_db
 class StatsSchemaTests(unittest.TestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
@@ -75,6 +78,7 @@ class StatsSchemaTests(unittest.TestCase):
 
 
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_job")
+@pytest.mark.live_db
 class JobHintingTests(regression_suite.PlanTestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
@@ -83,13 +87,10 @@ class JobHintingTests(regression_suite.PlanTestCase):
         )
         self.job = pb.workloads.job()
 
+    @pytest.mark.slow
     def test_pglab_backend(self) -> None:
         if self.pg_instance.hinting().backend != "pg_lab":
             self.skipTest("pg_lab is not available")
-
-        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
-        if skip:
-            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
 
         for label, query in self.job.entries():
             with self.subTest("Query", label=label):
@@ -99,13 +100,10 @@ class JobHintingTests(regression_suite.PlanTestCase):
                 explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
                 self.assertEqual(native_plan, explicit_plan)
 
+    @pytest.mark.slow
     def test_pg_hint_plan_backend(self) -> None:
         if self.pg_instance.hinting().backend != "pg_hint_plan":
             self.skipTest("pg_hint_plan is not available")
-
-        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
-        if skip:
-            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
 
         for label, query in self.job.entries():
             with self.subTest("Query", label=label):
@@ -118,6 +116,7 @@ class JobHintingTests(regression_suite.PlanTestCase):
 
 
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
+@pytest.mark.live_db
 class StatsHintingTests(regression_suite.PlanTestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
@@ -126,13 +125,10 @@ class StatsHintingTests(regression_suite.PlanTestCase):
         )
         self.stats = pb.workloads.stats()
 
+    @pytest.mark.slow
     def test_pglab_backend(self) -> None:
         if self.pg_instance.hinting().backend != "pg_lab":
             self.skipTest("pg_lab is not available")
-
-        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
-        if skip:
-            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
 
         for label, query in self.stats.entries():
             with self.subTest("Query", label=label):
@@ -142,13 +138,10 @@ class StatsHintingTests(regression_suite.PlanTestCase):
                 explicit_plan = self.pg_instance.optimizer().query_plan(hinted_query)
                 self.assertEqual(native_plan, explicit_plan)
 
+    @pytest.mark.slow
     def test_pg_hint_plan_backend(self) -> None:
         if self.pg_instance.hinting().backend != "pg_hint_plan":
             self.skipTest("pg_hint_plan is not available")
-
-        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
-        if skip:
-            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
 
         for label, query in self.stats.entries():
             with self.subTest("Query", label=label):
@@ -192,6 +185,7 @@ class StatsHintingTests(regression_suite.PlanTestCase):
 
 
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
+@pytest.mark.live_db
 class RegressionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(

@@ -3,12 +3,16 @@ from __future__ import annotations
 import abc
 import os
 import unittest
+from collections.abc import Callable
+from typing import TypeVar
 
-import psycopg
+import pytest
 
-from postbound import QueryPlan, postgres
+from postbound import QueryPlan
 
 ResultSet = list[tuple[object]]
+
+_T = TypeVar("_T")
 
 
 def _rebuild_result_set(result_set: ResultSet) -> ResultSet:
@@ -149,20 +153,30 @@ class PlanTestCase(unittest.TestCase, abc.ABC):
             self.assertQueryExecutionPlansEqual(left_child, right_child, message=message, _cur_level=_cur_level + 1)
 
 
-def skip_if_no_db(config_file):
-    """Decorator to conditionally skip a test if a database connection cannot be established.
+def skip_if_no_db(config_file: str | os.PathLike) -> Callable[[_T], _T]:
+    """Decorator that skips a test class or method when its database cannot be reached.
+
+    The connectivity probe is **deferred**: this decorator only attaches a marker recording which connection
+    file the test needs, and ``tests/conftest.py`` resolves availability at collection time (memoized per
+    file). That matters for two reasons:
+
+    - An offline run never opens a connection. The previous implementation connected eagerly at decoration
+      time, i.e. during module import, so merely *collecting* the suite opened one throwaway connection per
+      decorated class even when every test in it was about to be deselected.
+    - A missing or malformed connection file no longer aborts collection of the surrounding module. The
+      earlier version caught only `psycopg.OperationalError`, so an authentication failure or an unparseable
+      config file propagated out of the import.
+
+    Relative paths are resolved against the repository root rather than the working directory.
 
     Parameters
     ----------
-    config_file : _type_
-        The config file that describes the connection to the database. Must be compatible with the postgres.connect()
-    """
-    if not os.path.exists(config_file):
-        return unittest.skip(f"Config file '{config_file}' does not exist.")
+    config_file : str | os.PathLike
+        The config file describing the connection, in any format accepted by `postgres.connect`.
 
-    try:
-        pg_instance = postgres.connect(config_file=config_file, private=True)
-        pg_instance.close()
-        return lambda f: f
-    except psycopg.OperationalError:
-        return unittest.skip(f"Cannot connect to database with config file '{config_file}'")
+    Returns
+    -------
+    Callable
+        A decorator attaching the deferred-skip marker.
+    """
+    return pytest.mark.requires_db(str(config_file))

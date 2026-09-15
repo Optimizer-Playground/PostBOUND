@@ -6,12 +6,13 @@ queried for joins, etc.
 
 from __future__ import annotations
 
-import os
 import pathlib
 import textwrap
 import unittest
 from collections.abc import Iterable, Sequence
 from typing import ClassVar
+
+import pytest
 
 import postbound as pb
 from postbound import BoundColumnReference, ColumnReference, TableReference
@@ -563,15 +564,13 @@ class ParserTests(regression_suite.QueryTestCase):
 
 
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_job")
+@pytest.mark.live_db
+@pytest.mark.slow
 class JobWorkloadTests(regression_suite.DatabaseTestCase):
     def setUp(self):
         self.db = pb.postgres.connect(config_file=f"{pg_connect_dir}/.psycopg_connection_job")
 
     def test_resultset_equivalence(self) -> None:
-        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
-        if skip:
-            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
-
         _ = pb.workloads.job()  #  dummy load to ensure that the workload is available
         workload_base_dir = pathlib.Path.home() / ".postbound" / "workloads" / "job"
 
@@ -579,21 +578,19 @@ class JobWorkloadTests(regression_suite.DatabaseTestCase):
             with self.subTest(query=query_file.stem):
                 raw_query = query_file.read_text()
                 parsed_query = pb.parse_query(raw_query)
-                original_result = self.db.execute_query(parsed_query)
+                original_result = self.db.execute_query(raw_query)
                 parsed_result = self.db.execute_query(parsed_query)
                 self.assertResultSetsEqual(original_result, parsed_result, ordered=parsed_query.is_ordered())
 
 
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
+@pytest.mark.live_db
+@pytest.mark.slow
 class StatsWorkloadTests(regression_suite.DatabaseTestCase):
     def setUp(self):
         self.db = pb.postgres.connect(config_file=f"{pg_connect_dir}/.psycopg_connection_stats")
 
     def test_resultset_equivalence(self) -> None:
-        skip = os.environ.get("SKIP_ONLINE", "true") == "true"
-        if skip:
-            self.skipTest("Skipping online workload tests due to SKIP_ONLINE=true")
-
         _ = pb.workloads.stats()  #  dummy load to ensure that the workload is available
         workload_base_dir = pathlib.Path.home() / ".postbound" / "workloads" / "stats"
 
@@ -601,6 +598,6 @@ class StatsWorkloadTests(regression_suite.DatabaseTestCase):
             with self.subTest(query=query_file.stem):
                 raw_query = query_file.read_text()
                 parsed_query = pb.parse_query(raw_query)
-                original_result = self.db.execute_query(parsed_query)
+                original_result = self.db.execute_query(raw_query)
                 parsed_result = self.db.execute_query(parsed_query)
                 self.assertResultSetsEqual(original_result, parsed_result, ordered=parsed_query.is_ordered())

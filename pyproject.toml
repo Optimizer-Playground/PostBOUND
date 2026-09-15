@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PostBOUND"
-version = "0.22.0.dev2"
+version = "0.22.0.dev3"
 authors = [{ name = "Rico Bergmann", email = "rico.bergmann1@tu-dresden.de" }]
 description = "PostBOUND is a research framework to prototype and benchmark database query optimizers"
 readme = "README.md"
@@ -59,6 +59,12 @@ dev = [
     "jupyterlab>=4.6.1",
     "pre-commit>=4.4",
     "pyarrow>=23.0.0",
+    # pytest is the test runner. Existing unittest.TestCase classes are collected unchanged;
+    # new tests are written as plain functions so they can use fixtures and parametrization.
+    # xdist parallelises the offline tier, timeout stops a hung test from blocking a push.
+    "pytest>=8.4",
+    "pytest-timeout>=2.4",
+    "pytest-xdist>=3.8",
     "ruff==0.16.6",
     "tables==3.11.1",
     "ty==0.0.78",
@@ -75,6 +81,22 @@ required-version = ">=0.9"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["postbound*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Tests are tiered by the environment they need. A bare run executes tier 0 only: pure code plus
+# test doubles, no database, no network. That is what the pre-push hook enforces, so it has to stay
+# fast and dependency-free. Higher tiers are opt-in and cumulative via `--tier`, e.g.
+# `uv run pytest --tier 2`. See tests/conftest.py for the tier definitions.
+addopts = "--strict-markers"
+markers = [
+    "embedded: tier 1 -- needs an embedded engine (DuckDB in-memory) or a recorded transcript, but no server",
+    "live_db: tier 2 -- needs a live database server plus the synthetic test schema",
+    "slow: tier 3 -- full workload sweeps, real timeouts, prewarming; minutes to hours",
+]
+# No single tier-0 test should ever come close to this. It exists so that a deadlock in the
+# multiprocessing-based timeout code fails the run instead of hanging a developer's push.
+timeout = 300
 
 [tool.ruff]
 line-length = 120

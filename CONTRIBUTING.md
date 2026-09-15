@@ -18,9 +18,9 @@ because without them the type checker cannot resolve the imports in `postbound/v
 Prefix everything with `uv run` — the system Python does not have the dependencies:
 
 ```sh
-uv run python -m unittest discover -s tests -t .          # the full test suite
-uv run python -m unittest tests.test_qal -v               # a single module
-uv run python -m examples.example-01-basic-workflow       # examples are modules, not scripts
+uv run pytest                                            # the offline test suite (tier 0)
+uv run pytest --tier 2                                   # ... plus the tests needing a live database
+uv run pytest tests/test_qal.py -v                        # a single module
 ```
 
 ## Code style
@@ -62,21 +62,42 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 ## Tests
 
-Tests use `unittest`, not pytest. Many of them talk to a live database and are guarded by
-`tests/regression_suite.skip_if_no_db(<config_file>)`, which skips the test when the connection file is
-missing or the server is unreachable — so a bare run silently skips around 20 tests.
+Tests run under `pytest`. Existing `unittest.TestCase` classes are collected unchanged, but **new tests
+should be written as plain functions**, because pytest fixtures and `@pytest.mark.parametrize` do not work
+inside a `TestCase` subclass.
+
+Tests are grouped into **tiers** by the environment they need. Tiers are cumulative, so `--tier 2` runs
+tiers 0, 1 and 2:
+
+```sh
+uv run pytest                 # tier 0 (default) — pure code and test doubles; no server, no network
+uv run pytest --tier 1        # + embedded engines (DuckDB in-memory) and recorded transcripts
+uv run pytest --tier 2        # + a live database server
+uv run pytest --tier 3        # + slow workload sweeps, real timeouts, prewarming
+uv run pytest tests/test_qal.py -v          # a single module
+uv run pytest -k "predicate and not join"   # by name
+```
+
+**Tier 0 is the only tier enforced automatically**, as a `pre-push` hook alongside `ruff` and `ty`. It must
+stay fast (budget: under 10 seconds) and must never touch a database or the network. The higher tiers are
+run deliberately, and should be run before opening a pull request that touches a database backend.
+
+Requesting a tier whose environment is unavailable is an **error**, not a silent pass: if every selected
+test is skipped, the run fails and says so. Every run also prints a summary of what it skipped and why.
 
 Postgres connection files live in the repository root as `.psycopg_connection_<workload>` (for example
-`.psycopg_connection_job`, `.psycopg_connection_stats`); `tools/set-workload.sh` switches the active
-one. Two extra environment variables gate the slowest checks: `COMPARE_RESULT_SETS` and
-`CHECK_JOB_SANITY`.
+`.psycopg_connection_job`, `.psycopg_connection_stats`); `tools/set-workload.sh` switches the active one.
+Tests needing one declare it with `tests/regression_suite.skip_if_no_db(<config_file>)`, which defers the
+connectivity probe to collection time — so an offline run never opens a connection. Paths are resolved
+against the repository root, not the working directory.
 
 Workload queries are not stored in the repository — `postbound/workloads.py` downloads them on first
 use into `$HOME/.postbound/`. Database instances can be provisioned with the shell scripts in
 `db-support/<system>/`, or via the Dockerfile (see the README's Docker options table).
 
-**Please run the suite with a database configured before opening a pull request**, since a bare run
-does not exercise any of the backend code.
+Regression tests for specific fixed bugs belong in a `RegressionTests` class at the **end** of the relevant
+test module, with a docstring naming the commit or issue being pinned. Write them at the lowest tier that
+reproduces the bug, so they stay cheap enough to run constantly.
 
 ## Documentation
 

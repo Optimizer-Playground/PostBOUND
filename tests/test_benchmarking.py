@@ -4,6 +4,7 @@ import unittest
 from collections.abc import Iterable
 
 import pandas as pd
+import pytest
 
 import postbound as pb
 from tests import regression_suite
@@ -129,6 +130,7 @@ class OnlineLearnedOptimizer(pb.IncrementalOptimizationStep):
 
 
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
+@pytest.mark.live_db
 class StatsBenchmarkTests(unittest.TestCase):
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(config_file=f"{pg_connect_dir}/.psycopg_connection_stats")

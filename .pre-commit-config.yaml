@@ -55,9 +55,16 @@ repos:
         always_run: true
         require_serial: true
 
-      - id: unittest
-        name: unittest
-        entry: uv run -m unittest discover -s tests
+      - id: tests
+        name: tests (tier 0)
+        # Only the offline tier runs here: pure code plus test doubles, no database and no network.
+        # It has the same contract as the ruff and ty hooks -- fast, deterministic and dependency-free --
+        # because a hook slow enough to tempt `--no-verify` is worse than no hook at all. The higher tiers
+        # need a provisioned server and are run deliberately:
+        #     uv run pytest --tier 1    # + embedded engines (DuckDB in-memory, recorded transcripts)
+        #     uv run pytest --tier 2    # + a live database server
+        #     uv run pytest --tier 3    # + slow workload sweeps
+        entry: uv run pytest --tier 0
         language: system
         pass_filenames: false
         always_run: true

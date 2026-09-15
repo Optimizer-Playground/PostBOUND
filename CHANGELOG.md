@@ -40,8 +40,30 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   single modules. The public import path (`pb.postgres`, `pb.duckdb`) is unchanged.
 - The `DatabasePool` can now hold connections to several databases of the same system at the same time, which removes
   the need for the `private=True`/`refresh=True` workarounds when connecting to more than one database.
+- The test suite now runs under `pytest` instead of `unittest`. Existing `unittest.TestCase` classes are collected
+  unchanged, but new tests should be written as plain functions, since fixtures and `parametrize` do not work inside a
+  `TestCase`. Tests are grouped into cumulative **tiers** by the environment they need, selected with `--tier`:
+  0 = pure code plus test doubles (no server, no network; the default), 1 = embedded engines, 2 = a live database,
+  3 = slow workload sweeps. Only tier 0 is enforced automatically, as a `pre-push` hook beside ruff and ty.
+- Added hand-written database test doubles under `tests/doubles/` (`ScriptedCursor`, `FakeDatabase`, `StaticSchema`,
+  `FakeStatistics`, `FakeHintService`, `FakeOptimizer`). Because `DatabaseSchema` has no abstract methods, scripting a
+  cursor exercises its `information_schema` implementations for real and lets a test assert on the SQL that was
+  generated. Doubles subclass the real ABCs rather than using `unittest.mock`, so an interface change fails loudly
+  instead of silently passing.
 
 ## 🏥 Fixes
+
+- Fixed the JOB and Stats result-set equivalence tests executing the parsed query on both sides of the comparison, so
+  they compared a query against itself and could never fail on a parser regression.
+- Deferred the database-availability probe in `tests.regression_suite.skip_if_no_db` to collection time. It previously
+  connected at decoration time, i.e. during module import, so merely collecting the suite opened one throwaway
+  connection per decorated class. It also caught only `psycopg.OperationalError`, which let an authentication failure
+  or a malformed connection file abort collection of the whole module.
+- `DatabasePool` state no longer leaks between tests. A database registered by one test module stayed visible to every
+  later one, which made `parse_query` bind columns against an arbitrary leaked database.
+- Removed the undocumented `SKIP_ONLINE` environment variable, which defaulted to skipping and therefore kept six
+  whole-workload tests permanently dead even against a fully provisioned server. Tier selection replaces it, and
+  requesting a tier whose environment is unavailable now fails instead of reporting a green, all-skipped run.
 
 - Fixed `ResultCache` and `DuckDBDatabase` being impossible to instantiate: both still declared the pre-rename
   `database_system_version()` and were missing `__eq__`/`__hash__`, so they remained abstract.
