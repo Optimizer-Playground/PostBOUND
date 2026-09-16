@@ -697,28 +697,12 @@ def test_as_qep_attaches_subplan_by_parent_relationship() -> None:
     assert subplan.root.children[0].base_table == TableReference("posts", "p")
 
 
-def test_as_qep_subplan_target_name_is_not_actually_populated() -> None:
-    """Documents a real bug in `_generate_qep`, not the intended behaviour.
-
-    `QueryPlan.__init__` names its subplan-naming parameter `subplan_target_name`, but
-    `_generate_qep` passes `subplan_name=` instead. That name matches no declared parameter, so it
-    falls into `**kwargs` and lands as an opaque, undocumented plan-param entry on the *child's own*
-    QueryPlan (`get("subplan_name")`) rather than populating `Subplan.target_name` on the wrapper the
-    parent builds. `Subplan.target_name` therefore stays `""` no matter what "Subplan Name" or "CTE
-    Name" Postgres reported, which silently breaks `Subplan.tables()` (it only adds the virtual target
-    table when `target_name` is truthy).
-
-    This test exists so that fixing the parameter name is a deliberate, visible change rather than a
-    silent one -- see the `lookup_column` fix in commit 823efb5 for the established pattern.
-    """
+def test_as_qep_subplan_target_name_is_populated() -> None:
     plan = PostgresExplain(SUBPLAN_SCALAR[0]["Plan"]).as_qep()
     subplan = plan.subplan
     assert subplan is not None
 
-    # What should happen (and does not):
-    assert subplan.target_name == ""  # should be "SubPlan 1"
-    # What actually happens: the name leaks into the child's own opaque plan params instead.
-    assert subplan.root.get("subplan_name") == "SubPlan 1"
+    assert subplan.target_name == "SubPlan 1"
 
 
 def test_as_qep_analyze_plan_carries_execution_measures() -> None:

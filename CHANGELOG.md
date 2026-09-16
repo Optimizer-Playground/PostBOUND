@@ -94,12 +94,6 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 Found while adding test coverage; not yet fixed. Each is pinned by a dedicated test in `tests/unit/` explaining the
 root cause, so that fixing it is a deliberate, visible change.
 
-- `validation.EquiJoinPreCheck`'s `allow_conjunctions` flag can never change the result of `check_supported_query`.
-  `.joins()` always un-nests `AND`-connected predicates before the check sees them, so the only compound predicate it
-  can ever receive is `OR`-connected, which is rejected before the flag is consulted.
-- `postgres._explain._generate_qep` passes `subplan_name=` to `QueryPlan.__init__`, which has no such parameter (it
-  is `subplan_target_name`). The name silently lands in an unrelated node's opaque plan-params dict instead of
-  populating `Subplan.target_name`, which stays `""` regardless of the "Subplan Name"/"CTE Name" Postgres reported.
 - `PhysicalOperatorAssignment.__contains__` is broken for a singleton table set: for `frozenset({t})`, it checks
   membership of the frozenset itself against `scan_operators` (keyed by bare `TableReference`) instead of unwrapping
   it, so it is always `False` even when `t` has a scan operator assigned (and raises `TypeError` for a plain list).

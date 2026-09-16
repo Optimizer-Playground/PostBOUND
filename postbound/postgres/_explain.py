@@ -369,6 +369,7 @@ class PostgresExplain:
     def _generate_qep(self, *, card_adjustment: float = 1.0) -> QueryPlan:
         child_nodes = []
         inner_child, outer_child, subplan_child = None, None, None
+        subplan_name = ""
 
         # planned workers is 0 for sequential execution, otherwise it contains the number of additional workers
         # if we already have a card adjustment, we are alrady in a parallel subplan so we re-use the existing adjustment
@@ -386,6 +387,7 @@ class PostgresExplain:
                     outer_child = qep_child
                 case "SubPlan" | "InitPlan" | "Subquery":
                     subplan_child = qep_child
+                    subplan_name = child.subplan_name or child.cte_name or ""
                 case "Member":
                     child_nodes.append(qep_child)
                 case _:
@@ -399,7 +401,6 @@ class PostgresExplain:
             child_nodes.insert(0, inner_child)
 
         table = self.parse_table()
-        subplan_name = self.subplan_name or self.cte_name
 
         true_card = self.true_cardinality * self.loops
         estimated_card = self.cardinality_estimate * card_adjustment
@@ -437,7 +438,7 @@ class PostgresExplain:
             cache_hits=shared_hits,
             cache_misses=shared_misses,
             subplan_root=subplan_child,
-            subplan_name=subplan_name,
+            subplan_target_name=subplan_name,
         )
 
         return plan
