@@ -432,11 +432,13 @@ class PhysicalOperatorAssignment:
             return self.scan_operators.get(intermediate, default)
 
         intermediate_set = frozenset(intermediate)
-        return (
-            self.scan_operators.get(intermediate)
-            if len(intermediate_set) == 1
-            else self.join_operators.get(intermediate_set, default)
-        )
+        if len(intermediate_set) == 1:
+            table = next(iter(intermediate_set))
+            return self.scan_operators.get(table, default)
+        elif len(intermediate_set) > 1:
+            return self.join_operators.get(intermediate_set, default)
+
+        return default
 
     def inspect(self) -> str:
         padding = "  "
@@ -518,7 +520,13 @@ class PhysicalOperatorAssignment:
             return item in self.scan_operators
 
         items = frozenset(item)
-        return item in self.scan_operators if len(items) == 1 else items in self.join_operators
+        if len(items) == 1:
+            table = next(iter(items))
+            return table in self.scan_operators
+        elif len(items) > 1:
+            return items in self.join_operators
+
+        return False
 
     def __getitem__(
         self,

@@ -91,13 +91,10 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ## 🪲 Known bugs
 
-Found while adding test coverage; not yet fixed. Each is pinned by a dedicated test in `tests/unit/` explaining the
-root cause, so that fixing it is a deliberate, visible change.
-
-- `PhysicalOperatorAssignment.__contains__` is broken for a singleton table set: for `frozenset({t})`, it checks
-  membership of the frozenset itself against `scan_operators` (keyed by bare `TableReference`) instead of unwrapping
-  it, so it is always `False` even when `t` has a scan operator assigned (and raises `TypeError` for a plain list).
-  This makes `postgres._pg._generate_pglab_hints` always treat a single-table worker-count hint as unintegratable.
+- The automatic optimization of the Postgres server configuration as part of the Docker installation does not work
+  on MacOS. Currently, this should be considered as wontfix.
+- The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
+  currently exploring alternative, more reliable solutions.
 
 ---
 

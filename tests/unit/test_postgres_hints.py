@@ -241,36 +241,14 @@ def test_pglab_hints_warns_when_worker_params_have_no_matching_operator_assignme
     assert "workers=4" not in hint.query_hints
 
 
-def test_pglab_hints_worker_params_for_a_single_table_are_never_integrated() -> None:
-    """Documents a real bug in `PhysicalOperatorAssignment.__contains__`, not the intended behaviour.
-
-    For a singleton candidate, `__contains__` checks ``item in self.scan_operators`` where `item` is still
-    the original (frozen)set -- e.g. ``frozenset({R}) in {R: ...}`` -- rather than unwrapping it to the single
-    `TableReference` the dict is actually keyed by. So `frozenset({R}) in ops` is always *False* even when `R`
-    has a scan operator assigned (and raises `TypeError` outright for a plain, unhashable list).
-
-    `_generate_pglab_hints` relies on this membership check to decide whether a single-table worker-count hint
-    (`plan_params.set_workers([R], n)`) can be integrated into an existing scan assignment. Because the check
-    is always wrong for the singleton case, every such hint is treated as "dangling" and dropped with a
-    warning -- even though the assignment obviously has an operator for that table.
-
-    Multi-table joins are unaffected: for `len(items) > 1` the same method correctly checks
-    ``items in self.join_operators``.
-
-    This test exists so that fixing `__contains__` is a deliberate, visible change rather than a silent one --
-    see the `lookup_column` fix in commit 823efb5 for the established pattern.
-    """
+def test_pglab_hints_worker_params_for_a_single_table_are_integrated() -> None:
+    """Worker counts can be assigned to a known scan operator"""
     ops = PhysicalOperatorAssignment().set_scan_operator(ScanOperator.SequentialScan, R)
     params = PlanParameterization().set_workers([R], 4)
 
-    # What should happen (and does not): the worker count gets attached to the existing scan assignment.
-    with pytest.warns(HintWarning, match="known operators"):
-        hint = _generate_pglab_hints(None, ops, params)
-    assert "workers=4" not in hint.query_hints
+    hint = _generate_pglab_hints(None, ops, params)
 
-    # What actually happens: __contains__ itself already disagrees with `in` on a bare TableReference.
-    assert R in ops
-    assert frozenset([R]) not in ops  # should be True, since R has a scan operator assigned
+    assert "workers=4" in hint.query_hints
 
 
 def test_pglab_hints_no_preparatory_statements() -> None:

@@ -2191,6 +2191,8 @@ class PostgresHinting(HintService):
                 raw_hints = _generate_pglab_plan(plan)
                 hints = _expand_pglab_hints(raw_hints)
             case "pg_lab":
+                if physical_operators is not None and plan_parameters is not None:
+                    physical_operators = physical_operators.integrate_workers_from(plan_parameters)
                 hints = _generate_pglab_hints(
                     join_order,
                     physical_operators,
