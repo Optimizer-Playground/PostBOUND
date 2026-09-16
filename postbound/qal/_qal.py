@@ -3720,7 +3720,7 @@ def generate_predicates_for_equivalence_classes(
     return equivalence_predicates
 
 
-def _unwrap_expression(expression: SqlExpression) -> ColumnReference | object:
+def _unwrap_expression(expression: SqlExpression) -> tuple[bool, ColumnReference | object]:
     """Provides the column of a `ColumnExpression` or the value of a `StaticValueExpression`.
 
     This is a utility method to gain quick access to the values in simple predicates.
@@ -3732,18 +3732,19 @@ def _unwrap_expression(expression: SqlExpression) -> ColumnReference | object:
 
     Returns
     -------
-    ColumnReference | object
-        The column or value contained in the expression.
+    tuple[bool, ColumnReference | object]
+        A status, result tuple. Status indicates whether the unwrapping was successful. If so, the second element
+        contains the value. If unwrapping failed, the second element is undefined.
     """
     match expression:
         case StaticValueExpression(val):
-            return val
+            return True, val
         case ColumnExpression(col):
-            return col
+            return True, col
         case CastExpression(castee):
             return _unwrap_expression(castee)
         case _:
-            raise ValueError("Cannot unwrap expression " + str(expression))
+            return False, None
 
 
 UnwrappedFilter = tuple[ColumnReference, BinaryOperator | UnaryOperator, object]
@@ -3776,25 +3777,52 @@ def _attempt_filter_unwrap(
 
     match predicate:
         case BinaryPredicate(op, lhs, rhs):
-            left, right = _unwrap_expression(lhs), _unwrap_expression(rhs)
+            status, left = _unwrap_expression(lhs)
+            if not status:
+                return None
+            status, right = _unwrap_expression(rhs)
+            if not status:
+                return None
+
             left, right = (left, right) if isinstance(left, ColumnReference) else (right, left)
             assert isinstance(left, ColumnReference)
             return left, op, right
 
         case BetweenPredicate(lhs, lower, upper):
-            lhs = _unwrap_expression(lhs)
-            lower, upper = _unwrap_expression(lower), _unwrap_expression(upper)
+            status, lhs = _unwrap_expression(lhs)
+            if not status:
+                return None
+
+            status, lower = _unwrap_expression(lower)
+            if not status:
+                return None
+            status, upper = _unwrap_expression(upper)
+            if not status:
+                return None
+
             assert isinstance(lhs, ColumnReference)
             return lhs, BinaryOperator.Between, (lower, upper)
 
         case InPredicate(lhs, values):
-            lhs = _unwrap_expression(lhs)
-            values = [_unwrap_expression(val) for val in values]
+            status, lhs = _unwrap_expression(lhs)
+            if not status:
+                return None
+
+            unwrapped_vals = []
+            for v in values:
+                status, unwrapped = _unwrap_expression(v)
+                if not status:
+                    return None
+                unwrapped_vals.append(unwrapped)
+
             assert isinstance(lhs, ColumnReference)
-            return lhs, BinaryOperator.In, tuple(values)
+            return lhs, BinaryOperator.In, tuple(unwrapped_vals)
 
         case UnaryPredicate(col, op) if predicate.is_null_test() or predicate.is_bool_test():
-            col = _unwrap_expression(col)
+            status, col = _unwrap_expression(col)
+            if not status:
+                return None
+
             assert isinstance(col, ColumnReference) and op is not None
             return col, op, None
 
@@ -4087,10 +4115,13 @@ def _attempt_join_unwrap(
     if predicate.operator != BinaryOperator.Equal:
         return None
 
-    lhs, rhs = (
-        _unwrap_expression(predicate.lhs),
-        _unwrap_expression(predicate.rhs),
-    )
+    status, lhs = _unwrap_expression(predicate.lhs)
+    if not status:
+        return None
+    status, rhs = _unwrap_expression(predicate.rhs)
+    if not status:
+        return None
+
     if not isinstance(lhs, ColumnReference) or not isinstance(rhs, ColumnReference):
         return None
     return lhs, rhs

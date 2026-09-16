@@ -94,9 +94,6 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 Found while adding test coverage; not yet fixed. Each is pinned by a dedicated test in `tests/unit/` explaining the
 root cause, so that fixing it is a deliberate, visible change.
 
-- `SimpleFilter.can_wrap()` is documented to return a `bool`, but crashes with an uncaught `ValueError` for a filter
-  predicate containing a function call (e.g. `UPPER(r.c) = 'X'`) instead of returning `False`. This also crashes
-  `PredicateTree.all_simple()` and, through it, `validation.SPJCheck`.
 - `validation.CrossProductPreCheck` crashes with `networkx.NetworkXPointlessConcept` for any query with no `WHERE`
   clause at all (including the single-table case), because `SqlQuery.join_graph()` returns an empty graph rather than
   one node per table when there are no predicates, and `nx.is_connected` treats that as undefined.

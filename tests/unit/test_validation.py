@@ -607,23 +607,10 @@ def test_spj_check_fails_a_non_equi_join() -> None:
     assert result.failure_reason == "Query has complex predicates"
 
 
-def test_spj_check_crashes_on_a_predicate_with_a_function_call() -> None:
-    """Documents a real bug, not the intended behaviour -- and not local to `validation.py` or `SPJCheck`.
-
-    `SimpleFilter.can_wrap` is documented to return a `bool` reporting whether a predicate can be represented
-    simply. Its implementation is ``_attempt_filter_unwrap(predicate) is not None``, but
-    `_attempt_filter_unwrap` delegates to `_unwrap_expression`, which raises a bare `ValueError` (rather than
-    returning `None`) for any expression it does not recognise -- a function call among them. Nothing between
-    `_unwrap_expression` and `can_wrap` catches it, so `PredicateTree.all_simple()` -- which `SPJCheck`'s own
-    docstring says exists to reject exactly this case ("4. all predicates are simple (no function calls,
-    etc.)") -- crashes instead of returning `False` for any query with a function call in a filter predicate.
-
-    This test exists so that fixing it (most likely: `_attempt_filter_unwrap` catching the `ValueError` from
-    `_unwrap_expression`, or `_unwrap_expression` itself returning `None` on the unrecognised branch instead
-    of raising) is a deliberate, visible change -- see the `lookup_column` fix in commit 823efb5 for the
-    established pattern.
-    """
+def test_spj_check_fails_on_a_predicate_with_a_function_call() -> None:
+    """`all_simple()` rejects a predicate with a function call as "complex"""
     query = parse("SELECT * FROM r, s WHERE r.a = s.b AND UPPER(r.c) = 'X'")
+    result = validation.SPJCheck().check_supported_query(query)
 
-    with pytest.raises(ValueError, match="Cannot unwrap expression"):
-        validation.SPJCheck().check_supported_query(query)
+    assert result.passed is False
+    assert result.failure_reason == "Query has complex predicates"
