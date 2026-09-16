@@ -7,7 +7,6 @@
 # `rev:`, which could drift from the pins in pyproject.toml. Going through uv means the hook
 # and your editor use the exact same binary from uv.lock.
 default_install_hook_types: [pre-commit, pre-push]
-default_stages: [pre-push]
 minimum_pre_commit_version: "4.0.0"
 
 repos:
@@ -36,6 +35,7 @@ repos:
         language: system
         types_or: [python, pyi, jupyter]
         require_serial: true
+        stages: [pre-commit, pre-push]
 
       - id: ruff-format
         name: ruff format
@@ -43,6 +43,7 @@ repos:
         language: system
         types_or: [python, pyi, jupyter]
         require_serial: true
+        stages: [pre-commit, pre-push]
 
       - id: ty
         name: ty check
@@ -54,6 +55,7 @@ repos:
         pass_filenames: false
         always_run: true
         require_serial: true
+        stages: [pre-commit, pre-push]
 
       - id: tests
         name: tests (tier 0)
@@ -69,3 +71,4 @@ repos:
         pass_filenames: false
         always_run: true
         require_serial: true
+        stages: [pre-push]
