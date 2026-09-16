@@ -7134,10 +7134,10 @@ class From(BaseClause):
         return From(items)
 
     def __init__(self, items: TableSource | Iterable[TableSource]) -> None:
-        items = util.enlist(items)
+        items = (items,) if isinstance(items, TableSource) else tuple(items)
         if not items:
             raise ValueError("At least one source is required")
-        self._items = tuple(items)
+        self._items = items
         super().__init__(hash(self._items))
 
     __slots__ = ("_items",)
@@ -7160,12 +7160,6 @@ class From(BaseClause):
     def columns(self) -> set[ColumnReference]:
         return util.set_union(src.columns() for src in self._items)
 
-    def iterexpressions(self) -> Iterable[SqlExpression]:
-        return util.flatten(src.iterexpressions() for src in self._items)
-
-    def itercolumns(self) -> Iterable[ColumnReference]:
-        return util.flatten(src.itercolumns() for src in self._items)
-
     def predicates(self) -> PredicateTree | None:
         """Provides all predicates that are contained in the *FROM* clause."""
         source_predicates = [src.predicates() for src in self._items]
@@ -7174,6 +7168,24 @@ class From(BaseClause):
         actual_predicates = [src_pred.root for src_pred in source_predicates if src_pred]
         merged_predicate = CompoundPredicate.create_and(actual_predicates)
         return PredicateTree(merged_predicate)
+
+    def bound_tables(self) -> set[TableReference]:
+        """Provides the tables that are bound in the *FROM* clause.
+
+        Bound tables in this context means tables whose columns can be accessed in the rest of the query. For example,
+        for a direct table source, this will be the table itself. For function table sources, this will be the function's
+        output alias, etc.
+
+        In contrast to `tables`, this method ignores tables that are referenced within subqueries and only provides the
+        output alias of the subquery.
+        """
+        return util.set_union(src.bound_tables() for src in self._items)
+
+    def iterexpressions(self) -> Iterable[SqlExpression]:
+        return util.flatten(src.iterexpressions() for src in self._items)
+
+    def itercolumns(self) -> Iterable[ColumnReference]:
+        return util.flatten(src.itercolumns() for src in self._items)
 
     def accept_visitor(self, visitor: ClauseVisitor[VisitorResult], *args, **kwargs) -> VisitorResult:
         return visitor.visit_from_clause(self, *args, **kwargs)
@@ -8400,9 +8412,13 @@ class SqlQuery(ABC):
         PredicateTree.join_graph
         """
         pred_tree = self.predicates()
-        if pred_tree is None:
-            return nx.Graph()
-        return pred_tree.join_graph(merge_aliases=merge_aliases)
+        if pred_tree is not None:
+            return pred_tree.join_graph(merge_aliases=merge_aliases)
+
+        tables = {tab.drop_alias() for tab in self.tables()} if merge_aliases else self.tables()
+        g = nx.Graph()
+        g.add_nodes_from(tables)
+        return g
 
     def filters_for(self, table: TableReference) -> AbstractPredicate | None:
         """Alias for `predicates().filters_for(table)`.

@@ -94,9 +94,6 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 Found while adding test coverage; not yet fixed. Each is pinned by a dedicated test in `tests/unit/` explaining the
 root cause, so that fixing it is a deliberate, visible change.
 
-- `validation.CrossProductPreCheck` crashes with `networkx.NetworkXPointlessConcept` for any query with no `WHERE`
-  clause at all (including the single-table case), because `SqlQuery.join_graph()` returns an empty graph rather than
-  one node per table when there are no predicates, and `nx.is_connected` treats that as undefined.
 - `validation.SPJCheck` passes an unfiltered cross product (e.g. `SELECT * FROM r, s`) even though its own docstring
   requires rejecting cross products, because it returns early when `query.predicates()` is `None`.
 - `validation.EquiJoinPreCheck`'s `allow_conjunctions` flag can never change the result of `check_supported_query`.

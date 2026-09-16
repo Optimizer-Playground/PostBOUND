@@ -275,31 +275,21 @@ def test_cross_product_check_fails_a_disconnected_join_graph() -> None:
     assert result.failure_reason == "Query contains cross products"
 
 
-def test_cross_product_check_crashes_when_the_query_has_no_where_clause_at_all() -> None:
-    """Documents a real bug, not the intended behaviour.
+def test_cross_product_check_fails_with_no_where_clause_but_multiple_tables() -> None:
+    query = parse("SELECT * FROM r, s")  # no WHERE clause at all
 
-    `SqlQuery.join_graph()` returns an *empty* `nx.Graph()` (not one node per table) whenever the query has
-    no predicates at all -- `SqlQuery.join_graph` -> `PredicateTree.join_graph`, but with `predicates() is
-    None` it short-circuits to a bare `nx.Graph()`. `nx.is_connected` treats a graph with zero nodes as
-    undefined ("the null graph") and raises `NetworkXPointlessConcept` rather than returning a bool.
+    result = validation.CrossProductPreCheck().check_supported_query(query)
 
-    `CrossProductPreCheck` does not guard against this, so it crashes with an unhandled exception instead of
-    reporting a `PreCheckResult` -- for `SELECT * FROM r, s` (the single most literal cross product possible)
-    and even for the single-table `SELECT * FROM r` with no WHERE clause at all, which is not a cross product
-    and should trivially pass.
+    assert result.passed is False
+    assert result.failure_reason == "Query contains cross products"
 
-    This test exists so that fixing it (most likely: treat 0 or 1 nodes as connected before calling
-    `nx.is_connected`, the same way `nx.is_connected` itself special-cases a single node) is a deliberate,
-    visible change -- see the `lookup_column` fix in commit 823efb5 for the established pattern.
-    """
-    import networkx as nx
 
-    with pytest.raises(nx.NetworkXPointlessConcept):
-        validation.CrossProductPreCheck().check_supported_query(CROSS_PRODUCT)
+def test_cross_product_check_passes_a_single_table_with_no_where_clause() -> None:
+    query = parse("SELECT * FROM r")  # no WHERE clause at all, but only one table
 
-    single_table_no_predicates = parse("SELECT * FROM r")
-    with pytest.raises(nx.NetworkXPointlessConcept):
-        validation.CrossProductPreCheck().check_supported_query(single_table_no_predicates)
+    result = validation.CrossProductPreCheck().check_supported_query(query)
+
+    assert result.passed is True
 
 
 # -- VirtualTablesPreCheck ---------------------------------------------------------------------------------
