@@ -569,21 +569,9 @@ def test_spj_check_fails_a_cross_product() -> None:
 
 
 def test_spj_check_passes_an_unfiltered_cross_product() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    The check's own docstring requires "the query only performs inner equi joins and no cross products", but
-    the implementation returns `with_all_passed()` as soon as `query.predicates()` is *None* -- which is
-    exactly the case for a query with no WHERE clause at all. `SELECT * FROM r, s` is the most literal
-    possible cross product, yet it passes `SPJCheck` unchanged.
-
-    This test exists so that fixing it (most likely: check `nx.is_connected` over `query.tables()` rather than
-    short-circuiting on an absent predicate tree -- mind the null-graph crash documented in
-    `test_cross_product_check_crashes_when_the_query_has_no_where_clause_at_all` if reusing that approach) is
-    a deliberate, visible change -- see the `lookup_column` fix in commit 823efb5 for the established pattern.
-    """
     result = validation.SPJCheck().check_supported_query(CROSS_PRODUCT)
 
-    assert result.passed is True  # should be False
+    assert result.passed is False
 
 
 def test_spj_check_fails_a_non_equi_join() -> None:

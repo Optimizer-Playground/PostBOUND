@@ -729,7 +729,12 @@ class SPJCheck(OptimizationPreCheck):
             return PreCheckResult.with_failure("FROM clause has complex contents")
 
         predicates = query.predicates()
-        if predicates is None:
+        if predicates is None and len(query.from_clause.items) > 1:
+            # We know the query has a FROM clause thanks to the check above
+            # Therefore, we must have a cross product
+            return PreCheckResult.with_failure("Query contains cross products")
+        elif predicates is None:
+            # No predicates and exactly one table in the FROM clause. This is a valid SPJ query
             return PreCheckResult.with_all_passed()
 
         if not predicates.all_simple():

@@ -8404,21 +8404,27 @@ class SqlQuery(ABC):
             return []
         return pred_tree.joins()
 
+    @abstractmethod
     def join_graph(self, *, merge_aliases: bool = False) -> nx.Graph:
-        """Alias for `predicates().join_graph()`.
+        """Generates the join graph of a query.
+
+        In contrast to calling `predicates().join_graph()`, this method will always return a graph, even if no join
+        conditions are defined. In that case, the graph will contain all tables as nodes, but no edges. Other than that,
+        the same rules as for `predicates().join_graph()` apply.
+
+        Warnings
+        --------
+        This method is not defined on queries with set operations. Make sure to call `is_select_query()` before
+        calling this method to avoid exceptions.
 
         See Also
         --------
         PredicateTree.join_graph
         """
-        pred_tree = self.predicates()
-        if pred_tree is not None:
-            return pred_tree.join_graph(merge_aliases=merge_aliases)
-
-        tables = {tab.drop_alias() for tab in self.tables()} if merge_aliases else self.tables()
-        g = nx.Graph()
-        g.add_nodes_from(tables)
-        return g
+        # In contrast to many other methods on the PredicateTree, we cannot simply delegate here.
+        # The reason is that a query without any join conditions is perfectly valid, but it would not have a join
+        # tree. Therefore, we have to explicitly create one for this special case.
+        raise NotImplementedError
 
     def filters_for(self, table: TableReference) -> AbstractPredicate | None:
         """Alias for `predicates().filters_for(table)`.
@@ -9210,6 +9216,20 @@ class SelectStatement(SqlQuery):
 
         return self.tables() - self.bound_tables() - virtual_subquery_targets - virtual_cte_targets
 
+    def join_graph(self, *, merge_aliases: bool = False) -> nx.Graph:
+        if self._from_clause is None:
+            return nx.Graph()
+
+        predicate_tree = self.predicates()
+        g = nx.Graph() if predicate_tree is None else predicate_tree.join_graph(merge_aliases=merge_aliases)
+
+        source_tables = set(self._from_clause.bound_tables())
+        if merge_aliases:
+            source_tables = {table.drop_alias() for table in source_tables}
+
+        g.add_nodes_from(source_tables)
+        return g
+
     def __hash__(self) -> int:
         return self._hash_val
 
@@ -9544,6 +9564,12 @@ class SetQuery(SqlQuery):
 
     def contains_cross_product(self) -> bool:
         return self._lhs.contains_cross_product() or self._rhs.contains_cross_product()
+
+    def join_graph(self, *, merge_aliases: bool = False) -> nx.Graph:
+        raise QueryTypeError(
+            "Set queries do not have a well-defined join graph. "
+            "Make sure to check the actual query type before accessing specific clauses."
+        )
 
     def __hash__(self) -> int:
         return self._hash_val

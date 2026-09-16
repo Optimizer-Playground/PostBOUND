@@ -94,8 +94,6 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 Found while adding test coverage; not yet fixed. Each is pinned by a dedicated test in `tests/unit/` explaining the
 root cause, so that fixing it is a deliberate, visible change.
 
-- `validation.SPJCheck` passes an unfiltered cross product (e.g. `SELECT * FROM r, s`) even though its own docstring
-  requires rejecting cross products, because it returns early when `query.predicates()` is `None`.
 - `validation.EquiJoinPreCheck`'s `allow_conjunctions` flag can never change the result of `check_supported_query`.
   `.joins()` always un-nests `AND`-connected predicates before the check sees them, so the only compound predicate it
   can ever receive is `OR`-connected, which is rejected before the flag is consulted.
