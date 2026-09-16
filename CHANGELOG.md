@@ -61,6 +61,10 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   or a malformed connection file abort collection of the whole module.
 - `DatabasePool` state no longer leaks between tests. A database registered by one test module stayed visible to every
   later one, which made `parse_query` bind columns against an arbitrary leaked database.
+- Added offline test coverage for `postgres/_explain.py`, pg_lab/pg_hint_plan hint generation, the Postgres
+  timeout-query state machine, and the `validation.py` pre-check hierarchy, none of which had any tests before.
+  Several of these tests document current bugs rather than fixes for them (see Known bugs below); each is
+  written so that fixing the underlying issue is a deliberate, visible change instead of a silent one.
 - Removed the undocumented `SKIP_ONLINE` environment variable, which defaulted to skipping and therefore kept six
   whole-workload tests permanently dead even against a fully provisioned server. Tier selection replaces it, and
   requesting a tier whose environment is unavailable now fails instead of reporting a green, all-skipped run.
@@ -84,6 +88,35 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 - The `ues`, `tonic` and `experiments` modules have been removed and moved to the separate optimizer repository, as
   announced in version 0.21.6. The `tools/ceb-generator.py` and `tools/query-generator.py` scripts were removed along
   with them.
+
+## 🪲 Known bugs
+
+Found while adding test coverage; not yet fixed. Each is pinned by a dedicated test in `tests/unit/` explaining the
+root cause, so that fixing it is a deliberate, visible change.
+
+- `JoinTableSource.__match_args__` names its first two positions `"left"`/`"right"`, but the class only exposes
+  properties `lhs`/`rhs`. Any `case JoinTableSource(...)` with positional arguments therefore silently never matches
+  (Python treats the resulting `AttributeError` as "no match"), reaching a fallback branch instead. This breaks
+  `SqlQuery.bound_tables()` (and therefore `is_dependent()`) and subquery collection for any query using explicit
+  `JOIN` syntax, and makes `validation.InnerJoinPreCheck` raise on every explicit join, inner or outer.
+- `SimpleFilter.can_wrap()` is documented to return a `bool`, but crashes with an uncaught `ValueError` for a filter
+  predicate containing a function call (e.g. `UPPER(r.c) = 'X'`) instead of returning `False`. This also crashes
+  `PredicateTree.all_simple()` and, through it, `validation.SPJCheck`.
+- `validation.CrossProductPreCheck` crashes with `networkx.NetworkXPointlessConcept` for any query with no `WHERE`
+  clause at all (including the single-table case), because `SqlQuery.join_graph()` returns an empty graph rather than
+  one node per table when there are no predicates, and `nx.is_connected` treats that as undefined.
+- `validation.SPJCheck` passes an unfiltered cross product (e.g. `SELECT * FROM r, s`) even though its own docstring
+  requires rejecting cross products, because it returns early when `query.predicates()` is `None`.
+- `validation.EquiJoinPreCheck`'s `allow_conjunctions` flag can never change the result of `check_supported_query`.
+  `.joins()` always un-nests `AND`-connected predicates before the check sees them, so the only compound predicate it
+  can ever receive is `OR`-connected, which is rejected before the flag is consulted.
+- `postgres._explain._generate_qep` passes `subplan_name=` to `QueryPlan.__init__`, which has no such parameter (it
+  is `subplan_target_name`). The name silently lands in an unrelated node's opaque plan-params dict instead of
+  populating `Subplan.target_name`, which stays `""` regardless of the "Subplan Name"/"CTE Name" Postgres reported.
+- `PhysicalOperatorAssignment.__contains__` is broken for a singleton table set: for `frozenset({t})`, it checks
+  membership of the frozenset itself against `scan_operators` (keyed by bare `TableReference`) instead of unwrapping
+  it, so it is always `False` even when `t` has a scan operator assigned (and raises `TypeError` for a plain list).
+  This makes `postgres._pg._generate_pglab_hints` always treat a single-table worker-count hint as unintegratable.
 
 ---
 
