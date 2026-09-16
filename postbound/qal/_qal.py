@@ -6891,7 +6891,7 @@ class JoinTableSource(TableSource):
         "_left",
         "_right",
     )
-    __match_args__ = ("left", "right", "join_condition", "join_type")
+    __match_args__ = ("lhs", "rhs", "join_condition", "join_type")
 
     @property
     def lhs(self) -> TableSource:

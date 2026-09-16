@@ -94,11 +94,6 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 Found while adding test coverage; not yet fixed. Each is pinned by a dedicated test in `tests/unit/` explaining the
 root cause, so that fixing it is a deliberate, visible change.
 
-- `JoinTableSource.__match_args__` names its first two positions `"left"`/`"right"`, but the class only exposes
-  properties `lhs`/`rhs`. Any `case JoinTableSource(...)` with positional arguments therefore silently never matches
-  (Python treats the resulting `AttributeError` as "no match"), reaching a fallback branch instead. This breaks
-  `SqlQuery.bound_tables()` (and therefore `is_dependent()`) and subquery collection for any query using explicit
-  `JOIN` syntax, and makes `validation.InnerJoinPreCheck` raise on every explicit join, inner or outer.
 - `SimpleFilter.can_wrap()` is documented to return a `bool`, but crashes with an uncaught `ValueError` for a filter
   predicate containing a function call (e.g. `UPPER(r.c) = 'X'`) instead of returning `False`. This also crashes
   `PredicateTree.all_simple()` and, through it, `validation.SPJCheck`.

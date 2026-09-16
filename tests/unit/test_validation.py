@@ -396,37 +396,10 @@ def test_inner_join_check_passes_implicit_joins() -> None:
     assert validation.InnerJoinPreCheck().check_supported_query(IMPLICIT_JOIN).passed is True
 
 
-def test_inner_join_check_crashes_on_any_explicit_join() -> None:
-    """Documents a real bug, not the intended behaviour -- and not one local to `validation.py`.
-
-    `InnerJoinPreCheck._check_table_source` pattern-matches with
-    ``case JoinTableSource(left, right, _, join_type):``, following the class's own
-    ``__match_args__ = ("left", "right", "join_condition", "join_type")``. But `JoinTableSource` only exposes
-    properties named `lhs`/`rhs` -- there is no `left`/`right` attribute at all. Python's positional class
-    pattern matching does an attribute lookup per `__match_args__` entry and silently treats a resulting
-    `AttributeError` as "this case does not match" (it does not propagate the error), so
-    `case JoinTableSource(...)` never matches *anything*, for any explicit JOIN, anywhere it is used with
-    positional arguments.
-
-    In `validation.py` this means every explicit-JOIN query falls through to the check's own
-    ``case _: raise ValueError(...)`` -- `InnerJoinPreCheck` cannot classify a single explicit join, inner or
-    outer, without crashing. The same root cause reaches further than this file: `qal/_qal.py`'s
-    `_collect_bound_tables_from_source` (which backs `SqlQuery.bound_tables()`, and therefore
-    `is_dependent()`) and `_collect_subqueries_in_table_source` use the same 2-argument positional pattern,
-    and `transform.py`'s `_TableRenamer._rename_table_source` uses the same 4-argument one -- all similarly
-    unreachable for explicit joins.
-
-    This test exists so that fixing `JoinTableSource.__match_args__` to name the actual properties
-    (`("lhs", "rhs", "join_condition", "join_type")`) is a deliberate, visible change across every call site
-    it unlocks, rather than a silent one -- see the `lookup_column` fix in commit 823efb5 for the established
-    pattern. Given how many places rely on the same broken contract, this is worth prioritizing over the
-    other documented findings in this file.
-    """
-    with pytest.raises(ValueError, match="Unknown table source type"):
-        validation.InnerJoinPreCheck().check_supported_query(EXPLICIT_JOIN)
-
-    with pytest.raises(ValueError, match="Unknown table source type"):
-        validation.InnerJoinPreCheck().check_supported_query(LEFT_OUTER_JOIN)
+def test_inner_join_check_passes_explicit_inner_joins() -> None:
+    """Explicit `JOIN` syntax is a `JoinTableSource` with `join_type == JoinOperator.Inner`, which is allowed."""
+    assert validation.InnerJoinPreCheck().check_supported_query(EXPLICIT_JOIN).passed is True
+    assert validation.InnerJoinPreCheck().check_supported_query(LEFT_OUTER_JOIN).passed is False
 
 
 # -- SubqueryPreCheck --------------------------------------------------------------------------------------
