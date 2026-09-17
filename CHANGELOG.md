@@ -63,8 +63,13 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   later one, which made `parse_query` bind columns against an arbitrary leaked database.
 - Added offline test coverage for `postgres/_explain.py`, pg_lab/pg_hint_plan hint generation, the Postgres
   timeout-query state machine, and the `validation.py` pre-check hierarchy, none of which had any tests before.
-  Several of these tests document current bugs rather than fixes for them (see Known bugs below); each is
-  written so that fixing the underlying issue is a deliberate, visible change instead of a silent one.
+  Several of these tests originally documented then-current bugs rather than fixes for them; all of those
+  have since been fixed (see Fixes below) and the tests updated to match.
+- Added test coverage for the `postbound.qal` package itself (`SqlExpression`, `AbstractPredicate` and
+  `PredicateTree`, the clause hierarchy including every `TableSource` variant, the `SqlQuery`/
+  `SelectStatement`/`SetQuery` aggregate API, and `format_quick`), replacing the ad-hoc `SqlQueryTests` and
+  `PredicateTests` in `tests/test_qal.py`. `tests/test_qal.py` now holds only the parser/transform tests and
+  the JOB/Stats workload sweeps.
 - Removed the undocumented `SKIP_ONLINE` environment variable, which defaulted to skipping and therefore kept six
   whole-workload tests permanently dead even against a fully provisioned server. Tier selection replaces it, and
   requesting a tier whose environment is unavailable now fails instead of reporting a green, all-skipped run.
