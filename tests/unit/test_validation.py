@@ -350,27 +350,13 @@ def test_equi_join_check_and_connected_joins_are_always_split_and_checked_indivi
     assert validation.EquiJoinPreCheck(allow_conjunctions=True).check_supported_query(query).passed is True
 
 
-def test_equi_join_check_allow_conjunctions_never_actually_changes_the_result() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    `_perform_compound_predicate_check` only accepts a `CompoundPredicate` whose `operation` is
-    `CompoundOperator.And`. But `.joins()` (see the test above) always un-nests ANDs before handing predicates
-    to a `OptimizationPreCheck`, so the only kind of `CompoundPredicate` `EquiJoinPreCheck` can ever actually
-    receive from a real query is an OR-connected one (`.joins()`'s own docstring: "OR predicates are included
-    as a whole if they are a join"). An OR is rejected unconditionally, before `allow_conjunctions` is even
-    consulted. So the flag can never change the outcome of `check_supported_query` for any query -- it is
-    dead configuration.
-
-    This test exists so that fixing it (most likely: also accept `CompoundOperator.Or` under
-    `allow_conjunctions`, or drop the flag if AND-splitting means it is genuinely unneeded) is a deliberate,
-    visible change -- see the `lookup_column` fix in commit 823efb5 for the established pattern.
-    """
+def test_equi_join_check_allow_conjunctions_changes_the_result() -> None:
     query = parse("SELECT * FROM r, s WHERE r.a = s.b OR r.a = s.c")
 
     without_flag = validation.EquiJoinPreCheck(allow_conjunctions=False).check_supported_query(query)
     with_flag = validation.EquiJoinPreCheck(allow_conjunctions=True).check_supported_query(query)
 
-    assert without_flag == with_flag
+    assert without_flag != with_flag
     assert without_flag.passed is False
 
 
@@ -459,13 +445,15 @@ def test_supported_hint_check_fails_and_lists_unsupported_hints() -> None:
     result = check.check_supported_database_system(db)
 
     assert result.passed is False
-    assert result.failure_reason == [JoinOperator.HashJoin, HintType.Cardinality]
+    assert len(result.failure_reason) == 2
+    assert "Database does not support hint: JoinOperator.HashJoin" in result.failure_reason
+    assert "Database does not support hint: HintType.Cardinality" in result.failure_reason
 
 
 def test_supported_hint_check_describe_lists_the_features() -> None:
     check = validation.SupportedHintCheck([JoinOperator.HashJoin])
 
-    assert check.describe() == {"name": "database_operator_support", "features": [JoinOperator.HashJoin]}
+    assert check.describe() == {"name": "database_operator_support", "features": {JoinOperator.HashJoin}}
 
 
 # -- CustomCheck -------------------------------------------------------------------------------------------
