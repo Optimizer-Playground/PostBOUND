@@ -2,9 +2,9 @@
 
 from . import dynprog, enumeration, native, noopt, randomized
 from ._cardinalities import (
-    CardinalityDistortion,
-    PreciseCardinalities,
-    PreComputedCardinalities,
+    CardinalityCache,
+    OfflineCardinalities,
+    PerfectCardinalities,
 )
 from ._helpers import (
     explode_query_plan,
@@ -18,9 +18,9 @@ from ._helpers import (
 )
 
 __all__ = [
-    "CardinalityDistortion",
-    "PreComputedCardinalities",
-    "PreciseCardinalities",
+    "CardinalityCache",
+    "OfflineCardinalities",
+    "PerfectCardinalities",
     "dynprog",
     "enumeration",
     "explode_query_plan",
