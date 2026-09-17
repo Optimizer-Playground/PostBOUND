@@ -5311,7 +5311,7 @@ class WithQuery:
 
     Parameters
     ----------
-    query : SelectStatement
+    query : SqlQuery
         The query that should be used to construct the temporary common table.
     target_name : str | TableReference
         The name under which the table should be made available. If a table reference is provided, its identifier will
@@ -5330,7 +5330,7 @@ class WithQuery:
 
     def __init__(
         self,
-        query: SelectStatement,
+        query: SqlQuery,
         target_name: str | TableReference,
         *,
         materialized: bool | None = None,
@@ -5355,12 +5355,12 @@ class WithQuery:
     )
 
     @property
-    def query(self) -> SelectStatement:
+    def query(self) -> SqlQuery:
         """The query that is used to construct the temporary table
 
         Returns
         -------
-        SelectStatement
+        SqlQuery
             The query
         """
         return self._query

@@ -1285,7 +1285,7 @@ def _pglast_parse_ctes(json_data: dict, *, parent_namespace: QueryNamespace, que
                 namespace=child_nsp,
                 query_txt=query_txt,
             )
-            parsed_cte = WithQuery(cte_query, target_table, materialized=force_materialization)  # type: ignore - see comment on build_query() in _qal
+            parsed_cte = WithQuery(cte_query, target_table, materialized=force_materialization)
 
         parsed_ctes.append(parsed_cte)
 
