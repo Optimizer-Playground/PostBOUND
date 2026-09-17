@@ -25,5 +25,6 @@
 
   "ruff.importStrategy": "fromEnvironment",
   "ty.importStrategy": "fromEnvironment",
+  "ty.diagnosticMode": "workspace",
   "editor.rulers": [121]
 }
