@@ -128,11 +128,12 @@ class SchemaCache:
     def __init__(self, schema: DatabaseSchema | None = None) -> None:
         self._schema = schema
         self._lookup_cache: dict[str, tuple[list[str], set[str]]] = {}
+        self._issued_binding_warning = False
 
     def initialize_with(self, schema: DatabaseSchema | None) -> None:
         """Sets the catalog if necessary"""
         if self._schema is not None and self._schema != schema:
-            warnings.warn("Parsing query for new schema. Dropping old schema cache.", stacklevel=2)
+            # warnings.warn("Parsing query for new schema. Dropping old schema cache.", stacklevel=2)
             self._schema = schema
             self._lookup_cache.clear()
         elif self._schema is not None:
@@ -152,6 +153,7 @@ class SchemaCache:
             is returned. If none of the candidates is the correct table, *None* is returned.
         """
         if not self._schema:
+            self._warn_no_binding()
             return None
 
         for candidate in candidate_tables:
@@ -170,6 +172,7 @@ class SchemaCache:
         If no catalog is available, this method will always return an empty list.
         """
         if not self._schema:
+            self._warn_no_binding()
             return []
 
         cols, _ = self._inflate_cache(table)
@@ -197,6 +200,19 @@ class SchemaCache:
         cols_set = set(cols)
         self._lookup_cache[table] = cols, cols_set
         return cols, cols_set
+
+    def _warn_no_binding(self) -> None:
+        if self._issued_binding_warning:
+            return
+
+        warnings.warn(
+            "The database pool does not contain any databases. Did you call connect() on any? "
+            "Having no database available means that the parser will be unable to infer the correct table for "
+            "unqualified column references.",
+            category=ParserWarning,
+            stacklevel=3,
+        )
+        self._issued_binding_warning = True
 
 
 class QueryNamespace:
@@ -356,12 +372,20 @@ class QueryNamespace:
                     # Do nothing, this is an expression that cannot be referenced later on!
                     # Or at least, it is highly system-dependent how the expression would be named.
                     # For example, Postgres uses the function names for function calls without alias
-                    warnings.warn(
-                        f"Found complex expression without an alias: '{projection.expression}'. "
-                        "Such expressions may currently not be referenced later on.",
-                        category=ParserWarning,
-                        stacklevel=2,
-                    )
+
+                    # Previously we issued a warning when we encoutered such an expression.
+                    # However, there are many perfectly valid queries where we encouter such expressions and
+                    # warning about them is not really helpful. We might re-introduce the warning in the future,
+                    # but for now just keep it silent.
+                    #
+                    # warnings.warn(
+                    #    f"Found complex expression without an alias: '{projection.expression}'. "
+                    #    "Such expressions may currently not be referenced later on.",
+                    #    category=ParserWarning,
+                    #    stacklevel=2,
+                    # )
+
+                    continue
 
     def register_table(self, table: TableReference) -> None:
         """Adds a "physical" table to the current namespace.
@@ -2170,13 +2194,6 @@ def parse_query(
         pool = DatabasePool.get_instance()
         match pool.n_databases():
             case 0:
-                warnings.warn(
-                    "The database pool does not contain any databases. Did you call connect() on any? "
-                    "Having no database available means that the parser will be unable to infer the correct table for "
-                    "unqualified column references.",
-                    category=ParserWarning,
-                    stacklevel=2,
-                )
                 db_schema = None
             case 1:
                 db_schema = pool.current_database().schema()
