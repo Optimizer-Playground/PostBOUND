@@ -3460,7 +3460,7 @@ class PredicateVisitor(ABC, Generic[VisitorResult]):
             case _:
                 raise ValueError(f"Cannot visit predicates of query type {type(query).__name__}: {query}")
 
-    def visit_query_predicates(self, predicates: PredicateTree, *args, **kwargs) -> VisitorResult | None:
+    def visit_query_predicates(self, predicates: PredicateTree, *args, **kwargs) -> VisitorResult:
         """Convenience method to visit the predicates of predicate tree.
 
         The visiting process starts at the root of the tree.
