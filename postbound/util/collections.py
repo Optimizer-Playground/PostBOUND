@@ -8,16 +8,13 @@ from collections.abc import (
     Collection,
     Container,
     Generator,
-    ItemsView,
     Iterable,
     Iterator,
-    KeysView,
     Mapping,
     Sequence,
     Sized,
-    ValuesView,
 )
-from typing import Any, Literal, overload
+from typing import Any, overload
 
 from .._base import T
 from .dicts import HashableDict
@@ -50,99 +47,6 @@ def flatten[T](xs):
         else:
             flattened.append(nested)
     return flattened
-
-
-@overload
-def enlist(obj: list[T]) -> list[T]: ...
-
-
-@overload
-def enlist(obj: tuple[T, ...], *, enlist_tuples: Literal[True]) -> list[tuple[T, ...]]: ...
-
-
-@overload
-def enlist(obj: tuple[T, ...], *, enlist_tuples: Literal[False]) -> tuple[T, ...]: ...
-
-
-@overload
-def enlist(obj: tuple[T, ...]) -> tuple[T, ...]: ...
-
-
-@overload
-def enlist(obj: set[T]) -> set[T]: ...
-
-
-@overload
-def enlist(obj: frozenset[T]) -> frozenset[T]: ...
-
-
-@overload
-def enlist(obj: KeysView[T] | ValuesView[T]) -> list[T]: ...
-
-
-@overload
-def enlist[K, T](obj: ItemsView[K, T]) -> list[tuple[K, T]]: ...
-
-
-@overload
-def enlist(obj: Sequence[T]) -> Sequence[T]: ...
-
-
-@overload
-def enlist(obj: Sequence[T] | T) -> Sequence[T]: ...
-
-
-@overload
-def enlist(obj: str) -> list[str]: ...
-
-
-@overload
-def enlist(obj: Iterable[T]) -> Iterable[T]: ...
-
-
-@overload
-def enlist(obj: Iterable[T] | T) -> Iterable[T]: ...
-
-
-@overload
-def enlist(obj: T | Iterable[T]) -> Iterable[T]: ...
-
-
-@overload
-def enlist(obj: T) -> list[T]: ...
-
-
-def enlist(obj, *, enlist_tuples: bool = False):
-    """Transforms any object into a singular list of that object, if it is not a container already.
-
-    Specifically, the following types are treated as container-like and will not be transformed: lists, tuples, sets
-    and frozensets. The treatment of tuples can be configured via parameters. All other arguments will be wrapped in a list.
-
-    For example, ``"abc"`` is turned into ``["abc"]``, whereas ``["abc"]`` is returned unmodified.
-
-    Parameters
-    ----------
-    obj : T | Iterable[T]
-        The object or list to wrap
-    enlist_tuples : bool, optional
-        Whether a tuple `obj` should be enlisted. This is ``False`` by default
-
-    Returns
-    -------
-    Iterable[T]
-        The object, wrapped into a list if necessary
-    """
-    if isinstance(obj, str):
-        return [obj]
-    if isinstance(obj, tuple) and enlist_tuples:
-        return [obj]
-    if isinstance(obj, (KeysView, ValuesView, ItemsView)):
-        return list(obj)
-
-    list_types = [tuple, list, set, frozenset]
-    if any(isinstance(obj, target_type) for target_type in list_types):
-        return obj
-    return [obj]
 
 
 def get_any(elems: Iterable[T]) -> T:

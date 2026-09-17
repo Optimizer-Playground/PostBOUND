@@ -7,7 +7,6 @@ import warnings
 from collections.abc import Callable, Sequence
 from typing import Literal, overload
 
-from .. import util
 from .._core import quote
 from ._qal import (
     AbstractPredicate,
@@ -666,22 +665,13 @@ def _expression_prettifier[T: SqlExpression](
             target = type(expression)
 
             replaced_lhs = _expression_prettifier(
-                lhs,
-                flavor=flavor,
-                inline_hints=inline_hints,
-                indentation=indentation,
+                lhs, flavor=flavor, inline_hints=inline_hints, indentation=indentation
             )
-            rhs = util.enlist(rhs) if rhs else []
-            replaced_rhs = [
-                _expression_prettifier(
-                    expr,
-                    flavor=flavor,
-                    inline_hints=inline_hints,
-                    indentation=indentation,
-                )
-                for expr in rhs
-            ]
-            replaced_rhs = util.simplify(replaced_rhs)
+            replaced_rhs = (
+                _expression_prettifier(rhs, flavor=flavor, inline_hints=inline_hints, indentation=indentation)
+                if rhs
+                else None
+            )
             return target(op, replaced_lhs, replaced_rhs)
 
         case ArrayAccessExpression(array, ind, lo, hi):

@@ -9,7 +9,6 @@ The `OptimizationPreCheck` defines the abstract interface that all checks should
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
 
 import networkx as nx
 
@@ -41,7 +40,6 @@ from .qal import (
 )
 
 
-@dataclass
 class PreCheckResult:
     """Wrapper for a validation result.
 
@@ -93,8 +91,17 @@ class PreCheckResult:
         for check in checks:
             if check.passed:
                 continue
-            failures.extend(util.enlist(check.failure_reason))
+
+            if isinstance(check.failure_reason, str):
+                failures.append(check.failure_reason)
+            else:
+                failures.extend(check.failure_reason)
+
         return PreCheckResult.with_all_passed() if not failures else PreCheckResult.with_failure(failures)
+
+    def __init__(self, passed: bool = True, failure_reason: str | list[str] = "") -> None:
+        self.passed = passed
+        self.failure_reason = failure_reason if failure_reason else ""
 
     def with_failure(failure: str | list[str]) -> PreCheckResult:
         """Generates a check result for a specific failure.
@@ -619,12 +626,12 @@ class SupportedHintCheck(OptimizationPreCheck):
 
     def __init__(self, hints: HintType | PhysicalOperator | Iterable[HintType | PhysicalOperator]) -> None:
         super().__init__("database-check")
-        self._features = util.enlist(hints)
+        self._features = {hints} if isinstance(hints, (HintType, PhysicalOperator)) else set(hints)
 
     def check_supported_database_system(self, database_instance: Database) -> PreCheckResult:
         failures = [hint for hint in self._features if not database_instance.hinting().supports_hint(hint)]
         passed = not failures
-        return PreCheckResult(passed, failures)
+        return PreCheckResult(passed, [f"Database does not support hint: {hint}" for hint in failures])
 
     def describe(self) -> dict:
         return {"name": "database_operator_support", "features": self._features}

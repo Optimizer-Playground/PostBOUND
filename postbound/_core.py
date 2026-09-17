@@ -1371,13 +1371,15 @@ class UnboundColumnError(StateError):
 
     Parameters
     ----------
-    column : ColumnReference
-        The column without the necessary table binding
+    column : ColumnReference | str
+        The column without the necessary table binding or a custom error message.
     """
 
-    def __init__(self, column: ColumnReference) -> None:
-        super().__init__("Column is not bound to any table: " + str(column))
-        self.column = column
+    def __init__(self, column: ColumnReference | str) -> None:
+        msg = column if isinstance(column, str) else f"Column is not bound to any table: {column}"
+        super().__init__(msg)
+        if isinstance(column, ColumnReference):
+            self.column = column
 
 
 class VirtualTableError(StateError):

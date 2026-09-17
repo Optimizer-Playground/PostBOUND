@@ -412,7 +412,7 @@ class NativeCardinalityEstimator(CardinalityEstimator):
     ) -> Cardinality:
         assert self._target_db is not None
 
-        intermediate = util.enlist(intermediate)
+        intermediate = [intermediate] if isinstance(intermediate, TableReference) else list(intermediate)
         subquery = transform.extract_subquery(query, intermediate)
         subquery = transform.as_star_query(subquery)
         return self._target_db.optimizer().cardinality_estimate(subquery)

@@ -376,7 +376,7 @@ def extract_query_fragment(
     if isinstance(query, SelectStatement) and not query.has_simple_from():
         query = explicit_to_implicit(query)
 
-    referenced_tables: set[TableReference] = set(util.enlist(referenced_tables))
+    referenced_tables = {referenced_tables} if isinstance(referenced_tables, TableReference) else set(referenced_tables)
     if not referenced_tables.issubset(query.tables()):
         return None
 
@@ -913,7 +913,19 @@ def drop_hints(query, preparatory_statements_only: bool = False):
     return drop_clause(query, Hint)
 
 
-def as_explain[T: SqlQuery](query: T, explain: Explain = Explain.plan()) -> T:
+@overload
+def as_explain(query: SelectStatement, explain: Explain = Explain.plan()) -> SelectStatement: ...
+
+
+@overload
+def as_explain(query: SetQuery, explain: Explain = Explain.plan()) -> SetQuery: ...
+
+
+@overload
+def as_explain(query: SqlQuery, explain: Explain = Explain.plan()) -> SqlQuery: ...
+
+
+def as_explain(query: SqlQuery, explain: Explain = Explain.plan()) -> SqlQuery:
     """Transforms a specific query into an ``EXPLAIN`` query.
 
     Parameters
@@ -931,7 +943,19 @@ def as_explain[T: SqlQuery](query: T, explain: Explain = Explain.plan()) -> T:
     return add_clause(query, explain)
 
 
-def as_explain_analyze[T: SqlQuery](query: T) -> T:
+@overload
+def as_explain_analyze(query: SelectStatement) -> SelectStatement: ...
+
+
+@overload
+def as_explain_analyze(query: SetQuery) -> SetQuery: ...
+
+
+@overload
+def as_explain_analyze(query: SqlQuery) -> SqlQuery: ...
+
+
+def as_explain_analyze(query: SqlQuery) -> SqlQuery:
     """Transforms a specific query into an ``EXPLAIN ANALYZE`` query.
 
     Parameters
@@ -991,11 +1015,26 @@ def remove_predicate(
         return CompoundPredicate.create(predicate.operation, updated_children)
 
 
-def add_clause[T: SqlQuery](query: T, clauses_to_add: SqlClause | Iterable[SqlClause]) -> T:
+@overload
+def add_clause(
+    query: SelectStatement, clauses_to_add: BaseClause | ModifierClause | Iterable[BaseClause | ModifierClause]
+) -> SelectStatement: ...
+
+
+@overload
+def add_clause(
+    query: SetQuery, clauses_to_add: SetOpClause | ModifierClause | Iterable[SetOpClause | ModifierClause]
+) -> SetQuery: ...
+
+
+@overload
+def add_clause(query: SqlQuery, clauses_to_add: SqlClause | Iterable[SqlClause]) -> SqlQuery: ...
+
+
+def add_clause(query: SqlQuery, clauses_to_add: SqlClause | Iterable[SqlClause]):
     """Creates a new SQL query, potentailly with additional clauses.
 
-    No validation is performed. Conflicts are resolved according to the rules of `build_query`. This means that the query
-    can potentially be switched from an implicit query to an explicit one and vice-versa.
+    No validation is performed. Conflicts are resolved according to the rules of `build_query`.
 
     Parameters
     ----------
@@ -1010,10 +1049,10 @@ def add_clause[T: SqlQuery](query: T, clauses_to_add: SqlClause | Iterable[SqlCl
         A new clauses consisting of the old query's clauses and the `clauses_to_add`. Duplicate clauses are overwritten by
         the `clauses_to_add`.
     """
-    clauses_to_add = util.enlist(clauses_to_add)
+    clauses_to_add = [clauses_to_add] if isinstance(clauses_to_add, SqlClause) else list(clauses_to_add)
     new_clause_types = {type(clause) for clause in clauses_to_add}
     remaining_clauses = [clause for clause in query.clauses() if type(clause) not in new_clause_types]
-    return build_query(remaining_clauses + list(clauses_to_add))
+    return build_query(remaining_clauses + clauses_to_add)
 
 
 ClauseDescription = type | SqlClause | Iterable[type | SqlClause]
@@ -1037,7 +1076,7 @@ def drop_clause(query: SetQuery, clauses_to_drop: ClauseDescription) -> SetQuery
 def drop_clause(query: SqlQuery, clauses_to_drop: ClauseDescription) -> SqlQuery: ...
 
 
-def drop_clause(query, clauses_to_drop):
+def drop_clause(query: SqlQuery, clauses_to_drop: ClauseDescription) -> SqlQuery:
     """Removes specific clauses from a query.
 
     The clauses can be denoted in two different ways: either as the raw type of the clause, or as an instance of the same
@@ -1069,7 +1108,7 @@ def drop_clause(query, clauses_to_drop):
         drop_clause(query, Limit)
         drop_clause(query, query.limit_clause)
     """
-    clauses_to_drop = set(util.enlist(clauses_to_drop))
+    clauses_to_drop = {clauses_to_drop} if isinstance(clauses_to_drop, (type, SqlClause)) else set(clauses_to_drop)
     clauses_to_drop = {drop if isinstance(drop, type) else type(drop) for drop in clauses_to_drop}
     remaining_clauses = [clause for clause in query.clauses() if type(clause) not in clauses_to_drop]
     return build_query(remaining_clauses)
@@ -1091,7 +1130,7 @@ def replace_clause(
 def replace_clause(query: SqlQuery, replacements: SqlClause | Iterable[SqlClause]) -> SqlQuery: ...
 
 
-def replace_clause(query, replacements):
+def replace_clause(query: SqlQuery, replacements: SqlClause | Iterable[SqlClause]) -> SqlQuery:
     """Creates a new SQL query with the replacements being used instead of the original clauses.
 
     Clauses are matched on a per-type basis (including subclasses, i.e. a replacement can be a subclass of an existing clause).
@@ -1115,7 +1154,7 @@ def replace_clause(query, replacements):
         An updated query where the matching `replacements` clauses are used in place of the clause instances that were
         originally present in the query
     """
-    available_replacements: set[SqlClause] = set(util.enlist(replacements))
+    available_replacements = {replacements} if isinstance(replacements, SqlClause) else set(replacements)
 
     replaced_clauses: list[SqlClause] = []
     for current_clause in query.clauses():

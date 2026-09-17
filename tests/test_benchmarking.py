@@ -49,7 +49,7 @@ class DummyCardinalityEstimator(pb.CardinalityEstimator):
         query: pb.SqlQuery,
         intermediate: pb.TableReference | Iterable[pb.TableReference],
     ) -> pb.Cardinality:
-        intermediate = pb.util.enlist(intermediate)
+        intermediate = [intermediate] if isinstance(intermediate, pb.TableReference) else list(intermediate)
         cardinality = len(intermediate) * random.randint(42, 1000)
         return pb.Cardinality(cardinality)
 

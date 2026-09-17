@@ -15,7 +15,7 @@ from . import (
 )
 from ._df import read_df, write_df
 from ._errors import InvariantViolationError, LogicError, StateError
-from .collections import enlist, flatten, powerset, set_union, simplify, sliding_window
+from .collections import flatten, powerset, set_union, simplify, sliding_window
 from .dicts import argmax, argmin, frozendict, hash_dict
 from .jsonize import jsondict, to_json, to_json_dump
 from .logging import Logger, make_logger, standard_logger, timestamp
@@ -36,7 +36,6 @@ __all__ = [
     "camel_case2snake_case",
     "collections",
     "dicts",
-    "enlist",
     "flatten",
     "frozendict",
     "hash_dict",

@@ -1320,11 +1320,14 @@ class PostgresStatistics(StatisticsCatalog):
         if not columns and not tables:
             tables = [tab for tab in self._db.schema().tables() if not self._db.schema().is_view(tab)]
         if not columns and tables:
-            tables = util.enlist(tables)
+            tables = [tables] if isinstance(tables, TableReference) else list(tables)
             columns = util.set_union(self._db.schema().columns(tab) for tab in tables)
 
         assert columns is not None
-        columns: Iterable[ColumnReference] = util.enlist(columns)
+        columns = [columns] if isinstance(columns, ColumnReference) else list(columns)
+        if not ColumnReference.all_bound(columns):
+            raise UnboundColumnError("All columns must be bound to a table for statistics update")
+
         columns_map: dict[TableReference, list[str]] = util.dicts.generate_multi(
             (col.table, col.name) for col in columns
         )

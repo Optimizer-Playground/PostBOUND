@@ -282,14 +282,16 @@ class PhysicalOperatorAssignment:
             case ScanOperator():
                 self.set_scan_operator(operator, tables)
             case JoinOperator():
-                tables = util.enlist(tables)
+                tables = [tables] if isinstance(tables, TableReference) else tables
                 self.set_join_operator(operator, tables)
             case ScanOperatorAssignment():
                 self.set_scan_operator(operator)
             case JoinOperatorAssignment():
                 self.set_join_operator(operator)
             case IntermediateOperator():
-                tables = util.enlist(tables)
+                if tables is None:
+                    raise ValueError("Tables must be given for intermediate operators")
+                tables = [tables] if isinstance(tables, TableReference) else tables
                 self.set_intermediate_operator(operator, tables)
             case _:
                 raise ValueError(f"Unknown operator assignment: {operator}")
@@ -1443,7 +1445,8 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
         Optional[JoinTree[AnnotationType]]
             The join tree node that contains the specified tables. If no such node exists, *None* is returned.
         """
-        needle: set[TableReference] = set(util.enlist(table))
+        table = {table} if isinstance(table, TableReference) else set(table)
+        needle: set[TableReference] = set(table)
         candidates = self.tables()
 
         if needle == candidates:

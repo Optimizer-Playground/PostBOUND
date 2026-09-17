@@ -59,7 +59,7 @@ class PreciseCardinalities(CardinalityEstimator):
     def calculate_estimate(
         self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
-        intermediate = util.enlist(intermediate)
+        intermediate = [intermediate] if isinstance(intermediate, TableReference) else list(intermediate)
         subquery = transform.extract_subquery(query, intermediate)
         subquery = transform.as_count_star_query(subquery)
         if subquery in self._cardinality_cache:
@@ -180,7 +180,7 @@ class PreComputedCardinalities(CardinalityEstimator):
     def calculate_estimate(
         self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
-        intermediate = frozenset(util.enlist(intermediate))
+        intermediate = frozenset([intermediate] if isinstance(intermediate, TableReference) else intermediate)
         label = self._workload.label_of(query)
         card = self._cards.get((label, intermediate))
         if card is not None:

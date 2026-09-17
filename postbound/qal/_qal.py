@@ -4715,10 +4715,8 @@ class PredicateTree:
             self._join_predicate_map = self._init_join_predicate_map()
 
         join_predicates = set()
-        first_table, second_table = (
-            util.enlist(first_table),
-            util.enlist(second_table),
-        )
+        first_table = [first_table] if not isinstance(first_table, Iterable) else list(first_table)
+        second_table = [second_table] if not isinstance(second_table, Iterable) else list(second_table)
         for first in first_table:
             for second in second_table:
                 map_key = frozenset((first, second))
@@ -6021,7 +6019,7 @@ class Select(BaseClause):
         Select
             The clause
         """
-        columns = util.enlist(columns)
+        columns = [columns] if not isinstance(columns, Iterable) else list(columns)
         target_columns = [
             Projection.column(column) if isinstance(column, ColumnReference) else Projection(column)
             for column in columns
@@ -7130,7 +7128,11 @@ class From(BaseClause):
         tables: TableReference | Iterable[TableReference],
     ) -> From:
         """Shorthand method to create a *FROM* clause for a set of table references."""
-        items = [DirectTableSource(table) for table in util.enlist(tables)]
+        items = (
+            [DirectTableSource(tables)]
+            if isinstance(tables, TableReference)
+            else [DirectTableSource(tab) for tab in tables]
+        )
         return From(items)
 
     def __init__(self, items: TableSource | Iterable[TableSource]) -> None:
@@ -7557,7 +7559,7 @@ class OrderBy(ModifierClause):
     def __init__(self, expressions: Iterable[Ordering] | Ordering) -> None:
         if not expressions:
             raise ValueError("At least one ORDER BY expression required")
-        self._expressions = tuple(util.enlist(expressions))
+        self._expressions = (expressions,) if isinstance(expressions, Ordering) else tuple(expressions)
         super().__init__(hash(self._expressions))
 
     __slots__ = ("_expressions",)
@@ -9188,8 +9190,7 @@ class SelectStatement(SqlQuery):
         ]
 
         skip = skip or []  # handle None case - now we have an Iterable or a Type
-        skip = util.enlist(skip)  # handle single type case - now we have an Iterable
-        skip = tuple(skip)  # prepare for isinstance() checks
+        skip = (skip,) if isinstance(skip, type) else tuple(skip)  # handle single type case - now we have a tuple
 
         return [clause for clause in all_clauses if clause is not None and not isinstance(clause, skip)]
 
@@ -9509,7 +9510,7 @@ class SetQuery(SqlQuery):
         return list(self._lhs.subqueries()) + list(self._rhs.subqueries())
 
     def clauses(self, *, skip: type | Iterable[type] | None = None) -> Sequence[ModifierClause | SetOpClause]:
-        clauses: list[SqlClause] = []
+        clauses: list[ModifierClause | SetOpClause] = []
 
         if self._hints:
             clauses.append(self._hints)
@@ -9534,8 +9535,7 @@ class SetQuery(SqlQuery):
             clauses.append(self._limit)
 
         skip = skip or []  # handle None case - now we have an Iterable or a Type
-        skip = util.enlist(skip)  # handle single type case - now we have an Iterable
-        skip = tuple(skip)  # prepare for isinstance() checks
+        skip = (skip,) if isinstance(skip, type) else tuple(skip)  # handle single type case - now we have a tuple
 
         return [c for c in clauses if not isinstance(c, skip)]
 
@@ -9821,6 +9821,6 @@ def as_query(clauses: SqlClause | Iterable[SqlClause], *args) -> SqlQuery:
     occurrences overwrite earlier ones. Whether a `SelectStatement` or a `SetQuery` is produced is
     inferred from the clauses - see `build_query` for the exact rules.
     """
-    all_clauses = list(util.enlist(clauses))
+    all_clauses = [clauses] if isinstance(clauses, SqlClause) else list(clauses)
     all_clauses.extend(args)
     return build_query(all_clauses)

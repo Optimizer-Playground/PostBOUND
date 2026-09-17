@@ -1456,7 +1456,8 @@ class QueryPlan:
         Optional[QueryPlan]
             The join tree node that contains the specified tables. If no such node exists, *None* is returned.
         """
-        needle: set[TableReference] = set(util.enlist(tables))
+        tables = {tables} if isinstance(tables, TableReference) else set(tables)
+        needle: set[TableReference] = set(tables)
         candidates = self.tables()
 
         if needle == candidates:

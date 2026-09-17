@@ -2716,7 +2716,7 @@ class _SubquerySet:
 
         This factory handles the generation of an appropriate frozenset.
         """
-        subqueries = util.enlist(subqueries)
+        subqueries = [subqueries] if isinstance(subqueries, SelectStatement) else list(subqueries)
         return _SubquerySet(frozenset(subqueries))
 
     def __add__(self, other: _SubquerySet) -> _SubquerySet:
