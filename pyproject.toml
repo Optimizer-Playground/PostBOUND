@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PostBOUND"
-version = "0.22.0.dev3"
+version = "0.22.0.dev4"
 authors = [{ name = "Rico Bergmann", email = "rico.bergmann1@tu-dresden.de" }]
 description = "PostBOUND is a research framework to prototype and benchmark database query optimizers"
 readme = "README.md"
@@ -26,6 +26,7 @@ dependencies = [
     "pandas~=2.3",
     "pglast~=7.10",
     "psycopg[binary]~=3.2",
+    "quacklab~=1.5",
     "tqdm~=4.67",
 ]
 
@@ -34,9 +35,6 @@ vis = [
     "matplotlib~=3.10",
     "seaborn~=0.13",
     "graphviz~=0.21",
-]
-duckdb = [
-    "quacklab~=1.5",
 ]
 mysql = [
     "mysql-connector-python~=9.5"
@@ -54,7 +52,7 @@ dev = [
     # Pull in every optional backend: without them ty cannot resolve the imports in vis/,
     # duckdb.py and mysql.py, so type-check results would depend on which extras a
     # developer happened to sync.
-    "postbound[duckdb,mysql,vis]",
+    "postbound[mysql,vis]",
     "ipython>=9.8.0",
     "jupyterlab>=4.6.1",
     "pre-commit>=4.4",
@@ -64,15 +62,11 @@ dev = [
     # xdist parallelises the offline tier, timeout stops a hung test from blocking a push.
     "pytest>=8.4",
     "pytest-timeout>=2.4",
-    "pytest-xdist>=3.8",
     "ruff==0.16.6",
-    "tables==3.11.1",
-    "ty==0.0.78",
-]
-doc = [
-    "ipython>=9.8.0",
     "sphinx>=9.1.0",
     "sphinx-book-theme>=1.1.4",
+    "tables==3.11.1",
+    "ty==0.0.78",
 ]
 
 [tool.uv]
