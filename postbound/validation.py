@@ -166,6 +166,9 @@ class PreCheckResult:
             raise ValueError("Unexpected failure reason type: " + str(self.failure_reason))
         return f"[{inner_contents}]"
 
+    def __bool__(self) -> bool:
+        return self.passed
+
 
 class UnsupportedQueryError(RuntimeError):
     """Error to indicate that a specific query cannot be optimized by a selected algorithms.
