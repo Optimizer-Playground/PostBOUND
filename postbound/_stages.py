@@ -5,7 +5,7 @@ import math
 from collections.abc import Generator, Iterable
 from typing import Self
 
-from . import util
+from . import HintType, util
 from ._core import Cardinality, Cost, TableReference, TimeMs
 from ._hints import JoinTree, PhysicalOperatorAssignment, PlanParameterization
 from ._qep import QueryPlan
@@ -13,7 +13,7 @@ from .db import Database, DatabasePool, ResultSet
 from .qal import SqlQuery
 from .train import TrainingData, TrainingMetrics, TrainingSpec
 from .util.jsonize import jsondict
-from .validation import EmptyPreCheck, OptimizationPreCheck
+from .validation import EmptyPreCheck, OptimizationPreCheck, SupportedHintCheck
 from .workloads import Workload
 
 
@@ -69,6 +69,12 @@ class OptimizationStage:
     have to satisfy for the optimization stage to work properly. For example, if your hook only works for equi-join
     predicates, the pre-check can verify that the input query contains only such predicates. The benchmarking tools will
     make sure that only supported queries are passed to the stage.
+    A lot of commonly-used checks are already defined in the `validation` module. Take a look at the module before
+    implementing your own checks.
+
+    Each optimization stage automatically checks, whether the target database system supports all hints required for the
+    stage. If you overwrite the `pre_check` method, make sure to merge your specific check with the one provided by the
+    super class (using `OptimizationPreCheck.merge_with`). Otherwise, you need to check for the supported hints yourself.
 
     Finally, optimization stages provide a number of methods related to training. Specifically, each stage can specify that
     it needs to be trained on the database, the workload, or some sort of training samples in order to work properly.
@@ -383,6 +389,9 @@ class CompleteOptimizationAlgorithm(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
+    def pre_check(self) -> OptimizationPreCheck:
+        return SupportedHintCheck([HintType.JoinOrder, HintType.Operator])
+
 
 class JoinOrdering(OptimizationStage, abc.ABC):
     """The join order optimization generates a complete join order for an input query.
@@ -431,6 +440,9 @@ class JoinOrdering(OptimizationStage, abc.ABC):
             `JoinTree`.
         """
         raise NotImplementedError
+
+    def pre_check(self) -> OptimizationPreCheck:
+        return SupportedHintCheck([HintType.JoinOrder])
 
 
 class OperatorSelection(OptimizationStage, abc.ABC):
@@ -481,6 +493,9 @@ class OperatorSelection(OptimizationStage, abc.ABC):
         there is no reasonable way to deal with it.
         """
         raise NotImplementedError
+
+    def pre_check(self) -> OptimizationPreCheck:
+        return SupportedHintCheck([HintType.Operator])
 
 
 class ParameterGeneration(OptimizationStage, abc.ABC):
@@ -708,6 +723,9 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
 
         return parameterization
 
+    def pre_check(self) -> OptimizationPreCheck:
+        return SupportedHintCheck([HintType.Cardinality])
+
 
 class CostModel(OptimizationStage, abc.ABC):
     """The cost model estimates how expensive computing a certain query plan is.
@@ -851,6 +869,9 @@ class PlanEnumerator(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
+    def pre_check(self) -> OptimizationPreCheck:
+        return SupportedHintCheck([HintType.JoinOrder, HintType.Operator])
+
 
 class IncrementalOptimizationStep(OptimizationStage, abc.ABC):
     """Incremental optimization allows to chain different smaller optimization strategies.
@@ -891,6 +912,9 @@ class IncrementalOptimizationStep(OptimizationStage, abc.ABC):
             The optimized plan
         """
         raise NotImplementedError
+
+    def pre_check(self) -> OptimizationPreCheck:
+        return SupportedHintCheck([HintType.JoinOrder, HintType.Operator])
 
 
 class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):

@@ -820,8 +820,7 @@ class DuckDBHintService(HintService):
             JoinOperator.NestedLoopJoin,
             JoinOperator.HashJoin,
             JoinOperator.SortMergeJoin,
-            HintType.LinearJoinOrder,
-            HintType.BushyJoinOrder,
+            HintType.JoinOrder,
             HintType.Cardinality,
             HintType.Operator,
         }

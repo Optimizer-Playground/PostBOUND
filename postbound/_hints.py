@@ -1172,9 +1172,8 @@ class HintType(Enum):
     certain hints can be checked on the database system interface and should be handled as part of the optimization pre-checks.
     """
 
-    LinearJoinOrder = "Join order"
+    JoinOrder = "Join orderˆˆ"
     JoinDirection = "Join direction"
-    BushyJoinOrder = "Bushy join order"
     Operator = "Physical operators"
     Parallelization = "Par. workers"
     Cardinality = "Cardinality"

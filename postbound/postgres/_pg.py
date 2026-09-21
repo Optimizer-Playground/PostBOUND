@@ -1726,8 +1726,7 @@ PostgresScanHints = {
 PostgresPlanHints = {
     HintType.Cardinality,
     HintType.Parallelization,
-    HintType.LinearJoinOrder,
-    HintType.BushyJoinOrder,
+    HintType.JoinOrder,
     HintType.JoinDirection,
     HintType.Operator,
 }
