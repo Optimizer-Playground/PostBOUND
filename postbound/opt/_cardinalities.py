@@ -10,11 +10,11 @@ from pathlib import Path
 import pandas as pd
 
 from .. import PlanParameterization, parser, transform
-from .._core import Cardinality, TableReference
+from .._core import Cardinality, TableReference, TimeS
 from .._stages import (
     CardinalityEstimator,
 )
-from ..db import Database, DatabasePool
+from ..db import Database, DatabasePool, TimeoutSupport
 from ..qal import SqlQuery
 from ..util import Logger, jsondict, make_logger
 
@@ -35,19 +35,32 @@ class PerfectCardinalities(CardinalityEstimator):
         Whether to allow cross products in the query plan. If enabled, the estimator will compute cardinalities for
         cross products as part of `estimate_cardinalities` or `generate_plan_parameters`. Since this can be incredibly
         expensive, it is disabled by default.
+    timeout : TimeS, optional
+        If the database provides timeout support, this is the maximum number of seconds to wait for a cardinality
+        "estimate" (computation). If the query is not completed within this amount of time, an unknown cardinality will
+        be returned.
     """
 
     @staticmethod
     def cached(
-        database: Database | None = None, *, offline_file: Path | str, allow_cross_products: bool = False
+        database: Database | None = None,
+        *,
+        offline_file: Path | str,
+        allow_cross_products: bool = False,
+        timeout: TimeS | None = None,
     ) -> CardinalityEstimator:
-        estimator = PerfectCardinalities(database, allow_cross_products=allow_cross_products)
+        estimator = PerfectCardinalities(database, allow_cross_products=allow_cross_products, timeout=timeout)
         offline = OfflineCardinalities(offline_file, fallback=estimator)
         return offline
 
-    def __init__(self, database: Database | None = None, *, allow_cross_products: bool = False) -> None:
+    def __init__(
+        self, database: Database | None = None, *, allow_cross_products: bool = False, timeout: TimeS | None = None
+    ) -> None:
         super().__init__(allow_cross_products=allow_cross_products)
         self.database = database if database is not None else DatabasePool.get_instance().current_database()
+        if not self.database.provides(TimeoutSupport) and timeout is not None:
+            raise ValueError(f"Database {self.database} does not provide timeout support")
+        self._timeout = timeout
 
     def calculate_estimate(
         self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
@@ -55,8 +68,16 @@ class PerfectCardinalities(CardinalityEstimator):
         subquery = transform.extract_subquery(query, intermediate)
         subquery = transform.as_count_star_query(subquery)
 
-        card = self.database.execute_query(subquery)
-        return Cardinality(card)
+        if self._timeout is not None:
+            assert isinstance(self.database, TimeoutSupport)
+            card = self.database.execute_with_timeout(subquery, timeout=self._timeout)
+        else:
+            card = self.database.execute_query(subquery, raw=True)
+
+        if card is None:
+            return Cardinality.unknown()
+
+        return Cardinality(card[0][0])
 
     def describe(self) -> jsondict:
         return {"name": "perfect-cardinalities", "database": self.database.describe()}
@@ -236,7 +257,7 @@ class OfflineCardinalities(CardinalityEstimator):
 
     @staticmethod
     def fallback_perfect(
-        source: Path | str, *, database: Database | None = None, log: Logger | None = None
+        source: Path | str, *, database: Database | None = None, timeout: TimeS | None = None, log: Logger | None = None
     ) -> OfflineCardinalities:
         """Creates an OfflineCardinalities estimator with a perfect fallback estimator.
 
@@ -247,11 +268,15 @@ class OfflineCardinalities(CardinalityEstimator):
         database : Database, optional
             The database to use for the perfect fallback estimator. If not provided, the current database from the
             DatabasePool will be used.
+        timeout : TimeS, optional
+            If the database provides timeout support, this is the maximum number of seconds to wait for a cardinality
+            "estimate" (computation). If the query is not completed within this amount of time, an unknown cardinality
+            will be returned.
         log : Logger, optional
                 A logger to document when the perfect estimator is used.
         """
         database = database or DatabasePool.get_instance().current_database()
-        fallback = PerfectCardinalities(database)
+        fallback = PerfectCardinalities(database, timeout=timeout)
         return OfflineCardinalities(source, fallback=fallback, log=log)
 
     def __init__(
