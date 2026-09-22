@@ -90,7 +90,7 @@ class Cardinality(Number):
         self._value = round(value) if self._valid else -1
 
     __slots__ = ("_inf", "_nan", "_valid", "_value")
-    __match_args__ = ("_valid", "_value")
+    __match_args__ = ("value",)
 
     @property
     def value(self) -> int:
@@ -268,7 +268,7 @@ class Cardinality(Number):
             return Cardinality.unknown()
 
         match other:
-            case Cardinality(_, otherval):
+            case Cardinality(otherval):
                 if other._nan:
                     return Cardinality.unknown()
                 if other._inf:
@@ -297,71 +297,57 @@ class Cardinality(Number):
             return Cardinality(float(other))
         return Cardinality(float(other) % self.value)
 
-    def __lt__(self, other: object) -> bool:
-        if not self._valid:
+    def __lt__(self, other: SupportsFloat | SupportsIndex) -> bool:
+        if self._nan or self._inf:
             return False
 
         match other:
-            case Cardinality(_, otherval):
-                if other._nan:
-                    return False
-                if other._inf:
-                    return True
-                return self.value < otherval
-
+            case Cardinality(otherval):
+                return self._value < otherval
             case int() | float():
-                return self.value < other
+                return self._value < other
 
         return NotImplemented
 
-    def __le__(self, other: object) -> bool:
-        if not self._valid:
+    def __le__(self, other: SupportsFloat | SupportsIndex) -> bool:
+        if self._nan:
             return False
+        if self._inf:
+            return math.isinf(other)
 
         match other:
-            case Cardinality(_, otherval):
-                if other._nan:
-                    return False
-                if other._inf:
-                    return True
-                return self.value <= otherval
-
+            case Cardinality(otherval):
+                return self._value <= otherval
             case int() | float():
-                return self.value <= other
+                return self._value <= other
 
         return NotImplemented
 
-    def __gt__(self, other: object) -> bool:
-        if not self._valid:
+    def __gt__(self, other: SupportsFloat | SupportsIndex) -> bool:
+        if self._nan:
             return False
+        if self._inf:
+            return not math.isinf(other)
 
         match other:
-            case Cardinality(_, otherval):
-                if other._nan:
-                    return False
-                if other._inf:
-                    return True
-                return self.value > otherval
-
+            case Cardinality(otherval):
+                return self._value > otherval
             case int() | float():
-                return self.value > other
+                return self._value > other
 
         return NotImplemented
 
-    def __ge__(self, other: object) -> bool:
-        if not self._valid:
+    def __ge__(self, other: SupportsFloat | SupportsIndex) -> bool:
+        if self._nan:
             return False
+        if self._inf:
+            return True
 
         match other:
-            case Cardinality(_, otherval):
-                if other._nan:
-                    return False
-                if other._inf:
-                    return True
-                return self.value >= otherval
-
+            case Cardinality(otherval):
+                return self._value >= otherval
             case int() | float():
-                return self.value >= other
+                return self._value >= other
 
         return NotImplemented
 
