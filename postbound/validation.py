@@ -266,11 +266,17 @@ class OptimizationPreCheck:
         """
         return PreCheckResult.with_all_passed()
 
-    def merge_with(self, other: OptimizationPreCheck) -> OptimizationPreCheck:
+    def merge_with(self, other: OptimizationPreCheck | Iterable[OptimizationPreCheck]) -> OptimizationPreCheck:
         """Combines two checks."""
-        if self == other:
-            return self
-        return CompoundCheck([self, other])
+        if isinstance(other, OptimizationPreCheck):
+            other = [other]
+
+        all_checks: list[OptimizationPreCheck] = [self]
+        for check in other:
+            if check == self:
+                continue
+            all_checks.append(check)
+        return CompoundCheck(all_checks)
 
     def describe(self) -> dict:
         """Provides a JSON-serializable representation of the specific check, as well as important parameters.
