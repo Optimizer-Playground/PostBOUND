@@ -90,7 +90,7 @@ class Cardinality(Number):
         self._value = round(value) if self._valid else -1
 
     __slots__ = ("_inf", "_nan", "_valid", "_value")
-    __match_args__ = ("value",)
+    __match_args__ = ("raw_value",)
 
     @property
     def value(self) -> int:
@@ -100,6 +100,15 @@ class Cardinality(Number):
                 "Not a valid cardinality. Use is_valid() to check, or get() to handle unknown values yourself."
             )
         return self._value
+
+    @property
+    def raw_value(self) -> float:
+        """Get the raw value of this cardinality. This is a float and can be *NaN* or *inf* for invalid cardinalities."""
+        if self._nan:
+            return math.nan
+        if self._inf:
+            return math.inf
+        return float(self._value)
 
     def isnan(self) -> bool:
         """Checks, whether cardinality value is *NaN*."""
