@@ -107,6 +107,9 @@ class ResultCache(Database):
         ResultCache
             The (possibly newly created) cache instance for the given database and offline file.
         """
+        if isinstance(db, ResultCache) and offline_cache == db.offline_file:
+            return db
+
         existing_cache = _caches.get((db, offline_cache))
         if existing_cache is not None:
             return existing_cache
