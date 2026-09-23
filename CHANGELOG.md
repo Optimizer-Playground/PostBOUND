@@ -100,6 +100,31 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   on MacOS. Currently, this should be considered as wontfix.
 - The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
   currently exploring alternative, more reliable solutions.
+- `Cardinality.__eq__` raises `StateError` instead of returning `False` when comparing two `Cardinality` instances
+  that are invalid in *different* ways (e.g. one is NaN/"unknown" and the other is infinite, or one is valid and the
+  other is NaN/infinite). Comparing against a raw `float('nan')`/`float('inf')` is unaffected. Pinned in
+  `tests/unit/test_core.py::test_eq_between_differently_invalid_cardinalities_raises_instead_of_returning_false`.
+- `hash(Cardinality(5)) != hash(5)`, even though `Cardinality(5) == 5`, which violates the usual equal-objects-hash-
+  equal contract and can break lookups in collections that mix `Cardinality` and plain `int`/`float` keys. Pinned in
+  `tests/unit/test_core.py::test_hash_is_inconsistent_with_equality_against_a_plain_int`.
+- `Cardinality.__floordiv__`/`__rfloordiv__` raise `ValueError`/`OverflowError` for NaN/infinite operands instead of
+  propagating them gracefully like `__mod__`/`__divmod__` do, and even for finite operands they round the quotient to
+  the nearest int before flooring, so e.g. `Cardinality(11) // Cardinality(4)` is `3` instead of the true floor
+  division result `2`. Pinned in `tests/unit/test_core.py::test_floordiv_with_a_nan_operand_raises_instead_of_propagating_unknown`,
+  `test_floordiv_with_an_infinite_dividend_raises_instead_of_propagating_infinite` and
+  `test_floordiv_rounds_to_the_nearest_int_before_flooring_instead_of_truncating`.
+- `Cardinality.__neg__` unconditionally `return`s the `NotImplemented` sentinel. Since `__neg__` is unary, Python does
+  not intercept that sentinel the way it does for binary operators, so `-Cardinality(5)` silently evaluates to the
+  `NotImplemented` object instead of raising `TypeError`. Pinned in
+  `tests/unit/test_core.py::test_neg_returns_the_notimplemented_sentinel_instead_of_raising`.
+- `Cardinality.__sub__` (and the constructor in general) never enforces the "non-negative integer" invariant stated in
+  the class docstring, so e.g. `Cardinality(3) - Cardinality(5)` produces a `Cardinality` that reports `is_valid()`
+  as `True` with a negative `.value`. Pinned in
+  `tests/unit/test_core.py::test_subtraction_can_silently_produce_an_invalid_negative_cardinality`.
+- `Cardinality`'s class docstring documents matching in `case` statements against the shape `(is_valid, value)`, but
+  `__match_args__` is actually the single-element `("raw_value",)`; a two-element pattern raises `TypeError` instead
+  of matching. Pinned in
+  `tests/unit/test_core.py::test_match_pattern_does_not_match_the_documented_is_valid_value_shape`.
 
 ---
 
