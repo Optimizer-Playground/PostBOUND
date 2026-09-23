@@ -62,6 +62,9 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 ## Tests
 
+The testing strategy — what to test for a new module, which tier it belongs in, which doubles to use, and when the
+work counts as done — is described in [TESTING.md](TESTING.md). This section only covers the mechanics.
+
 Tests run under `pytest`. Existing `unittest.TestCase` classes are collected unchanged, but **new tests
 should be written as plain functions**, because pytest fixtures and `@pytest.mark.parametrize` do not work
 inside a `TestCase` subclass.
@@ -95,9 +98,10 @@ Workload queries are not stored in the repository — `postbound/workloads.py` d
 use into `$HOME/.postbound/`. Database instances can be provisioned with the shell scripts in
 `db-support/<system>/`, or via the Dockerfile (see the README's Docker options table).
 
-Regression tests for specific fixed bugs belong in a `RegressionTests` class at the **end** of the relevant
-test module, with a docstring naming the commit or issue being pinned. Write them at the lowest tier that
-reproduces the bug, so they stay cheap enough to run constantly.
+Every fixed bug gets a **dedicated regression test function** that fails if the bug is re-introduced. Put it
+in a final `# -- regression tests --` section of the relevant test module, with a docstring naming the commit
+or issue, and write it at the lowest tier that reproduces the bug so it stays cheap enough to run constantly.
+See [TESTING.md](TESTING.md#66-regression-tests) for details.
 
 ## Documentation
 

@@ -41,6 +41,10 @@ cd docs && uv run --group doc sphinx-build -M html source build
 
 ### Tests and database connections
 
+**`TESTING.md` is the testing strategy** — what to test and how, step by step. Follow it whenever writing or extending
+tests (e.g. "implement tests for `<module>` in accordance with `TESTING.md`"). Every fixed bug gets a dedicated
+regression test function that fails if the bug is re-introduced. The summary below covers only the mechanics.
+
 Tests run under **pytest**. Existing `unittest.TestCase` classes are collected unchanged; **new tests are written as
 plain functions**, since fixtures and `parametrize` do not work inside a `TestCase`.
 
