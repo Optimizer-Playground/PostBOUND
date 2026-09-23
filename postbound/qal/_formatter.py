@@ -443,7 +443,20 @@ def _quick_format_predicate(predicate: AbstractPredicate, *, flavor: SqlDialect)
 
     if isinstance(predicate, AndPredicate):
         first_child, *remaining_children = predicate.children
-        return [str(first_child)] + ["AND " + str(child) for child in remaining_children]
+        formatted_children: list[str] = []
+        if first_child.is_compound() and not isinstance(first_child, AndPredicate):
+            formatted_children.append(f"({first_child})")
+        else:
+            formatted_children.append(str(first_child))
+
+        for child in remaining_children:
+            if child.is_compound() and not isinstance(child, AndPredicate):
+                formatted_children.append(f"AND ({child})")
+            else:
+                formatted_children.append(f"AND {child}")
+
+        return formatted_children
+
     return [str(predicate)]
 
 

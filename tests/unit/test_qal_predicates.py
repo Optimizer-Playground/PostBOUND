@@ -251,6 +251,18 @@ def test_and_of_udf_predicates_produces_no_joins_only_filters() -> None:
     assert len(query.filters()) == 4
 
 
+def test_and_predicate_str_brackets_a_disjunctive_child() -> None:
+    """`AndPredicate.__str__` must wrap an `OrPredicate` child in parentheses -- since AND binds tighter than
+    OR, printing it unparenthesized would silently change the predicate's meaning if the string were reparsed
+    (`a AND b OR c` parses as `(a AND b) OR c`, not `a AND (b OR c)`). Guards the same bracket-insertion rule
+    that `format_quick()` has a dedicated regression test for in `test_qal_formatter.py`, since `str()` builds
+    the *WHERE* clause through this same method.
+    """
+    pred = where("SELECT * FROM r WHERE r.a = 1 AND (r.b = 2 OR r.b = 3)")
+
+    assert str(pred) == "r.a = 1 AND (r.b = 2 OR r.b = 3)"
+
+
 def test_or_predicate_takes_precedence_in_parsing() -> None:
     """`a OR b AND c` parses as `a OR (b AND c)` -- the OR is the root, matching normal operator precedence."""
     query = parse(

@@ -3338,7 +3338,7 @@ class AndPredicate(CompoundPredicate):
     def __str__(self) -> str:
         components: list[str] = []
         for child in self._children:
-            if isinstance(child, CompoundPredicate) and not child.is_negation():
+            if isinstance(child, CompoundPredicate) and not isinstance(child, AndPredicate):
                 components.append(f"({child})")
             else:
                 components.append(str(child))

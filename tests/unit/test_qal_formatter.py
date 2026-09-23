@@ -143,3 +143,34 @@ def test_vanilla_and_postgres_flavors_agree_on_a_plain_query() -> None:
     query = parse("SELECT * FROM r WHERE r.a = 1")
 
     assert format_quick(query, flavor="vanilla") == format_quick(query, flavor="postgres")
+
+
+# -- regression tests --------------------------------------------------------------------------------------
+
+
+def test_and_predicate_formatting_brackets_a_trailing_or_child() -> None:
+    """Regression guard for a bracket-dropping bug in `_quick_format_predicate`: the non-first children of an
+    *AND* were rendered with plain `str(child)`, which never wraps a compound child in parentheses (that is
+    the *caller's* job, not `OrPredicate.__str__`'s). So `f.a = 42 AND (f.b = 2 OR f.b = 3)` used to come out
+    as `f.a = 42 AND f.b = 2 OR f.b = 3` -- a different predicate once reparsed, since *AND* binds tighter
+    than *OR*.
+    """
+    query = parse("SELECT * FROM foo f WHERE f.a = 42 AND (f.b = 2 OR f.b = 3)")
+
+    formatted = format_quick(query)
+
+    assert "AND (f.b = 2 OR f.b = 3)" in formatted
+    assert parse(formatted) == query
+
+
+def test_and_predicate_formatting_brackets_a_leading_or_child() -> None:
+    """Regression guard for the same bug as `test_and_predicate_formatting_brackets_a_trailing_or_child`, but
+    for the *first* child of the *AND*, which `_quick_format_predicate` handles in a separate branch of its
+    own (`first_child, *remaining_children = predicate.children`) and so could regress independently.
+    """
+    query = parse("SELECT * FROM foo f WHERE (f.b = 2 OR f.b = 3) AND f.a = 42")
+
+    formatted = format_quick(query)
+
+    assert "WHERE (f.b = 2 OR f.b = 3)" in formatted
+    assert parse(formatted) == query
