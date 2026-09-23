@@ -1572,7 +1572,7 @@ class PostgresStatistics(StatisticsCatalog):
         null_frac = self.null_frac(column)
         assert n_rows is not None and null_frac is not None
 
-        bucket_freq = (1 - null_frac) * n_rows // len(bounds)
+        bucket_freq = round((1 - null_frac) * n_rows // len(bounds))
 
         mcvs = self.most_common_values(column)
         if mcvs is None:
