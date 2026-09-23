@@ -1434,7 +1434,7 @@ class PostgresStatistics(StatisticsCatalog):
         n_rows = self.total_rows(column.table)
         assert n_rows is not None, "Could not retrieve total row count for table"
 
-        return int(-1 * n_rows * dist_values) + null_correction
+        return -1 * int(n_rows) * dist_values + null_correction
 
     def null_frac(self, column: ColumnReference) -> float | None:
         if not ColumnReference.assert_bound(column):
