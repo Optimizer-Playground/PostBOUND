@@ -69,8 +69,8 @@ def test_zero_factory_produces_a_valid_zero() -> None:
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
-    [(42.0, 42), (42.4, 42), (42.6, 43), (42.5, 42), (43.5, 44), (-0.4, 0)],
-    ids=["exact", "round-down", "round-up", "half-to-even-down", "half-to-even-up", "negative-rounds-to-zero"],
+    [(42.0, 42), (42.4, 42), (42.6, 43), (42.5, 42), (43.5, 44)],
+    ids=["exact", "round-down", "round-up", "half-to-even-down", "half-to-even-up"],
 )
 def test_constructor_rounds_the_value_like_builtin_round(raw: float, expected: int) -> None:
     """`round()` uses banker's rounding (round-half-to-even), and the constructor inherits that."""
@@ -216,8 +216,10 @@ def test_rsub_with_plain_number_operands(other: int | float) -> None:
 
 def test_sub_with_nan_or_inf_operand_is_unknown_or_infinite() -> None:
     assert (VALID - NAN).isnan()
-    assert (VALID - INF).isinf()
     assert (INF - VALID).isinf()
+
+    with pytest.raises(ValueError, match="Cardinalities cannot be negative"):
+        _ = VALID - INF
 
 
 def test_sub_of_infinite_from_infinite_is_unknown() -> None:
@@ -656,33 +658,16 @@ def test_match_binds_the_single_positional_pattern_to_raw_value() -> None:
 # -- regression tests ----------------------------------------------------------------------------------------
 
 
-def test_neg_returns_the_notimplemented_sentinel_instead_of_raising() -> None:
-    """Documents a real bug, not the intended behavior.
-
-    `__neg__` unconditionally `return NotImplemented`. For binary operators that sentinel triggers the
-    reflected-method protocol, but `__neg__` is unary -- there is no other operand to hand it to, so Python
-    does not intercept it. `-VALID` therefore silently evaluates to the `NotImplemented` singleton itself
-    rather than raising `TypeError` (the usual outcome for an unsupported unary operator) or returning a
-    sensible value. The comment on `__neg__` ("What's a negative cardinality supposed to be?") suggests
-    raising `TypeError` was the intent.
-    """
-    result = -VALID
-
-    assert result is NotImplemented
+def test_neg_raises() -> None:
+    """`__neg__` is not implemented because cardinalities are always non-negative by contract."""
+    with pytest.raises(TypeError):
+        _ = -VALID
 
 
-def test_subtraction_can_silently_produce_an_invalid_negative_cardinality() -> None:
-    """Documents a real bug, not the intended behavior.
-
-    The class docstring states "a valid cardinality can be any non-negative integer", but the constructor
-    never enforces that: `__sub__` just wraps `self.get() - other.get()` in `Cardinality(...)` with no bounds
-    check, so subtracting a larger cardinality from a smaller one produces a Cardinality that reports
-    `is_valid() is True` and a negative `.value`.
-    """
-    result = Cardinality(3) - Cardinality(5)
-
-    assert result.is_valid() is True
-    assert result.value == -2
+def tests_substraction_cannot_produce_negative_cardinality() -> None:
+    """__sub__ can never produce a negative cardinality, and the constructor raises if it would."""
+    with pytest.raises(ValueError):
+        _ = Cardinality(3) - Cardinality(5)
 
 
 @pytest.mark.parametrize(
@@ -697,87 +682,39 @@ def test_subtraction_can_silently_produce_an_invalid_negative_cardinality() -> N
     ],
     ids=["valid-nan", "nan-valid", "valid-inf", "inf-valid", "nan-inf", "inf-nan"],
 )
-def test_eq_between_differently_invalid_cardinalities_raises_instead_of_returning_false(
-    lhs: Cardinality, rhs: Cardinality
-) -> None:
-    """Documents a real bug, not the intended behavior.
-
-    `__eq__`'s `Cardinality` branch only special-cases the case where *both* operands share the same invalid
-    state (both NaN, or both inf); every other combination -- including one valid operand paired with one
-    invalid one -- falls through to `self.value == other.value`, which raises `StateError` because `.value`
-    is undefined for NaN/inf. Comparing against a raw `float('nan')`/`float('inf')` instead of a `Cardinality`
-    does not hit this path and correctly returns `False` (see
-    `test_comparisons_against_a_plain_number_operand`), so the crash is specific to comparing two
-    `Cardinality` instances.
-    """
-    with pytest.raises(StateError, match="Not a valid cardinality"):
-        _ = lhs == rhs
+def test_eq_between_differently_invalid_cardinalities_is_false(lhs: Cardinality, rhs: Cardinality) -> None:
+    assert lhs != rhs
 
 
-def test_hash_is_inconsistent_with_equality_against_a_plain_int() -> None:
-    """Documents a real bug, not the intended behavior.
-
-    `Cardinality(5) == 5` is `True` (see `test_eq_against_equal_plain_numbers`), but `__hash__` hashes the
-    tuple `(self._nan, self._inf, self._value)` rather than delegating to `hash(float(self))`. This violates
-    the invariant that equal objects must hash equal, and would silently break lookups in a `dict`/`set` that
-    mixes `Cardinality` and plain `int`/`float` keys of the same numeric value.
-    """
+def test_hash_is_consistent_with_equality_against_a_plain_int() -> None:
     assert VALID == 5
-    assert hash(VALID) != hash(5)
+    assert hash(VALID) == hash(5)
 
 
-def test_floordiv_with_a_nan_operand_raises_instead_of_propagating_unknown() -> None:
-    """Documents a real bug, not the intended behavior.
-
-    `__mod__`/`__divmod__` explicitly special-case NaN/inf operands and propagate them gracefully (see
-    `test_mod_when_self_is_invalid_returns_unknown` and friends). `__floordiv__`/`__rfloordiv__` have no such
-    special-casing: they just do `math.floor(float(self / other))`, and `math.floor(nan)` raises `ValueError`
-    instead of returning an "unknown" result.
-    """
-    with pytest.raises(ValueError, match="cannot convert float NaN to integer"):
-        _ = VALID // NAN
-
-    with pytest.raises(ValueError, match="cannot convert float NaN to integer"):
-        _ = NAN // VALID
-
-    with pytest.raises(ValueError, match="cannot convert float NaN to integer"):
-        _ = 10 // NAN
+def test_floordiv_with_a_nan_propagates_unknown() -> None:
+    assert math.isnan(VALID // NAN)
+    assert math.isnan(NAN // VALID)
+    assert math.isnan(10 // NAN)
 
 
-def test_floordiv_rounds_to_the_nearest_int_before_flooring_instead_of_truncating() -> None:
-    """Documents a real bug, not the intended behavior.
-
-    `__floordiv__` is `math.floor(float(self / other))`, and `self / other` (`__truediv__`) already rounds
-    its quotient to the nearest int via the `Cardinality(...)` constructor before `__floordiv__` ever floors
-    it. So `11 // 4` -- true floor division is `2` -- first computes `11 / 4 = 2.75`, rounds that to `3`
-    inside the intermediate `Cardinality`, and only then floors, landing on `3`.
-    """
+def test_floordiv_truncates() -> None:
     result = Cardinality(11) // Cardinality(4)
-
-    assert result == 3
-    assert result != 11 // 4
+    assert result == 11 // 4
 
 
-def test_floordiv_with_an_infinite_dividend_raises_instead_of_propagating_infinite() -> None:
-    """Documents a real bug, not the intended behavior.
-
-    Same root cause as `test_floordiv_with_a_nan_operand_raises_instead_of_propagating_unknown`:
-    `math.floor(math.inf)` raises `OverflowError` rather than `__floordiv__` returning something like `inf`.
-    """
-    with pytest.raises(OverflowError, match="cannot convert float infinity to integer"):
-        _ = INF // VALID
+def test_floordiv_with_an_infinite_dividend_is_unknown() -> None:
+    assert math.isnan(INF // VALID)
 
 
-def test_match_pattern_does_not_match_the_documented_is_valid_value_shape() -> None:
-    """Documents a real bug, not the intended behavior.
+def test_match_pattern_is_the_documented_is_valid_value_shape() -> None:
+    match VALID:
+        case Cardinality(val):
+            assert val == VALID.value
 
-    The class docstring says cardinalities "match the following pattern: *(is_valid, value)*", implying a
-    two-element positional pattern. In reality `__match_args__ = ("raw_value",)` is a single-element tuple,
-    so a `case Cardinality(is_valid, value):` as documented raises `TypeError` at match time instead of
-    matching -- see `test_match_binds_the_single_positional_pattern_to_raw_value` for what the pattern
-    actually binds.
-    """
-    with pytest.raises(TypeError, match=r"accepts 1 positional sub-pattern \(2 given\)"):
-        match VALID:
-            case Cardinality(_is_valid, _value):  # type: ignore - the point of this test is that this raises at runtime
-                pass
+    match NAN:
+        case Cardinality(val):
+            assert math.isnan(val)
+
+    match INF:
+        case Cardinality(val):
+            assert math.isinf(val)

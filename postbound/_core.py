@@ -55,8 +55,8 @@ class Cardinality(Number):
     value. The `of()` factory method can be used for better readability. Additionally, the `unknown()` and `infinite()`
     factory methods can be used to create cardinalities in the special states.
 
-    Lastly, cardinalities can be used in *match* statements. They match the following pattern: *(is_valid, value)*. If
-    the cardinality is invalid, the value is set to -1.
+    Lastly, cardinalities can be used in *match* statements. They match the following pattern: *(value)*, where value is
+    a float. If the cardinality is unknown or infinite, the corresponding floats (NaN/inf) are used.
     """
 
     @staticmethod
@@ -84,6 +84,9 @@ class Cardinality(Number):
         return Cardinality(0)
 
     def __init__(self, value: int | float) -> None:
+        if value < 0:
+            raise ValueError("Cardinalities cannot be negative")
+
         self._nan = math.isnan(value)
         self._inf = math.isinf(value)
         self._valid = not self._nan and not self._inf
@@ -170,7 +173,7 @@ class Cardinality(Number):
 
     def __neg__(self) -> Cardinality:
         # What's a negative cardinality supposed to be?
-        return NotImplemented
+        raise TypeError("There are no negative cardinalities")
 
     def __sub__(self, other: object) -> Cardinality:
         if isinstance(other, Cardinality):
@@ -266,11 +269,23 @@ class Cardinality(Number):
             own_value = self.value
         return divmod(float(other), own_value)
 
-    def __floordiv__(self, other: object) -> int:
-        return math.floor(float(self / other))
+    def __floordiv__(self, other: SupportsFloat | SupportsIndex) -> float:
+        if self._nan or self._inf:
+            return math.nan
+        if math.isnan(other):
+            return math.nan
+        if math.isinf(other):
+            return 0
+        return math.floor(float(self) / float(other))
 
-    def __rfloordiv__(self, other: SupportsFloat | SupportsIndex) -> int:
-        return math.floor(float(other / self))
+    def __rfloordiv__(self, other: SupportsFloat | SupportsIndex) -> float:
+        if self._nan:
+            return math.nan
+        if self._inf:
+            return math.nan if math.isnan(other) or math.isinf(other) else 0
+        if math.isnan(other) or math.isinf(other):
+            return math.nan
+        return math.floor(float(other) / float(self))
 
     def __mod__(self, other: object) -> Cardinality:
         if not self._valid:
@@ -384,11 +399,13 @@ class Cardinality(Number):
     def __eq__(self, other: object) -> bool:
         match other:
             case Cardinality():
-                if self._nan and other._nan:
-                    return True
-                if self._inf and other._inf:
-                    return True
-                return self.value == other.value
+                if self._nan:
+                    return other._nan
+                if self._inf:
+                    return other._inf
+                if other._nan or other._inf:
+                    return False
+                return self._value == other._value
 
             case int():
                 return self._valid and self.value == other
@@ -398,13 +415,13 @@ class Cardinality(Number):
                     return True
                 if self._inf and math.isinf(other):
                     return True
-                return self._valid and self.value == other
+                return self._valid and self._value == other
 
         return NotImplemented
 
     def __hash__(self) -> int:
         # There is no need to hash _valid, since it is directly derived from _nan and _inf
-        return hash((self._nan, self._inf, self._value))
+        return hash(self.raw_value)
 
     def __repr__(self) -> str:
         return str(self)
