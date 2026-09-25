@@ -488,16 +488,10 @@ def extract_subquery(
 
 
 @overload
-def extract_subquery(
-    query: SetQuery, intermediate: TableReference | Iterable[TableReference]
-) -> SelectStatement | SetQuery: ...
-
-
-@overload
 def extract_subquery(query: SqlQuery, intermediate: TableReference | Iterable[TableReference]) -> SqlQuery: ...
 
 
-def extract_subquery(query, intermediate: TableReference | Iterable[TableReference]):
+def extract_subquery(query: SqlQuery, intermediate: TableReference | Iterable[TableReference]):
     """Extracts a subquery from a given query based on a subset of its tables.
 
     The subquery consists of exactly those predicates (join and filter) of the original query that reference the given tables.
@@ -505,11 +499,14 @@ def extract_subquery(query, intermediate: TableReference | Iterable[TableReferen
 
     - if the subquery extraction fails, we raise an error
     - the subquery will always be a *SELECT \\** query
+    - the subquery will only contain a *SELECT*, *FROM*, and *WHERE* clause
+
+    Note that especially the last rule can break a query if one of the intermediates was defined in a CTE.
     """
     subquery = extract_query_fragment(query, intermediate, projection="star")
     if subquery is None:
         raise ValueError("Could not extract subquery for the given tables")
-    return subquery
+    return build_query([subquery.select_clause, subquery.from_clause, subquery.where_clause])
 
 
 def _default_subquery_name(tables: Iterable[TableReference]) -> str:
