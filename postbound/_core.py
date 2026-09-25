@@ -467,7 +467,6 @@ class JoinOperator(Enum):
     NestedLoopJoin = "NLJ"
     HashJoin = "Hash Join"
     SortMergeJoin = "Sort-Merge Join"
-    IndexNestedLoopJoin = "Idx. NLJ"
 
     def __json__(self) -> str:
         return self.value

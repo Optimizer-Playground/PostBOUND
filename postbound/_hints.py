@@ -1572,12 +1572,12 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
     def __json__(self) -> jsondict:
         if self.is_scan():
             return {
-                "type": "join_tree_generic",
+                "type": "scan_node",
                 "table": self._table,
                 "annotation": self._annotation,
             }
         return {
-            "type": "join_tree_generic",
+            "type": "join_node",
             "outer": self._outer,
             "inner": self._inner,
             "annotation": self._annotation,
