@@ -204,6 +204,16 @@ class _NativeCardinalities(CardinalityEstimator):
         return self._database.optimizer().cardinality_estimate(subquery)
 
 
+class _DummyCardinalities(CardinalityEstimator):
+    def __init__(self) -> None:
+        super().__init__(allow_cross_products=False)
+
+    def calculate_estimate(
+        self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
+    ) -> Cardinality:
+        return Cardinality.unknown()
+
+
 class OfflineCardinalities(CardinalityEstimator):
     """Loads pre-computed cardinalities from disk.
 
@@ -231,6 +241,9 @@ class OfflineCardinalities(CardinalityEstimator):
     fallback : CardinalityEstimator, optional
         The fallback estimator to use if a specific intermediate is not found in the offline file. If not provided, a
         KeyError will be raised when an intermediate is not found.
+    update_source : bool, optional
+        Whether to update the offline file with newly computed cardinalities. If set to False, fallback cardinalities
+        are only retained for the lifetime of the estimator.
     log : Logger, optional
         A logger to document when the fallback estimator is used.
     """
@@ -253,11 +266,16 @@ class OfflineCardinalities(CardinalityEstimator):
         """
         database = database or DatabasePool.get_instance().current_database()
         fallback = _NativeCardinalities(database)
-        return OfflineCardinalities(source, fallback=fallback, log=log)
+        return OfflineCardinalities(source, fallback=fallback, update_source=False, log=log)
 
     @staticmethod
     def fallback_perfect(
-        source: Path | str, *, database: Database | None = None, timeout: TimeS | None = None, log: Logger | None = None
+        source: Path | str,
+        *,
+        database: Database | None = None,
+        timeout: TimeS | None = None,
+        update_source: bool = True,
+        log: Logger | None = None,
     ) -> OfflineCardinalities:
         """Creates an OfflineCardinalities estimator with a perfect fallback estimator.
 
@@ -272,15 +290,36 @@ class OfflineCardinalities(CardinalityEstimator):
             If the database provides timeout support, this is the maximum number of seconds to wait for a cardinality
             "estimate" (computation). If the query is not completed within this amount of time, an unknown cardinality
             will be returned.
+        updated_source : bool, optional
+            Whether to update the offline file with newly computed cardinalities
         log : Logger, optional
                 A logger to document when the perfect estimator is used.
         """
         database = database or DatabasePool.get_instance().current_database()
         fallback = PerfectCardinalities(database, timeout=timeout)
-        return OfflineCardinalities(source, fallback=fallback, log=log)
+        return OfflineCardinalities(source, fallback=fallback, update_source=update_source, log=log)
+
+    @staticmethod
+    def fallback_dummy(source: Path | str, *, log: Logger | None = None) -> OfflineCardinalities:
+        """Creates an OfflineCardinalities estimator that ignores all missing cardinalities.
+
+        Parameters
+        ----------
+        source : Path | str
+            The offline file containing the pre-computed cardinalities.
+        log : Logger, optional
+                A logger to document when estimates are missing.
+        """
+
+        return OfflineCardinalities(source, fallback=_DummyCardinalities(), update_source=False, log=log)
 
     def __init__(
-        self, source: Path | str, *, fallback: CardinalityEstimator | None = None, log: Logger | None = None
+        self,
+        source: Path | str,
+        *,
+        fallback: CardinalityEstimator | None = None,
+        update_source: bool = True,
+        log: Logger | None = None,
     ) -> None:
         super().__init__(allow_cross_products=fallback.allow_cross_products if fallback is not None else False)
 
@@ -298,6 +337,7 @@ class OfflineCardinalities(CardinalityEstimator):
         self._fallback = fallback
         self._dump_requested = False
         self._source = source
+        self._update_source = update_source
 
         self._complete_cache: dict[SqlQuery, PlanParameterization] = {}
 
@@ -320,7 +360,7 @@ class OfflineCardinalities(CardinalityEstimator):
         card = self._fallback.calculate_estimate(query, intermediate)
         self._cardinalities[subquery] = card
 
-        if self._dump_requested:
+        if self._dump_requested or not self._update_source:
             return card
 
         atexit.register(self._dump_cardinalities)
