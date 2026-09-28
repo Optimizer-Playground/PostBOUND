@@ -1654,26 +1654,26 @@ class QueryPlan:
         cost_estimator: Callable[[QueryPlan, Cardinality], Cost] | None = None,
         ignore_nan: bool = True,
     ) -> QueryPlan:
-        """Replaces the current estimates of the operator with the actual measurements.
+        """Replaces the current estimates of the plan with the actual measurements.
 
-        The updated plan will not contain any measurements anymore and the costs will be set to *Nan* unless an explicit cost
+        The updated plan will not contain any measurements and the costs will be set to *Nan* unless an explicit cost
         estimator is provided.
 
         Parameters
         ----------
         cost_estimator : Optional[Callable[[QueryPlan, Cardinality], Cost]], optional
-            An optional cost function to compute new estimates based on the new estimates. If no cost estimator is provided,
-            the cost is set to *NaN*. The estimator receives the old plan now along with the new cardinality estimate as input
-            and should return the new cost estimate.
+            An optional cost function to compute new estimates based on the new estimates. If no cost estimator is
+            provided, the cost is set to *NaN*. The estimator receives the old plan now along with the new cardinality
+            estimate as input and should return the new cost estimate.
         ignore_nan : bool, optional
-            Whether *NaN* cardinalities should also be swapped. By default, this is set to *True*, which only replaces the
-            estimated cardinality if the actual cardinality is a meaningful value.
+            Whether *NaN* cardinalities should also be swapped. By default, this is set to *True*, which only replaces
+            the estimated cardinality if the actual cardinality is a meaningful value.
 
         Returns
         -------
         QueryPlan
-            A new query plan with the actual cardinality as the estimated cardinality and the actual execution time as the
-            estimated cost. The current plan is not changed.
+            A new query plan with the actual cardinality as the estimated cardinality and the actual execution time as
+            the estimated cost. The current plan is not changed.
         """
         if self.actual_cardinality:
             updated_cardinality = (
@@ -1711,6 +1711,44 @@ class QueryPlan:
             plan_params=self.params,
             estimates=updated_estimates,
             measures=updated_measures,
+            subplan=updated_subplan,
+        )
+
+    def with_card_as_cost(self, *, ignore_nan: bool = True) -> QueryPlan:
+        """Replaces the current cost estimate of the operator with the estimated cardinality.
+
+        Parameters
+        ----------
+        ignore_nan : bool, optional
+            Whether *NaN* cardinalities should also be skipped. By default, this is set to *True*, which only replaces
+            the estimated cost if the estimated cardinality is a meaningful value.
+        """
+        updated_cost = (
+            self.estimated_cost
+            if ignore_nan and self.estimated_cardinality.isnan()
+            else float(self.estimated_cardinality)
+        )
+        updated_estimates = PlanEstimates(
+            cardinality=self.estimated_cardinality,
+            cost=updated_cost,
+            **(self._estimates.additional_estimates),
+        )
+
+        updated_children = [child.with_card_as_cost(ignore_nan=ignore_nan) for child in self.children]
+
+        if self.subplan:
+            updated_subplan_root = self.subplan.root.with_card_as_cost(ignore_nan=ignore_nan)
+            updated_subplan = Subplan(updated_subplan_root, self.subplan.target_name)
+        else:
+            updated_subplan = None
+
+        return QueryPlan(
+            self.node_type,
+            operator=self.operator,
+            children=updated_children,
+            plan_params=self.params,
+            estimates=updated_estimates,
+            measures=self._measures,
             subplan=updated_subplan,
         )
 
