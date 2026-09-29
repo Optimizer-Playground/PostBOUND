@@ -223,6 +223,7 @@ stats_data/
 # Build artifacts
 /dist/
 /generated/
+/workloads/
 /results/
 docs/build/
 docs/source/generated/

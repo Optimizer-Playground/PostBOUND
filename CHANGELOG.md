@@ -100,59 +100,30 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   on MacOS. Currently, this should be considered as wontfix.
 - The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
   currently exploring alternative, more reliable solutions.
-- `Cardinality.__eq__` raises `StateError` instead of returning `False` when comparing two `Cardinality` instances
-  that are invalid in *different* ways (e.g. one is NaN/"unknown" and the other is infinite, or one is valid and the
-  other is NaN/infinite). Comparing against a raw `float('nan')`/`float('inf')` is unaffected. Pinned in
-  `tests/unit/test_core.py::test_eq_between_differently_invalid_cardinalities_raises_instead_of_returning_false`.
-- `hash(Cardinality(5)) != hash(5)`, even though `Cardinality(5) == 5`, which violates the usual equal-objects-hash-
-  equal contract and can break lookups in collections that mix `Cardinality` and plain `int`/`float` keys. Pinned in
-  `tests/unit/test_core.py::test_hash_is_inconsistent_with_equality_against_a_plain_int`.
-- `Cardinality.__floordiv__`/`__rfloordiv__` raise `ValueError`/`OverflowError` for NaN/infinite operands instead of
-  propagating them gracefully like `__mod__`/`__divmod__` do, and even for finite operands they round the quotient to
-  the nearest int before flooring, so e.g. `Cardinality(11) // Cardinality(4)` is `3` instead of the true floor
-  division result `2`. Pinned in `tests/unit/test_core.py::test_floordiv_with_a_nan_operand_raises_instead_of_propagating_unknown`,
-  `test_floordiv_with_an_infinite_dividend_raises_instead_of_propagating_infinite` and
-  `test_floordiv_rounds_to_the_nearest_int_before_flooring_instead_of_truncating`.
-- `Cardinality.__neg__` unconditionally `return`s the `NotImplemented` sentinel. Since `__neg__` is unary, Python does
-  not intercept that sentinel the way it does for binary operators, so `-Cardinality(5)` silently evaluates to the
-  `NotImplemented` object instead of raising `TypeError`. Pinned in
-  `tests/unit/test_core.py::test_neg_returns_the_notimplemented_sentinel_instead_of_raising`.
-- `Cardinality.__sub__` (and the constructor in general) never enforces the "non-negative integer" invariant stated in
-  the class docstring, so e.g. `Cardinality(3) - Cardinality(5)` produces a `Cardinality` that reports `is_valid()`
-  as `True` with a negative `.value`. Pinned in
-  `tests/unit/test_core.py::test_subtraction_can_silently_produce_an_invalid_negative_cardinality`.
-- `Cardinality`'s class docstring documents matching in `case` statements against the shape `(is_valid, value)`, but
-  `__match_args__` is actually the single-element `("raw_value",)`; a two-element pattern raises `TypeError` instead
-  of matching. Pinned in
-  `tests/unit/test_core.py::test_match_pattern_does_not_match_the_documented_is_valid_value_shape`.
 - Several `postbound.transform` functions produce wrong results or crash. All are pinned in
   `tests/unit/test_transform.py` (search for "Documents a real bug"):
-  - Column renaming (`rename_columns_in_expression`/`_predicate`/`_clause`/`_query`) crashes on arithmetic
-    expressions (`first_arg`), `BETWEEN` (`interval_start`), `NOT` (`children`) and any `SetQuery` (`having_clause`
-    is read before the set-query branch); it turns `NOT IN` into `IN`; and it drops a `VALUES` CTE that no renaming
-    touches. These crashes propagate to `move_into_subquery`, `rename_table` and `merge_tables`.
-  - `replace_predicate` never replaces a WHERE/HAVING predicate, because `replace_expressions` only hands the
-    operands of base predicates to the replacement callback.
-  - `merge_tables` always fails for two or more tables: after the first `rename_table` the target is already in
-    the FROM clause, which `rename_table` rejects.
-  - `infer_between_predicates` treats `v <= col` as `col <= v`, keeps only one of two `<=` bounds on the same
-    column, and drops a bound on a computed expression (e.g. `r.a + 1 <= 5`) together with every conjunct not yet
-    visited (or raises, if nothing is left).
-  - `add_ec_predicates` silently drops non-equi joins such as `s.c < t.d`.
-  - `explicit_to_implicit` crashes on a `CROSS JOIN` ("No predicates supplied").
-  - `extract_query_fragment` with `projection="keep"` drops projections over a strict subset of the requested
-    tables, and ignores `projection` altogether for set queries.
-  - `move_into_subquery` keeps the (renamed) original WHERE clause when all predicates move into the subquery.
-  - `expand_select_star` expands `*` over a CTE or subquery into the columns *inside* it (e.g. `SELECT r.a FROM c`)
-    and replaces unnamed computed projections such as `count(*)` by a non-existent `"?column?"` column.
-  - `expand_natural_joins` rejects a chain of natural joins as "ambiguous".
-  - `normalize_query` normalizes the CTEs of a `SelectStatement` but then discards the result.
+    - Column renaming (`rename_columns_in_expression`/`_predicate`/`_clause`/`_query`) crashes on arithmetic
+      expressions (`first_arg`), `BETWEEN` (`interval_start`), `NOT` (`children`) and any `SetQuery` (`having_clause`
+      is read before the set-query branch); it turns `NOT IN` into `IN`; and it drops a `VALUES` CTE that no renaming
+      touches. These crashes propagate to `move_into_subquery`, `rename_table` and `merge_tables`.
+    - `replace_predicate` never replaces a WHERE/HAVING predicate, because `replace_expressions` only hands the
+      operands of base predicates to the replacement callback.
+    - `merge_tables` always fails for two or more tables: after the first `rename_table` the target is already in
+      the FROM clause, which `rename_table` rejects.
+    - `infer_between_predicates` treats `v <= col` as `col <= v`, keeps only one of two `<=` bounds on the same
+      column, and drops a bound on a computed expression (e.g. `r.a + 1 <= 5`) together with every conjunct not yet
+      visited (or raises, if nothing is left).
+    - `add_ec_predicates` silently drops non-equi joins such as `s.c < t.d`.
+    - `explicit_to_implicit` crashes on a `CROSS JOIN` ("No predicates supplied").
+    - `extract_query_fragment` with `projection="keep"` drops projections over a strict subset of the requested
+      tables, and ignores `projection` altogether for set queries.
+    - `move_into_subquery` keeps the (renamed) original WHERE clause when all predicates move into the subquery.
+    - `expand_select_star` expands `*` over a CTE or subquery into the columns _inside_ it (e.g. `SELECT r.a FROM c`)
+      and replaces unnamed computed projections such as `count(*)` by a non-existent `"?column?"` column.
+    - `expand_natural_joins` rejects a chain of natural joins as "ambiguous".
+    - `normalize_query` normalizes the CTEs of a `SelectStatement` but then discards the result.
 - The parser maps `NATURAL RIGHT JOIN` to `JoinType.NaturalOuterJoin` (i.e. a natural full join). Pinned in
   `tests/test_qal.py::test_parser_turns_a_natural_right_join_into_a_natural_full_join`.
-- `InPredicate` ignores its operator in `__eq__`/`__hash__` (so `IN` equals `NOT IN`) and in `__str__`, which means
-  a parsed `NOT IN` query is formatted - and executed - as `IN`. Pinned in
-  `tests/unit/test_qal_predicates.py::test_in_predicate_equality_and_hash_ignore_the_negation` and
-  `test_not_in_predicate_is_rendered_as_in`.
 
 ---
 

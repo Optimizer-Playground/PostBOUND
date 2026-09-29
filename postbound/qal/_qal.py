@@ -2802,7 +2802,7 @@ class InPredicate(BasePredicate):
         self._operator: Literal[BinaryOperator.In, BinaryOperator.NotIn] = operator
         self._column = column
         self._values = tuple(values)
-        hash_val = hash((BinaryOperator.In, self._column, self._values))
+        hash_val = hash((self._operator, self._column, self._values))
         super().__init__(hash_val=hash_val)
 
     __slots__ = ("_column", "_operator", "_values")
@@ -2913,11 +2913,17 @@ class InPredicate(BasePredicate):
     __hash__ = AbstractPredicate.__hash__
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, type(self)) and self.column == other.column and set(self.values) == set(other.values)
+        return (
+            isinstance(other, type(self))
+            and self._column == other._column
+            and self._operator == other._operator
+            and set(self._values) == set(other._values)
+        )
 
     def __str__(self) -> str:
         vals = self._stringify_values()
-        return f"{self.column} IN {vals}"
+        operator = "NOT IN" if self._operator == BinaryOperator.NotIn else "IN"
+        return f"{self._column} {operator} {vals}"
 
 
 class UnaryPredicate(BasePredicate):
