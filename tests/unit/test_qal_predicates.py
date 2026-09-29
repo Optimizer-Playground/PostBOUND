@@ -182,6 +182,36 @@ def test_in_predicate_with_dependent_subquery_is_still_a_filter() -> None:
     assert pred.is_filter() is True
 
 
+def test_in_predicate_equality_and_hash_ignore_the_negation() -> None:
+    """Documents a real bug, not the intended behaviour.
+
+    `InPredicate.__init__` hashes ``(BinaryOperator.In, column, values)`` regardless of the actual operator, and
+    `InPredicate.__eq__` compares only the column and the value set. ``r.a IN (1, 2)`` and ``r.a NOT IN (1, 2)``
+    therefore compare *and* hash equal, so e.g. set-based predicate bookkeeping silently merges the two. They should
+    compare unequal.
+    """
+    positive = where("SELECT * FROM r WHERE r.a IN (1, 2)")
+    negated = where("SELECT * FROM r WHERE r.a NOT IN (1, 2)")
+    assert isinstance(negated, InPredicate)
+    assert negated.operator == BinaryOperator.NotIn
+
+    assert positive == negated
+    assert hash(positive) == hash(negated)
+
+
+def test_not_in_predicate_is_rendered_as_in() -> None:
+    """Documents a real bug, not the intended behaviour.
+
+    `InPredicate.__str__` hard-codes ``f"{self.column} IN {vals}"`` and ignores the operator. Since query
+    formatting goes through the predicate's string form, a parsed ``NOT IN`` query is emitted as ``IN`` -- executing
+    it runs the inverted predicate. The output should contain ``NOT IN``.
+    """
+    query = parser.parse_query("SELECT * FROM r WHERE r.a NOT IN (1, 2)", bind_columns=False)
+
+    assert str(where("SELECT * FROM r WHERE r.a NOT IN (1, 2)")) == "r.a IN (1, 2)"
+    assert "NOT IN" not in str(query)
+
+
 # -- UnaryPredicate --------------------------------------------------------------------------------------
 
 
