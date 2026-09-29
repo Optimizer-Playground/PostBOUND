@@ -1836,7 +1836,7 @@ wheels = [
 
 [[package]]
 name = "postbound"
-version = "0.22.0.dev6"
+version = "0.22.0.dev7"
 source = { editable = "." }
 dependencies = [
     { name = "lazy-loader" },

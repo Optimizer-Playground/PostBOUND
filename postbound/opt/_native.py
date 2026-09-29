@@ -43,9 +43,9 @@ from .._stages import (
     OperatorSelection,
     ParameterGeneration,
 )
-from ..db import Database, DatabaseServerError, DatabaseUserError
+from ..db import Database, DatabasePool, DatabaseServerError, DatabaseUserError
 from ..postgres import PostgresDatabase
-from ..qal import ColumnExpression, OrderBy, SqlQuery
+from ..qal import ColumnExpression, OrderBy, QueryTypeError, SqlQuery, is_select_query
 from ..util import jsondict
 
 
@@ -525,3 +525,19 @@ class NativeOptimizer(CompleteOptimizationAlgorithm):
 
     def describe(self) -> jsondict:
         return {"name": "native", "database_system": self.db_instance.describe()}
+
+
+def native_join_order(query: SqlQuery, *, database: Database | None = None) -> JoinTree:
+    if not is_select_query(query):
+        raise QueryTypeError.expected_select(query)
+    database = database or DatabasePool.get_current()
+    plan = database.optimizer().query_plan(query)
+    return jointree_from_plan(plan)
+
+
+def native_card_est(
+    query: SqlQuery, intermediate: TableReference | Iterable[TableReference], *, database: Database | None = None
+) -> Cardinality:
+    database = database or DatabasePool.get_current()
+    subquery = transform.extract_subquery(query, intermediate)
+    return database.optimizer().cardinality_estimate(subquery)

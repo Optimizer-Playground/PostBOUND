@@ -1,11 +1,22 @@
 # Type stubs for postbound.optimizer package
 
-from . import dynprog, enumeration, native, noopt, randomized
 from ._cardinalities import (
     CardinalityCache,
     OfflineCardinalities,
     PerfectCardinalities,
 )
+from ._dynprog import (
+    AddPathHook,
+    DPTable,
+    DPWarning,
+    DynamicProgrammingEnumerator,
+    JoinRelLevel,
+    Level,
+    PostgresDynProg,
+    RelOptInfo,
+    Sorting,
+)
+from ._enumeration import ExhaustiveJoinOrderEnumerator, ExhaustiveOperatorEnumerator, ExhaustivePlanEnumerator
 from ._helpers import (
     explode_query_plan,
     read_jointree_json,
@@ -16,17 +27,56 @@ from ._helpers import (
     to_query_plan,
     update_plan,
 )
+from ._native import (
+    NativeCardinalityEstimator,
+    NativeCostModel,
+    NativeJoinOrderOptimizer,
+    NativeOptimizer,
+    NativePhysicalOperatorSelection,
+    NativePlanParameterization,
+    native_card_est,
+    native_join_order,
+)
+from ._randomized import (
+    RandomJoinOrderGenerator,
+    RandomJoinOrderOptimizer,
+    RandomOperatorGenerator,
+    RandomOperatorOptimizer,
+    RandomPlanGenerator,
+    RandomPlanOptimizer,
+)
 
 __all__ = [
+    "AddPathHook",
     "CardinalityCache",
+    "DPTable",
+    "DPWarning",
+    "DynamicProgrammingEnumerator",
+    "ExhaustiveJoinOrderEnumerator",
+    "ExhaustiveOperatorEnumerator",
+    "ExhaustivePlanEnumerator",
+    "JoinRelLevel",
+    "Level",
+    "NativeCardinalityEstimator",
+    "NativeCostModel",
+    "NativeJoinOrderOptimizer",
+    "NativeOptimizer",
+    "NativePhysicalOperatorSelection",
+    "NativePlanParameterization",
     "OfflineCardinalities",
     "PerfectCardinalities",
-    "dynprog",
-    "enumeration",
+    "PostgresDynProg",
+    "RandomJoinOrderGenerator",
+    "RandomJoinOrderOptimizer",
+    "RandomOperatorGenerator",
+    "RandomOperatorOptimizer",
+    "RandomPlanGenerator",
+    "RandomPlanOptimizer",
+    "RelOptInfo",
+    "Sorting",
     "explode_query_plan",
-    "native",
-    "noopt",
-    "randomized",
+    "native_card_est",
+    "native_join_order",
     "read_jointree_json",
     "read_operator_assignment_json",
     "read_operator_json",

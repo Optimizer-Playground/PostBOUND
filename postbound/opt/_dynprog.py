@@ -43,7 +43,7 @@ from ..validation import (
     VirtualTablesPreCheck,
     merge_checks,
 )
-from . import native
+from . import _native
 
 DPTable = dict[frozenset[TableReference], QueryPlan]
 
@@ -1559,7 +1559,7 @@ class PostgresDynProg(PlanEnumerator):
             return math.inf
 
     def _is_pg_cost(self, cost_model: CostModel) -> bool:
-        return isinstance(cost_model, native.NativeCostModel) and cost_model.target_db == self.target_db
+        return isinstance(cost_model, _native.NativeCostModel) and cost_model.target_db == self.target_db
 
     def _pg_plan(self, path: QueryPlan) -> QueryPlan | None:
         assert self.query is not None

@@ -469,13 +469,11 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
     """
 
     def __init__(self, target_db: Database) -> None:
-        from .opt.dynprog import (
+        from .opt import (
             DynamicProgrammingEnumerator,
-            PostgresDynProg,
-        )
-        from .opt.native import (
             NativeCardinalityEstimator,
             NativeCostModel,
+            PostgresDynProg,
         )
 
         self._target_db = target_db
