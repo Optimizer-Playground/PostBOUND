@@ -1752,6 +1752,40 @@ class QueryPlan:
             subplan=updated_subplan,
         )
 
+    def with_runtime_as_cost(self, *, ignore_nan: bool = True) -> QueryPlan:
+        """Replaces the current cost estimate of the operator with the actual execution time.
+
+        Parameters
+        ----------
+        ignore_nan : bool, optional
+            Whether *NaN* execution times should also be skipped. By default, this is set to *True*, which only replaces
+            the estimated cost if the actual execution time is a meaningful value.
+        """
+        updated_cost = self.estimated_cost if ignore_nan and math.isnan(self.execution_time) else self.execution_time
+        updated_estimates = PlanEstimates(
+            cardinality=self.estimated_cardinality,
+            cost=updated_cost,
+            **(self._estimates.additional_estimates),
+        )
+
+        updated_children = [child.with_runtime_as_cost(ignore_nan=ignore_nan) for child in self.children]
+
+        if self.subplan:
+            updated_subplan_root = self.subplan.root.with_runtime_as_cost(ignore_nan=ignore_nan)
+            updated_subplan = Subplan(updated_subplan_root, self.subplan.target_name)
+        else:
+            updated_subplan = None
+
+        return QueryPlan(
+            self.node_type,
+            operator=self.operator,
+            children=updated_children,
+            plan_params=self.params,
+            estimates=updated_estimates,
+            measures=self._measures,
+            subplan=updated_subplan,
+        )
+
     def scale_cardinality(
         self,
         factor: float,
