@@ -2412,7 +2412,7 @@ class PostgresOptimizer(OptimizerInterface):
         query_plan = PostgresPlan(raw_query_plan)
         return query_plan.as_qep()
 
-    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
+    def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
         # We should be graceful and handle both simplified and unsimplified
         # versions of the execute_query() output. This only works because PostgresPlan
         # is also cooperative and accepts a dictionary and a list-of-dictionary input as well
@@ -2425,6 +2425,10 @@ class PostgresOptimizer(OptimizerInterface):
             plan = plan[0]
         if isinstance(plan, tuple):
             plan = plan[0]
+
+        if not isinstance(plan, dict):
+            warnings.warn(f"Could not parse plan: {plan}. Expected a dictionary, but got {type(plan)}.", stacklevel=2)
+            return None
 
         pg_plan = PostgresPlan(plan)
         return pg_plan.as_qep()

@@ -73,6 +73,7 @@ from .db import (
     MostCommonValues,
     OptimizerInterface,
     PreciseStatistics,
+    ResultSet,
     StatisticsCatalog,
     UnsupportedDatabaseFeatureError,
     simplify_result_set,
@@ -629,9 +630,17 @@ class MysqlOptimizer(OptimizerInterface):
     def analyze_plan(self, query: SqlQuery) -> QueryPlan:
         raise NotImplementedError("MySQL interface does not support ANALYZE plans yet")
 
-    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
-        mysql_plan = MysqlExplainPlan(plan)
-        return mysql_plan.as_qep()
+    def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
+        if isinstance(plan, list):
+            plan = plan[0]
+        if isinstance(plan, tuple):
+            plan = plan[1]
+        if not isinstance(plan, dict):
+            warnings.warn(f"Could not parse plan: {plan}. Expected a dictionary, but got {type(plan)}.", stacklevel=2)
+            return None
+
+        root = parse_mysql_explain_plan(query, plan)
+        return root.as_qep()
 
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:
         return self.query_plan(query).estimated_cardinality

@@ -475,7 +475,7 @@ class FakeOptimizer(OptimizerInterface):
         self.requests.append(query)
         return self._require_plan()
 
-    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
+    def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
         if isinstance(plan, QueryPlan):
             return plan
         return self._require_plan()

@@ -657,8 +657,8 @@ class DuckDBOptimizer(OptimizerInterface):
         parsed = json.loads(raw_explain)
         return parse_duckdb_plan(parsed[0], query=query)
 
-    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
-        # Similar to the Postgres implementation of parse_plan(), we try to be gracefull
+    def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
+        # Similar to the Postgres implementation of parse_plan(), we try to be graceful
         # and accept both simplified and raw versions of the execute_query() output.
         # In essence, we always try to break the input down to a plain dictionary and
         # unwrap the lists and tuples that come with a raw result set.
@@ -666,6 +666,9 @@ class DuckDBOptimizer(OptimizerInterface):
             plan = plan[0]
         if isinstance(plan, tuple):
             plan = plan[1]
+        if not isinstance(plan, dict):
+            warnings.warn(f"Could not parse plan: {plan}. Expected a dictionary, but got {type(plan)}.", stacklevel=2)
+            return None
         return parse_duckdb_plan(plan, query=query)
 
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:

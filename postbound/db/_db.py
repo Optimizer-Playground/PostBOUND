@@ -2176,7 +2176,7 @@ class OptimizerInterface(ABC):
         return self.analyze_plan(query)
 
     @abstractmethod
-    def parse_plan(self, plan: Any, *, query: SqlQuery | None = None) -> QueryPlan:
+    def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
         """Transforms the system-specific EXPLAIN output into a standardized `QueryPlan`.
 
         The optional `query` can be used to provide additional context for the plan. This can be used by
@@ -2185,6 +2185,8 @@ class OptimizerInterface(ABC):
 
         This method is mainly inteded to parse a previously generated plan, or when the plan could not simply
         be obtained via `query_plan` or `analyze_plan`.
+
+        If the plan cannot be parsed, *None* is returned.
         """
         raise NotImplementedError
 
