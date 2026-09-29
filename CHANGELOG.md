@@ -122,8 +122,6 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
       and replaces unnamed computed projections such as `count(*)` by a non-existent `"?column?"` column.
     - `expand_natural_joins` rejects a chain of natural joins as "ambiguous".
     - `normalize_query` normalizes the CTEs of a `SelectStatement` but then discards the result.
-- The parser maps `NATURAL RIGHT JOIN` to `JoinType.NaturalOuterJoin` (i.e. a natural full join). Pinned in
-  `tests/test_qal.py::test_parser_turns_a_natural_right_join_into_a_natural_full_join`.
 
 ---
 

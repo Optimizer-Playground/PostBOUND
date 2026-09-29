@@ -389,20 +389,13 @@ class StatsWorkloadTests(regression_suite.DatabaseTestCase):
                 self.assertResultSetsEqual(original_result, parsed_result, ordered=parsed_query.is_ordered())
 
 
-# -- known parser bugs ----------------------------------------------------------------------------------------
+# -- fixed parser bugs ----------------------------------------------------------------------------------------
 
 
-def test_parser_turns_a_natural_right_join_into_a_natural_full_join() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    In `parser._pglast_parse_from_entry`, the ``JOIN_RIGHT`` + ``isNatural`` case of the `JoinExpr` handling maps to
-    `JoinType.NaturalOuterJoin` instead of `JoinType.NaturalRightJoin` (the ``JOIN_FULL`` case right below it uses
-    the same value). ``r NATURAL RIGHT JOIN s`` therefore round-trips as ``r NATURAL OUTER JOIN s``, which keeps
-    unmatched rows of ``r`` as well. The join type should be `JoinType.NaturalRightJoin`.
-    """
+def test_parser_handles_natural_right_join() -> None:
     query = pb.parse_query("SELECT * FROM r NATURAL RIGHT JOIN s", bind_columns=False)
 
     assert query.from_clause is not None
     [join] = query.from_clause.items
     assert isinstance(join, pb.qal.JoinTableSource)
-    assert join.join_type == pb.qal.JoinType.NaturalOuterJoin
+    assert join.join_type == pb.qal.JoinType.NaturalRightJoin

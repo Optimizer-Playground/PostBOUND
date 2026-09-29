@@ -1468,7 +1468,7 @@ def _pglast_parse_from_entry(pglast_data: dict, *, namespace: QueryNamespace, qu
                 case "JOIN_LEFT" if "isNatural" in join_expr:
                     join_type = JoinType.NaturalLeftJoin
                 case "JOIN_RIGHT" if "isNatural" in join_expr:
-                    join_type = JoinType.NaturalOuterJoin
+                    join_type = JoinType.NaturalRightJoin
                 case "JOIN_FULL" if "isNatural" in join_expr:
                     join_type = JoinType.NaturalOuterJoin
 
