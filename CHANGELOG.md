@@ -100,28 +100,6 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   on MacOS. Currently, this should be considered as wontfix.
 - The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
   currently exploring alternative, more reliable solutions.
-- Several `postbound.transform` functions produce wrong results or crash. All are pinned in
-  `tests/unit/test_transform.py` (search for "Documents a real bug"):
-    - Column renaming (`rename_columns_in_expression`/`_predicate`/`_clause`/`_query`) crashes on arithmetic
-      expressions (`first_arg`), `BETWEEN` (`interval_start`), `NOT` (`children`) and any `SetQuery` (`having_clause`
-      is read before the set-query branch); it turns `NOT IN` into `IN`; and it drops a `VALUES` CTE that no renaming
-      touches. These crashes propagate to `move_into_subquery`, `rename_table` and `merge_tables`.
-    - `replace_predicate` never replaces a WHERE/HAVING predicate, because `replace_expressions` only hands the
-      operands of base predicates to the replacement callback.
-    - `merge_tables` always fails for two or more tables: after the first `rename_table` the target is already in
-      the FROM clause, which `rename_table` rejects.
-    - `infer_between_predicates` treats `v <= col` as `col <= v`, keeps only one of two `<=` bounds on the same
-      column, and drops a bound on a computed expression (e.g. `r.a + 1 <= 5`) together with every conjunct not yet
-      visited (or raises, if nothing is left).
-    - `add_ec_predicates` silently drops non-equi joins such as `s.c < t.d`.
-    - `explicit_to_implicit` crashes on a `CROSS JOIN` ("No predicates supplied").
-    - `extract_query_fragment` with `projection="keep"` drops projections over a strict subset of the requested
-      tables, and ignores `projection` altogether for set queries.
-    - `move_into_subquery` keeps the (renamed) original WHERE clause when all predicates move into the subquery.
-    - `expand_select_star` expands `*` over a CTE or subquery into the columns _inside_ it (e.g. `SELECT r.a FROM c`)
-      and replaces unnamed computed projections such as `count(*)` by a non-existent `"?column?"` column.
-    - `expand_natural_joins` rejects a chain of natural joins as "ambiguous".
-    - `normalize_query` normalizes the CTEs of a `SelectStatement` but then discards the result.
 
 ---
 

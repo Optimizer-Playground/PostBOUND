@@ -33,9 +33,7 @@ from postbound.qal import (
     ColumnExpression,
     CommonTableExpression,
     CompoundPredicate,
-    DirectTableSource,
     Explain,
-    From,
     FunctionExpression,
     GroupBy,
     Hint,
@@ -46,11 +44,12 @@ from postbound.qal import (
     NotPredicate,
     OrderBy,
     OrPredicate,
-    QueryTypeError,
+    Projection,
     Select,
     SelectStatement,
     SetOperator,
     SetQuery,
+    SimpleFilter,
     SqlExpression,
     SqlQuery,
     StaticValueExpression,
@@ -59,7 +58,7 @@ from postbound.qal import (
     ValuesWithQuery,
     Where,
 )
-from postbound.transform import _BetweenPredCreator, _get_predicate_fragment
+from postbound.transform import _get_predicate_fragment
 from tests.doubles import FakeDatabase, StaticSchema
 
 # -- fixtures -----------------------------------------------------------------------------------------------
@@ -246,17 +245,14 @@ def test_explicit_to_implicit_leaves_the_original_query_unchanged() -> None:
 
 
 def test_explicit_to_implicit_crashes_on_a_cross_join() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    `_ImplicitFromClauseRewriter.visit_join_source` handles ``CROSS JOIN`` like an inner join and calls
-    ``CompoundPredicate.create_and([lhs_pred, rhs_pred, src.join_condition])``. For a cross join between two base
-    tables all three entries are ``None``, and `create_and` rejects an empty predicate list. The correct result
-    would be ``SELECT * FROM r, s`` without a WHERE clause.
-    """
     query = select("SELECT * FROM r CROSS JOIN s")
 
-    with pytest.raises(ValueError, match="No predicates supplied"):
-        transform.explicit_to_implicit(query)
+    implicit = transform.explicit_to_implicit(query)
+
+    assert isinstance(implicit, SelectStatement)
+    assert implicit.has_simple_from()
+    assert implicit.tables() == {R, S}
+    assert implicit.where_clause is None
 
 
 # -- _get_predicate_fragment ----------------------------------------------------------------------------------
@@ -412,29 +408,16 @@ def test_extract_query_fragment_of_a_set_query_returns_the_only_matching_side() 
     assert fragment.tables() == {R, S}
 
 
-def test_extract_query_fragment_keep_projection_drops_targets_of_a_strict_subset_of_the_tables() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    The docstring promises to keep every part of the query that references "only the given tables or a subset of
-    them", but the ``keep`` projection filter checks ``target.tables() == referenced_tables`` instead of a subset
-    test. Both ``r.a`` and ``s.b`` are therefore dropped from the R/S fragment, and the projection degrades to
-    ``SELECT *``. The correct projection would be ``SELECT r.a, s.b``.
-    """
+def test_extract_query_fragment_keep_projection_keeps_targets_of_a_strict_subset_of_the_tables() -> None:
     query = select("SELECT r.a, s.b FROM r, s, t WHERE r.a = s.b AND s.c = t.d")
 
     fragment = transform.extract_query_fragment(query, [R, S])
 
     assert fragment is not None
-    assert fragment.select_clause.is_star()
+    assert fragment.select_clause.columns() == {col("a", R), col("b", S)}
 
 
 def test_extract_query_fragment_ignores_the_projection_option_for_set_queries() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    The `SetQuery` branch recurses via ``extract_query_fragment(query.lhs, referenced_tables)`` without forwarding
-    ``projection``, so both sides silently fall back to ``keep``. With ``projection="count_star"`` the sides
-    should use ``SELECT COUNT(*)``.
-    """
     query = parse("SELECT r.a FROM r UNION SELECT r.b FROM r, s")
 
     fragment = transform.extract_query_fragment(query, R, projection="count_star")
@@ -530,21 +513,12 @@ def test_move_into_subquery_rejects_tables_exporting_columns_of_the_same_name() 
         transform.move_into_subquery(query, [R, S])
 
 
-def test_move_into_subquery_of_all_tables_keeps_the_moved_join_in_the_outer_query() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    When every predicate moves into the subquery, `remove_predicate` leaves nothing and ``updated_where_clause``
-    becomes ``None``. It is then simply not passed to `replace_clause`, which ignores clauses it is not given, so
-    the *original* WHERE clause survives and is renamed to ``r_s.a = r_s.b``. The outer query should have no WHERE
-    clause at all.
-    """
+def test_move_into_subquery_of_all_tables_drops_outer_where() -> None:
     query = select("SELECT * FROM r, s WHERE r.a = s.b")
-    sub = TableReference.create_virtual("r_s")
 
     moved = transform.move_into_subquery(query, [R, S], "r_s")
 
-    assert moved.where_clause is not None
-    assert set(moved.where_clause.columns()) == {col("a", sub), col("b", sub)}
+    assert moved.where_clause is None
 
 
 # -- add_ec_predicates ----------------------------------------------------------------------------------------
@@ -585,20 +559,13 @@ def test_add_ec_predicates_rejects_non_binary_joins() -> None:
         transform.add_ec_predicates(query)
 
 
-def test_add_ec_predicates_drops_non_equi_joins() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    The WHERE clause is rebuilt from ``generate_predicates_for_equivalence_classes(...)`` plus
-    ``predicates.filters()``. Equivalence classes only capture equi-joins, so the band join ``s.c < t.d`` is
-    neither regenerated nor counted as a filter and silently disappears -- turning ``t`` into a cross product.
-    The result should still contain ``s.c < t.d``.
-    """
+def test_add_ec_predicates_keeps_non_equi_joins() -> None:
     query = select("SELECT * FROM r, s, t WHERE r.a = s.b AND s.c < t.d")
 
     expanded = transform.add_ec_predicates(query)
 
-    assert len(conjuncts(expanded)) == 1
-    assert join_pairs(expanded) == {frozenset({col("a", R), col("b", S)})}
+    assert len(conjuncts(expanded)) == 2
+    assert join_pairs(expanded) == {frozenset({col("a", R), col("b", S)}), frozenset({col("c", S), col("d", T)})}
 
 
 # -- infer_between_predicates ---------------------------------------------------------------------------------
@@ -658,54 +625,66 @@ def test_infer_between_predicates_rewrites_ranges_below_a_negation() -> None:
     assert where_root(rewritten) == NotPredicate(pred("r.a BETWEEN 1 AND 5"))
 
 
-def test_infer_between_predicates_does_not_flip_a_bound_with_the_column_on_the_right() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    In `_BetweenPredCreator.visit_and_predicate`, a ``<=`` predicate whose column is on the right-hand side swaps
-    its operands but keeps treating it as an *upper* bound. ``1 <= r.a`` (i.e. ``r.a >= 1``) is therefore recorded
-    as ``r.a <= 1``, which changes the query result. The correct rewrite would be ``r.a BETWEEN 1 AND 5``.
+@pytest.mark.parametrize(
+    "condition",
+    ["1 <= r.a AND r.a <= 5", "r.a >= 1 AND 5 >= r.a", "1 <= r.a AND 5 >= r.a"],
+    ids=["lower-bound-mirrored", "upper-bound-mirrored", "both-mirrored"],
+)
+def test_infer_between_predicates_merges_bounds_with_the_column_on_the_right(condition: str) -> None:
+    """Regression guard for `_BetweenPredCreator` swapping the operands of a bound with the column on the right
+    without mirroring the operator: ``1 <= r.a`` was recorded as the upper bound ``r.a <= 1``.
     """
-    query = select("SELECT * FROM r WHERE 1 <= r.a AND r.a <= 5")
+    query = select(f"SELECT * FROM r WHERE {condition}")
 
     rewritten = transform.infer_between_predicates(query)
 
-    assert pred("r.a BETWEEN 1 AND 5") not in conjuncts(rewritten)
-    assert len(conjuncts(rewritten)) == 1
-    assert conjuncts(rewritten) <= {pred("r.a <= 1"), pred("r.a <= 5")}
+    assert conjuncts(rewritten) == {pred("r.a BETWEEN 1 AND 5")}
 
 
-def test_infer_between_predicates_drops_a_second_upper_bound_on_the_same_column() -> None:
-    """Documents a real bug, not the intended behaviour.
+@pytest.mark.parametrize(
+    ("condition", "expected_bounds"),
+    [
+        ("r.a <= 1 AND r.a <= 5 AND r.a >= 0", {("<=", 1), ("<=", 5), (">=", 0)}),
+        ("r.a >= 1 AND r.a >= 2 AND r.a <= 5", {(">=", 1), (">=", 2), ("<=", 5)}),
+        ("r.a <= 1 AND 5 >= r.a AND r.a >= 0", {("<=", 1), ("<=", 5), (">=", 0)}),
+        ("r.a <= 1 AND r.a <= 5 AND r.a >= 0 AND r.a >= 2", {("<=", 1), ("<=", 5), (">=", 0), (">=", 2)}),
+    ],
+    ids=["upper", "lower", "upper-mirrored", "both-directions"],
+)
+def test_infer_between_predicates_keeps_every_bound_of_the_same_direction(
+    condition: str, expected_bounds: set[tuple[str, int]]
+) -> None:
+    """Regression guard for `_BetweenPredCreator` only blocking a column with a second bound of the same direction,
+    without keeping that bound: one of the two bounds silently disappeared from the query.
 
-    Two ``<=`` predicates on one column are detected as "not safe to rewrite" (``blocked_less``), but
-    ``less_filters[column]`` is still overwritten by the second one and only that single value is emitted. One of
-    the bounds is lost; which one depends on the (set-based) child order after `flatten_and_predicate`. Both
-    bounds should survive.
+    Whether a surviving bound is rendered as ``r.a <= 5`` or kept as the original ``5 >= r.a`` depends on the
+    (hash-based) child order after `flatten_and_predicate`, so the bounds are compared in their simplified form.
     """
-    query = select("SELECT * FROM r WHERE r.a <= 1 AND r.a <= 5 AND r.a >= 0")
+    query = select(f"SELECT * FROM r WHERE {condition}")
 
     rewritten = transform.infer_between_predicates(query)
 
-    upper_bounds = conjuncts(rewritten) & {pred("r.a <= 1"), pred("r.a <= 5")}
-    assert len(upper_bounds) == 1
+    bounds = [SimpleFilter.wrap(child) for child in conjuncts(rewritten)]
+    assert all(bound.column == col("a", R) for bound in bounds)
+    assert len(bounds) == len(expected_bounds)
+    assert {(bound.operation.value, bound.value) for bound in bounds} == expected_bounds
 
 
-def test_infer_between_predicates_drops_a_bound_on_a_computed_expression() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    For ``r.a + 1 <= 5`` neither operand is a `ColumnExpression`, and the visitor executes ``break`` instead of
-    keeping the child. That exits the loop over the conjuncts: the predicate itself -- and every conjunct not yet
-    visited -- is lost. If it happens to come first, nothing is left and `CompoundPredicate.create_and` raises. All
-    three conjuncts should be kept unchanged.
-
-    `infer_between_predicates` feeds the visitor the output of `flatten_and_predicate`, whose child order depends on
-    the per-process hash salt. The visitor is therefore driven directly with the parser's deterministic order.
+@pytest.mark.parametrize(
+    "bound",
+    ["r.a + 1 <= 5", "CAST(r.a AS integer) <= 5", "upper(r.a) >= 'x'"],
+    ids=["arithmetic", "cast", "function"],
+)
+def test_infer_between_predicates_keeps_a_bound_on_a_computed_expression(bound: str) -> None:
+    """Regression guard for `_BetweenPredCreator` dropping a ``<=`` / ``>=`` child without a bare column operand:
+    it used to ``break`` out of the loop (losing every later conjunct as well), and afterwards simply never
+    re-added the child.
     """
-    predicate = pred("r.b = 3 AND r.a + 1 <= 5 AND r.c = 4")
+    query = select(f"SELECT * FROM r WHERE r.b = 3 AND {bound} AND r.c = 4")
 
-    rewritten = predicate.accept_visitor(_BetweenPredCreator())
+    rewritten = transform.infer_between_predicates(query)
 
-    assert rewritten == pred("r.b = 3")
+    assert conjuncts(rewritten) == {pred("r.b = 3"), pred(bound), pred("r.c = 4")}
 
 
 # -- as_star_query / as_count_star_query ----------------------------------------------------------------------
@@ -976,20 +955,12 @@ def test_replace_expressions_rejects_non_static_values_in_a_values_cte() -> None
         transform.replace_expressions(query, to_column)
 
 
-def test_replace_predicate_does_not_replace_a_where_predicate() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    `replace_predicate` is implemented as ``replace_expressions(query, lambda pred: new if pred == old else pred)``,
-    but `_replace_expression_in_predicate` only hands the *operands* of each base predicate to the replacement,
-    never the predicate itself. A predicate in WHERE/HAVING can therefore never match, and the docstring's promise
-    ("not just the top-level WHERE/HAVING predicates") is not met even for the top level. The result should be
-    ``... WHERE r.a = s.b AND r.c = 2``.
-    """
+def test_replace_predicate_replaces_a_where_predicate() -> None:
     query = select("SELECT * FROM r, s WHERE r.a = s.b AND r.c = 1")
 
     replaced = transform.replace_predicate(query, pred("r.c = 1"), pred("r.c = 2"))
 
-    assert replaced == query
+    assert replaced == select("SELECT * FROM r, s WHERE r.a = s.b AND r.c = 2")
 
 
 # -- rename_columns_in_expression / _predicate / _clause / _query ---------------------------------------------
@@ -1028,18 +999,13 @@ def test_rename_columns_in_expression_renames_nested_columns(sql: str, expected:
     assert renamed == expected_projection.expression
 
 
-def test_rename_columns_in_expression_crashes_on_arithmetic() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    The `MathExpression` branch reads ``expression.first_arg`` / ``expression.second_arg``, which do not exist
-    (the attributes are ``lhs`` / ``rhs``, as used by `_TableReferenceRenamer.visit_math_expr`). Renaming any
-    column inside an arithmetic expression -- including via `rename_columns_in_query`, `move_into_subquery`,
-    `rename_table` and `merge_tables` -- fails. The result should be ``r.z + 1``.
-    """
+def test_rename_columns_in_expression_renames_columns_in_arithmetic_expressions() -> None:
     [projection] = select("SELECT r.a + 1 FROM r").select_clause.targets
+    [expected_projection] = select("SELECT r.z + 1 FROM r").select_clause.targets
 
-    with pytest.raises(AttributeError, match="first_arg"):
-        transform.rename_columns_in_expression(projection.expression, RENAME_A)
+    renamed = transform.rename_columns_in_expression(projection.expression, RENAME_A)
+
+    assert renamed == expected_projection.expression
 
 
 def test_deprecated_rename_columns_in_expression_alias_warns_and_delegates() -> None:
@@ -1067,38 +1033,22 @@ def test_rename_columns_in_predicate_renames_every_predicate_type(condition: str
     assert transform.rename_columns_in_predicate(pred(condition), RENAME_A) == pred(expected)
 
 
-def test_rename_columns_in_predicate_crashes_on_between() -> None:
-    """Documents a real bug, not the intended behaviour.
+def test_rename_columns_in_predicate_renames_between_bounds() -> None:
+    renamed = transform.rename_columns_in_predicate(pred("r.a BETWEEN 1 AND r.b"), RENAME_A)
 
-    The `BetweenPredicate` branch reads ``predicate.interval_start`` / ``interval_end``, which do not exist (the
-    bounds are ``lower`` / ``upper``, as used by `_TableReferenceRenamer.visit_between_predicate`). The result
-    should be ``r.z BETWEEN 1 AND r.b``.
-    """
-    with pytest.raises(AttributeError, match="interval_start"):
-        transform.rename_columns_in_predicate(pred("r.a BETWEEN 1 AND r.b"), RENAME_A)
+    assert renamed == pred("r.z BETWEEN 1 AND r.b")
 
 
-def test_rename_columns_in_predicate_crashes_on_a_negation() -> None:
-    """Documents a real bug, not the intended behaviour.
+def test_rename_columns_in_predicate_renames_a_negated_predicate() -> None:
+    renamed = transform.rename_columns_in_predicate(pred("NOT r.a = 1"), RENAME_A)
 
-    The `CompoundPredicate` branch recurses into ``predicate.children`` for a ``NOT`` predicate, but
-    `NotPredicate` only exposes ``child``. Every renaming of a negated predicate -- and therefore of every query
-    containing one, via `rename_columns_in_query` -- fails with an `AttributeError`. The result should be
-    ``NOT r.z = 1``.
-    """
-    with pytest.raises(AttributeError, match="children"):
-        transform.rename_columns_in_predicate(pred("NOT r.a = 1"), RENAME_A)
+    assert renamed == pred("NOT r.z = 1")
 
 
-def test_rename_columns_in_predicate_turns_not_in_into_in() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    The `InPredicate` branch rebuilds the predicate as ``InPredicate(renamed_col, renamed_vals)`` without passing
-    the original operator, so ``r.a NOT IN (1, 2)`` becomes ``r.z IN (1, 2)`` -- the result set is inverted. The
-    correct result keeps `BinaryOperator.NotIn`.
-
-    The operator is asserted directly because `InPredicate.__eq__` ignores it (pinned separately in
-    ``test_qal_predicates.py``), so comparing against a parsed ``NOT IN`` predicate could not detect the bug.
+def test_rename_columns_in_predicate_keeps_the_not_in_operator() -> None:
+    """The operator is asserted directly because `InPredicate.__eq__` ignores it (pinned separately in
+    ``test_qal_predicates.py``), so comparing against a parsed ``NOT IN`` predicate would not catch a regression
+    that silently turns it into `IN`.
     """
     original = pred("r.a NOT IN (1, 2)")
     assert isinstance(original, InPredicate)
@@ -1108,7 +1058,7 @@ def test_rename_columns_in_predicate_turns_not_in_into_in() -> None:
 
     assert isinstance(renamed, InPredicate)
     assert renamed.column == ColumnExpression(col("z", R))
-    assert renamed.operator == BinaryOperator.In
+    assert renamed.operator == BinaryOperator.NotIn
 
 
 def test_rename_columns_in_clause_of_none_is_none() -> None:
@@ -1142,26 +1092,24 @@ def test_rename_columns_in_clause_renames_columns_of_a_values_cte() -> None:
     assert [c.name for c in values_cte.cols] == ["y"]
 
 
-def test_rename_columns_in_clause_rejects_moving_a_values_column_to_another_table() -> None:
+def test_rename_columns_in_clause_moves_a_values_cte_to_another_table() -> None:
     values = TableReference.create_virtual("v")
     cte = select("WITH v(x) AS (VALUES (1)) SELECT * FROM v").cte_clause
 
-    with pytest.raises(ValueError, match="different table"):
-        transform.rename_columns_in_clause(cte, {col("x", values): col("x", R)})
+    renamed = transform.rename_columns_in_clause(cte, {col("x", values): col("x", R)})
+
+    assert isinstance(renamed, CommonTableExpression)
+    [values_cte] = renamed.queries
+    assert isinstance(values_cte, ValuesWithQuery)
+    assert values_cte.cols == (col("x", R),)
 
 
-def test_rename_columns_in_clause_drops_an_unaffected_values_cte() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    For a `ValuesWithQuery` that none of the renamings touch, `rename_columns_in_clause` executes ``continue``
-    *before* appending the CTE to ``renamed_ctes``, so the CTE vanishes. With a single CTE the empty
-    `CommonTableExpression` is rejected outright; with several, the query silently loses a table definition. The
-    VALUES CTE should be kept unchanged.
-    """
+def test_rename_columns_in_clause_keeps_an_unaffected_values_cte() -> None:
     query = select("WITH v(x) AS (VALUES (1), (2)) SELECT * FROM r, v WHERE r.a = v.x")
 
-    with pytest.raises(ValueError, match="cannnot be empty"):
-        transform.rename_columns_in_query(query, RENAME_A)
+    renamed = transform.rename_columns_in_query(query, RENAME_A)
+
+    assert renamed == select("WITH v(x) AS (VALUES (1), (2)) SELECT * FROM r, v WHERE r.z = v.x")
 
 
 def test_rename_columns_in_query_renames_every_clause() -> None:
@@ -1179,15 +1127,10 @@ def test_rename_columns_in_query_renames_every_clause() -> None:
     )
 
 
-def test_rename_columns_in_query_crashes_on_a_set_query() -> None:
-    """Documents a real bug, not the intended behaviour.
+def test_rename_columns_in_query_renames_both_sides_of_a_set_query() -> None:
+    renamed = transform.rename_columns_in_query(parse("SELECT r.a FROM r UNION SELECT r.a FROM r"), RENAME_A)
 
-    `rename_columns_in_query` reads ``query.having_clause`` *before* branching on `SetQuery`, and a set query
-    raises `QueryTypeError` for that accessor. The dedicated `SetQuery` branch below it is unreachable. The result
-    should be ``SELECT r.z FROM r UNION SELECT r.z FROM r``.
-    """
-    with pytest.raises(QueryTypeError, match="HAVING clause on a set query"):
-        transform.rename_columns_in_query(parse("SELECT r.a FROM r UNION SELECT r.a FROM r"), RENAME_A)
+    assert renamed == parse("SELECT r.z FROM r UNION SELECT r.z FROM r")
 
 
 # -- rename_table ---------------------------------------------------------------------------------------------
@@ -1233,11 +1176,12 @@ def test_rename_table_renames_inside_explicit_joins_and_subqueries() -> None:
     assert renamed == select("SELECT x.* FROM x JOIN s ON x.a = s.b WHERE x.a IN (SELECT x.a FROM x)")
 
 
-def test_rename_table_rejects_a_target_that_is_already_in_the_query() -> None:
+def test_rename_table_merges_into_a_target_that_is_already_in_the_query() -> None:
     query = select("SELECT * FROM r, s WHERE r.a = s.b")
 
-    with pytest.raises(ValueError, match="already present in the query"):
-        transform.rename_table(query, R, S)
+    renamed = transform.rename_table(query, R, S)
+
+    assert renamed == select("SELECT * FROM s WHERE s.a = s.b")
 
 
 # -- merge_tables ---------------------------------------------------------------------------------------------
@@ -1253,17 +1197,19 @@ def test_merge_tables_of_a_single_table_is_a_renaming() -> None:
     assert merged == select("SELECT mv.a FROM mv, s WHERE mv.a = s.b")
 
 
-def test_merge_tables_fails_for_more_than_one_table() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    `merge_tables` calls `rename_table` once per source table. After the first call the target table is already
-    part of the FROM clause, and `_TableReferenceRenamer.visit_from_clause` refuses any renaming whose target is
-    present. Merging two or more tables -- the function's whole purpose, see its docstring example -- therefore
-    always fails. The result should be ``SELECT * FROM mv WHERE mv.a = mv.b AND mv.c = 1``.
-    """
+def test_merge_tables_merges_more_than_one_table_of_an_implicit_from_clause() -> None:
     query = select("SELECT * FROM r, s WHERE r.a = s.b AND r.c = 1")
 
-    with pytest.raises(ValueError, match="already present in the query"):
+    merged = transform.merge_tables(query, [R, S], target=MAT_VIEW)
+
+    assert merged == select("SELECT * FROM mv WHERE mv.a = mv.b AND mv.c = 1")
+
+
+def test_merge_tables_rejects_tables_joined_by_an_explicit_join() -> None:
+    """Documents the intended behaviour, not a bug"""
+    query = select("SELECT * FROM r JOIN s ON r.a = s.b WHERE r.c = 1")
+
+    with pytest.raises(ValueError, match="Cannot rename explicit JOINs"):
         transform.merge_tables(query, [R, S], target=MAT_VIEW)
 
 
@@ -1315,32 +1261,18 @@ def test_expand_select_star_falls_back_to_the_schema_of_the_current_database() -
 
 
 def test_expand_select_star_over_a_cte_references_the_columns_inside_the_cte() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    `_ResultSetShape.visit_direct_source` returns the CTE's *internal* projections for a virtual table, and
-    `_determine_output_shape` splices them unchanged into the outer SELECT. ``SELECT * FROM c`` thus becomes
-    ``SELECT 42 AS foo, r.a FROM c``, referencing ``r`` outside the CTE (and re-computing the constant). The
-    correct expansion is ``SELECT c.foo, c.a FROM c``. Subqueries in the FROM clause are affected the same way.
-    """
     query = select("WITH c AS (SELECT 42 AS foo, r.a FROM r) SELECT * FROM c")
 
     expanded = transform.expand_select_star(query, schema=SCHEMA)
 
-    assert expanded.select_clause == select("SELECT 42 AS foo, r.a FROM r").select_clause
+    assert expanded.select_clause == select("WITH c AS (SELECT 42) SELECT c.foo, c.a FROM c").select_clause
 
 
-def test_expand_select_star_replaces_unnamed_expressions_by_a_placeholder_column() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    `expand_select_star` reuses `_determine_output_shape`, which models an unnamed computed projection by the
-    placeholder column ``"?column?"``. That is right for describing the result shape of a subquery, but here it
-    becomes the new SELECT clause, so ``count(*)`` is replaced by a reference to a column that does not exist.
-    Non-star projections should be kept unchanged.
-    """
+def test_expand_select_star_keeps_top_level_unnamed_expressions() -> None:
     expanded = transform.expand_select_star(select("SELECT r.a, count(*) FROM r"), schema=SCHEMA)
 
     [_, placeholder] = expanded.select_clause.targets
-    assert placeholder.expression == ColumnExpression(ColumnReference("?column?"))
+    assert placeholder == Projection.count_star()
 
 
 # -- expand_natural_joins -------------------------------------------------------------------------------------
@@ -1367,11 +1299,7 @@ def test_expand_natural_joins_joins_on_the_shared_columns(natural: str, expected
 
 
 def test_expand_natural_joins_turns_a_natural_right_join_into_a_right_join() -> None:
-    """Synthetic input: the parser currently mis-parses ``NATURAL RIGHT JOIN`` as ``NATURAL OUTER JOIN`` (pinned
-    in ``tests/test_qal.py``), so the join is built directly to reach this branch of `_JoinRewriter`.
-    """
-    join = JoinTableSource(DirectTableSource(R), DirectTableSource(S), join_type=JoinType.NaturalRightJoin)
-    query = SelectStatement(select_clause=Select.star(), from_clause=From([join]))
+    query = select("SELECT * FROM r NATURAL RIGHT JOIN s")
 
     expanded = transform.expand_natural_joins(query, schema=SCHEMA)
 
@@ -1401,28 +1329,23 @@ def test_expand_natural_joins_expands_both_sides_of_a_set_query() -> None:
     assert expanded == parse("SELECT * FROM r JOIN s ON r.id = s.id UNION SELECT * FROM s JOIN t ON s.id = t.id")
 
 
-def test_expand_natural_joins_rejects_a_chain_of_natural_joins() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    For ``r NATURAL JOIN s NATURAL JOIN t`` the outer join's left input is ``r NATURAL JOIN s``. `_JoinRewriter`
-    computes its shape with `_ResultSetShape`, which lists ``r.id`` *and* ``s.id`` -- ignoring that a natural join
-    merges the shared column into one -- and then reports the column as ambiguous. The correct expansion joins
-    ``t`` on ``id`` as well. (The inner natural join would not be rewritten either, since the rewriter does not
-    recurse into join inputs.)
-    """
+def test_expand_natural_joins_expands_a_chain_of_natural_joins() -> None:
     query = select("SELECT * FROM r NATURAL JOIN s NATURAL JOIN t")
 
-    with pytest.raises(ValueError, match="Ambiguous column reference in LHS"):
-        transform.expand_natural_joins(query, schema=SCHEMA)
+    expanded = transform.expand_natural_joins(query, schema=SCHEMA)
+
+    assert expanded.tables() == {R, S, T}
+    assert join_pairs(expanded) == {
+        frozenset({col("id", R), col("id", S)}),
+        frozenset({col("id", S), col("id", T)}),
+        frozenset({col("id", R), col("id", T)}),
+    }
 
 
 # -- normalize_query ------------------------------------------------------------------------------------------
 
 
 def test_normalize_query_applies_all_normalizations() -> None:
-    """Note: the docstring claims implicit joins are rewritten to *explicit* ones; the code (and this test) does the
-    opposite via `explicit_to_implicit`, which is what the other normalization steps require.
-    """
     query = select("SELECT * FROM r JOIN s ON r.a = s.b JOIN t ON s.b = t.c WHERE r.id >= 1 AND r.id <= 5")
 
     normalized = transform.normalize_query(query, schema=SCHEMA)
@@ -1446,19 +1369,17 @@ def test_normalize_query_normalizes_both_sides_of_a_set_query() -> None:
     assert normalized == parse("SELECT r.a, r.id FROM r UNION SELECT s.b, s.id FROM s")
 
 
-def test_normalize_query_does_not_normalize_the_ctes_of_a_select_statement() -> None:
-    """Documents a real bug, not the intended behaviour.
-
-    `normalize_query` recursively normalizes every CTE into ``updated_cte``, but only the `SetQuery` branch uses
-    it. For a `SelectStatement` the normalized CTEs are discarded and the original CTE clause is carried through,
-    contradicting the docstring ("transformations are also applied to CTEs"). The CTE should become
-    ``SELECT r.a, r.id, s.b, s.id FROM r, s WHERE r.a = s.b``.
-    """
+def test_normalize_query_also_normalizes_the_ctes_of_a_select_statement() -> None:
     query = select("WITH c AS (SELECT * FROM r JOIN s ON r.a = s.b) SELECT c.a FROM c")
 
     normalized = transform.normalize_query(query, schema=SCHEMA)
 
-    assert normalized.cte_clause == query.cte_clause
+    assert normalized.cte_clause is not None
+    assert len(normalized.cte_clause.queries) == 1
+    normalized_cte = normalized.cte_clause.queries[0].query
+    assert normalized_cte.has_simple_from()
+    assert normalized_cte.select_clause == select("SELECT r.a, r.id, s.b, s.id FROM r, s").select_clause
+    assert join_pairs(normalized_cte) == {frozenset({col("a", R), col("b", S)})}
 
 
 def test_normalize_query_rejects_outer_joins() -> None:

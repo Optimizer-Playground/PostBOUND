@@ -61,6 +61,53 @@ class BinaryOperator(Enum):
     ContainedBy = "<@"
     Overlaps = "&&"
 
+    def reverse(self) -> BinaryOperator | None:
+        """Get the operator that is equivalent to this operator, but with the operands reversed.
+
+        For example, ``a < b`` is reversed to ``b > a``, while symmetric operators are left as-is.
+        Some operators, such as *LIKE* or *IN*, cannot be reversed and return *None*.
+        """
+        match self:
+            case BinaryOperator.Equal:
+                return BinaryOperator.Equal
+            case BinaryOperator.NotEqual:
+                return BinaryOperator.NotEqual
+            case BinaryOperator.Less:
+                return BinaryOperator.Greater
+            case BinaryOperator.LessEqual:
+                return BinaryOperator.GreaterEqual
+            case BinaryOperator.Greater:
+                return BinaryOperator.Less
+            case BinaryOperator.GreaterEqual:
+                return BinaryOperator.LessEqual
+            case BinaryOperator.Like:
+                return None
+            case BinaryOperator.NotLike:
+                return None
+            case BinaryOperator.ILike:
+                return None
+            case BinaryOperator.NotILike:
+                return None
+            case BinaryOperator.In:
+                return None
+            case BinaryOperator.NotIn:
+                return None
+            case BinaryOperator.Between:
+                return None
+            case BinaryOperator.DistinctFrom:
+                return BinaryOperator.DistinctFrom
+            case BinaryOperator.NotDistinctFrom:
+                return BinaryOperator.NotDistinctFrom
+            case BinaryOperator.Contains:
+                return BinaryOperator.ContainedBy
+            case BinaryOperator.ContainedBy:
+                return BinaryOperator.Contains
+            case BinaryOperator.Overlaps:
+                return BinaryOperator.Overlaps
+            case _:
+                assert_never(self)
+                raise ValueError(f"Unknown operator: {self}")
+
 
 class UnaryOperator(Enum):
     """The supported unary operators."""
@@ -3780,6 +3827,8 @@ def _attempt_filter_unwrap(
     """
     if not predicate.is_filter() or not predicate.is_base():
         return None
+    if len(predicate.columns()) != 1:
+        return None
 
     match predicate:
         case BinaryPredicate(op, lhs, rhs):
@@ -3790,7 +3839,13 @@ def _attempt_filter_unwrap(
             if not status:
                 return None
 
-            left, right = (left, right) if isinstance(left, ColumnReference) else (right, left)
+            if isinstance(right, ColumnReference):
+                left, right = right, left
+                op = BinaryOperator.reverse(op)
+
+            if op is None:
+                return None
+
             assert isinstance(left, ColumnReference)
             return left, op, right
 
@@ -3867,6 +3922,7 @@ class SimpleFilter(AbstractPredicate):
     will simply be dropped. As a rule of thumb, if an expression modifies a value (such as a function
     call), this cannot be unwrapped. Therefore, a filter approximately has to be of the form
     ``<column reference> <operator> <static values>`` in order for the representation to work.
+    Note that filters that compare values from the same table (e.g., ``R.a < R.b``) are unsupported.
 
     The static methods `attempt_wrap`, `wrap`, `can_wrap` and `wrap_all` serve as high-level access
     points into the view. The components of the view are accessible via properties.

@@ -399,6 +399,70 @@ def test_as_predicate_rejects_an_unknown_operator() -> None:
         as_predicate(col, "does-not-exist")
 
 
+# -- BinaryOperator.reverse ---------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("operator", "expected"),
+    [
+        (BinaryOperator.Less, BinaryOperator.Greater),
+        (BinaryOperator.LessEqual, BinaryOperator.GreaterEqual),
+        (BinaryOperator.Greater, BinaryOperator.Less),
+        (BinaryOperator.GreaterEqual, BinaryOperator.LessEqual),
+        (BinaryOperator.Contains, BinaryOperator.ContainedBy),
+        (BinaryOperator.ContainedBy, BinaryOperator.Contains),
+    ],
+    ids=["<", "<=", ">", ">=", "@>", "<@"],
+)
+def test_binary_operator_reverse_mirrors_asymmetric_operators(
+    operator: BinaryOperator, expected: BinaryOperator
+) -> None:
+    assert operator.reverse() == expected
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        BinaryOperator.Equal,
+        BinaryOperator.NotEqual,
+        BinaryOperator.DistinctFrom,
+        BinaryOperator.NotDistinctFrom,
+        BinaryOperator.Overlaps,
+    ],
+    ids=lambda op: op.value,
+)
+def test_binary_operator_reverse_keeps_symmetric_operators(operator: BinaryOperator) -> None:
+    assert operator.reverse() == operator
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        BinaryOperator.Like,
+        BinaryOperator.NotLike,
+        BinaryOperator.ILike,
+        BinaryOperator.NotILike,
+        BinaryOperator.In,
+        BinaryOperator.NotIn,
+        BinaryOperator.Between,
+    ],
+    ids=lambda op: op.value,
+)
+def test_binary_operator_reverse_rejects_operators_without_a_mirrored_form(operator: BinaryOperator) -> None:
+    assert operator.reverse() is None
+
+
+@pytest.mark.parametrize("operator", list(BinaryOperator), ids=lambda op: op.value)
+def test_binary_operator_reverse_handles_every_operator(operator: BinaryOperator) -> None:
+    """Also catches a newly added operator without a `reverse` case, which would silently return ``None``."""
+    reversed_op = operator.reverse()
+    if reversed_op is None:
+        return
+
+    assert isinstance(reversed_op, BinaryOperator)
+    assert reversed_op.reverse() == operator
+
+
 # -- SimpleFilter / SimpleJoin ------------------------------------------------------------------------------
 
 
@@ -423,6 +487,12 @@ def test_simple_filter_cannot_wrap_a_function_call_predicate() -> None:
     `SimpleFilter` -- there is no single column being compared directly against a plain value.
     """
     pred = where("SELECT * FROM r WHERE upper(r.a) = 'X'")
+
+    assert SimpleFilter.can_wrap(pred) is False
+
+
+def test_simple_filter_cannot_warp_a_like_with_the_pattern_on_the_left() -> None:
+    pred = where("SELECT * FROM r WHERE 'x%' LIKE r.a")
 
     assert SimpleFilter.can_wrap(pred) is False
 
@@ -613,3 +683,68 @@ def test_generate_predicates_for_equivalence_classes_produces_all_pairs() -> Non
         frozenset({col_a, col_c}),
         frozenset({col_b, col_c}),
     }
+
+
+# -- regression tests --------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("condition", "operation"),
+    [
+        ("42 > r.a", BinaryOperator.Less),
+        ("42 >= r.a", BinaryOperator.LessEqual),
+        ("42 < r.a", BinaryOperator.Greater),
+        ("42 <= r.a", BinaryOperator.GreaterEqual),
+        ("42 = r.a", BinaryOperator.Equal),
+        ("42 <> r.a", BinaryOperator.NotEqual),
+        ("CAST(42 AS integer) > r.a", BinaryOperator.Less),
+    ],
+    ids=[">", ">=", "<", "<=", "=", "<>", "cast"],
+)
+def test_simple_filter_mirrors_the_operator_when_the_column_is_on_the_right(
+    condition: str, operation: BinaryOperator
+) -> None:
+    """Regression guard for the operand swap in `_attempt_filter_unwrap`: when the column was on the right-hand
+    side, the operands were swapped into ``(column, operator, value)`` order but the operator was kept, so
+    ``42 > r.a`` was represented as ``r.a > 42`` -- the opposite filter. The operator must be mirrored as well.
+    """
+    wrapped = SimpleFilter.wrap(where(f"SELECT * FROM r WHERE {condition}"))
+
+    assert wrapped.column == ColumnReference("a", R)
+    assert wrapped.operation == operation
+    assert wrapped.value == 42
+
+
+@pytest.mark.parametrize(
+    ("condition", "operation"),
+    [
+        ("r.a > 42", BinaryOperator.Greater),
+        ("r.a >= 42", BinaryOperator.GreaterEqual),
+        ("r.a < 42", BinaryOperator.Less),
+        ("r.a <= 42", BinaryOperator.LessEqual),
+    ],
+    ids=[">", ">=", "<", "<="],
+)
+def test_simple_filter_keeps_the_operator_when_the_column_is_on_the_left(
+    condition: str, operation: BinaryOperator
+) -> None:
+    """Regression guard, counterpart of `test_simple_filter_mirrors_the_operator_when_the_column_is_on_the_right`:
+    the operator may only be mirrored when the operands are actually swapped.
+    """
+    wrapped = SimpleFilter.wrap(where(f"SELECT * FROM r WHERE {condition}"))
+
+    assert wrapped.column == ColumnReference("a", R)
+    assert wrapped.operation == operation
+    assert wrapped.value == 42
+
+
+def test_simple_filter_with_a_mirrored_operator_still_wraps_the_original_predicate() -> None:
+    """Regression guard for the same fix: only the simplified view is mirrored, the wrapped predicate itself must
+    stay exactly as written.
+    """
+    pred = where("SELECT * FROM r WHERE 42 > r.a")
+
+    wrapped = SimpleFilter.wrap(pred)
+
+    assert wrapped.unwrap() == pred
+    assert str(wrapped) == "42 > r.a"

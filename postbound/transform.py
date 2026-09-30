@@ -21,6 +21,8 @@ parts of queries, such as individual clauses or expressions.
 
 from __future__ import annotations
 
+import collections
+import itertools
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Literal, cast, overload
@@ -71,6 +73,7 @@ from .qal import (
     SelectStatement,
     SetOpClause,
     SetQuery,
+    SimpleJoin,
     SqlClause,
     SqlExpression,
     SqlExpressionVisitor,
@@ -88,6 +91,7 @@ from .qal import (
     Where,
     WindowExpression,
     WithQuery,
+    all_binary_predicates,
     as_predicate,
     as_query,
     build_query,
@@ -166,9 +170,23 @@ class _ImplicitFromClauseRewriter(TableSourceVisitor[tuple[Collection[TableSourc
         self, src: JoinTableSource, *args, **kwargs
     ) -> tuple[Collection[TableSource], AbstractPredicate | None]:
         match src.join_type:
-            case JoinType.InnerJoin | JoinType.CrossJoin:
+            case JoinType.CrossJoin:
                 lhs_tabs, lhs_pred = src.lhs.accept_visitor(self, *args, **kwargs)
-                rhs_tabs, rhs_pred = src.rhs.accept_visitor(self)
+                rhs_tabs, rhs_pred = src.rhs.accept_visitor(self, *args, **kwargs)
+                final_tabs = list(lhs_tabs) + list(rhs_tabs)
+
+                if lhs_pred is None:
+                    final_pred = rhs_pred
+                elif rhs_pred is None:
+                    final_pred = lhs_pred
+                else:
+                    final_pred = CompoundPredicate.create_and([lhs_pred, rhs_pred])
+
+                return final_tabs, final_pred
+
+            case JoinType.InnerJoin:
+                lhs_tabs, lhs_pred = src.lhs.accept_visitor(self, *args, **kwargs)
+                rhs_tabs, rhs_pred = src.rhs.accept_visitor(self, *args, **kwargs)
                 final_tabs = list(lhs_tabs) + list(rhs_tabs)
                 final_pred = CompoundPredicate.create_and([lhs_pred, rhs_pred, src.join_condition])
                 return final_tabs, final_pred
@@ -355,8 +373,9 @@ def extract_query_fragment(
         The tables that should be extracted
     projection : Literal["keep", "star", "*", "count_star"], optional
         How the projection of the resulting query should look like. Defaults to *keep*, which retains the original
-        projection/*SELECT* clause. Alternatively, the projection can be set to *star* or (literal) *\\** to use a *SELECT \\**
-        projection, or to *count_star* to use a *SELECT COUNT(\\*)* projection.
+        projection/*SELECT* clause. Alternatively, the projection can be set to *star* or (literal) *\\** to use a
+        *SELECT \\** projection, or to *count_star* to use a *SELECT COUNT(\\*)* projection. NOte that this setting
+        is ignored for set queries.
 
     Returns
     -------
@@ -421,7 +440,7 @@ def extract_query_fragment(
         case "keep":
             select_fragment = []
             for target in query.select_clause:
-                if target.tables() == referenced_tables or not target.columns():
+                if target.tables() <= referenced_tables or not target.columns():
                     select_fragment.append(target)
 
             if select_fragment:
@@ -637,10 +656,12 @@ def move_into_subquery(
     updated_predicate = query.where_clause.root if query.where_clause else None
     for predicate in subquery_predicates:
         updated_predicate = remove_predicate(updated_predicate, predicate)
-    updated_where_clause = Where(updated_predicate) if updated_predicate else None
 
-    updated_clauses = [updated_from_clause, updated_where_clause] if updated_where_clause else [updated_from_clause]
-    updated_query = replace_clause(query, updated_clauses)
+    updated_query = replace_clause(query, updated_from_clause)
+    if updated_predicate:
+        updated_query = replace_clause(updated_query, Where(updated_predicate))
+    else:
+        updated_query = drop_clause(updated_query, Where)
 
     updated_other_clauses: list[SqlClause] = []
     for clause in updated_query.clauses():
@@ -681,13 +702,16 @@ def add_ec_predicates(query: SelectStatement) -> SelectStatement:
         return query
 
     joins = predicates.joins()
-    if not all(isinstance(join, BinaryPredicate) for join in joins):
+    if not all_binary_predicates(joins):
         raise ValueError(f"Cannot add equivalence class predicates for non-binary joins: {joins}")
 
-    ec_classes = determine_join_equivalence_classes(joins)  # type: ignore
+    ec_classes = determine_join_equivalence_classes(joins)
     ec_predicates = generate_predicates_for_equivalence_classes(ec_classes)
 
-    all_predicates = list(ec_predicates) + list(predicates.filters())
+    non_equi_joins = [join for join in joins if not SimpleJoin.can_wrap(join)]
+    filter_preds = list(predicates.filters())
+
+    all_predicates = list(ec_predicates) + non_equi_joins + filter_preds
     updated_where_clause = Where(CompoundPredicate.create_and(all_predicates))
 
     final_query = replace_clause(query, updated_where_clause)
@@ -728,30 +752,56 @@ class _BetweenPredCreator(PredicateVisitor[AbstractPredicate]):
                 case BinaryPredicate(op, lhs, rhs) if op == BinaryOperator.LessEqual:
                     if isinstance(lhs, ColumnExpression):
                         column = lhs.column
+                        if column in less_filters:
+                            # There is already a <= on the column. This is not safe to rewrite!
+                            blocked_less.add(column)
+
+                            # the predicate from less_filters will be added later, we just need to make sure we don't
+                            # drop the current predicate
+                            rewritten_filters.append(child)
+                        else:
+                            less_filters[column] = rhs
                     elif isinstance(rhs, ColumnExpression):
                         column = rhs.column
-                        lhs, rhs = rhs, lhs
+                        if column in greater_filters:
+                            # There is already a >= on the column. This is not safe to rewrite!
+                            blocked_greater.add(column)
+
+                            # the predicate from greater_filters will be added later, we just need to make sure we don't
+                            # drop the current predicate
+                            rewritten_filters.append(child)
+                        else:
+                            greater_filters[column] = lhs
                     else:
-                        break
+                        # no operand is a bare column
+                        rewritten_filters.append(child)
 
-                    if column in less_filters:
-                        # There is already a <= on the column. This is not safe to rewrite!
-                        blocked_less.add(column)
-                    less_filters[column] = rhs
-
-                case BinaryPredicate(op) if op == BinaryOperator.GreaterEqual:
+                case BinaryPredicate(op, lhs, rhs) if op == BinaryOperator.GreaterEqual:
                     if isinstance(lhs, ColumnExpression):
                         column = lhs.column
+                        if column in greater_filters:
+                            # There is already a <= on the column. This is not safe to rewrite!
+                            blocked_greater.add(column)
+
+                            # the predicate from greater_filters will be added later, we just need to make sure we don't
+                            # drop the current predicate
+                            rewritten_filters.append(child)
+                        else:
+                            greater_filters[column] = rhs
                     elif isinstance(rhs, ColumnExpression):
                         column = rhs.column
-                        lhs, rhs = rhs, lhs
-                    else:
-                        break
+                        if column in less_filters:
+                            # There is already a >= on the column. This is not safe to rewrite!
+                            blocked_less.add(column)
 
-                    if column in greater_filters:
-                        # There is already a <= on the column. This is not safe to rewrite!
-                        blocked_greater.add(column)
-                    greater_filters[column] = rhs
+                            # the predicate from less_filters will be added later, we just need to make sure we don't
+                            # drop the current predicate
+                            rewritten_filters.append(child)
+                        else:
+                            less_filters[column] = lhs
+                    else:
+                        # no operand is a bare column
+                        rewritten_filters.append(child)
 
                 case _:
                     rewritten_filters.append(child)
@@ -1214,38 +1264,40 @@ def _replace_expression_in_predicate(predicate, replacement):
         case BinaryPredicate(op, lhs, rhs):
             replaced_lhs = replacement(lhs)
             replaced_rhs = replacement(rhs)
-            return BinaryPredicate(op, replaced_lhs, replaced_rhs)
+            result = BinaryPredicate(op, replaced_lhs, replaced_rhs)
 
         case InPredicate(col, vals, op):
             relaced_col = replacement(col)
             replaced_vals = [replacement(val) for val in vals]
-            return InPredicate(relaced_col, replaced_vals, operator=op)
+            result = InPredicate(relaced_col, replaced_vals, operator=op)
 
         case BetweenPredicate(col, lo, hi):
             replaced_col = replacement(col)
             replaced_lo = replacement(lo)
             replaced_hi = replacement(hi)
-            return BetweenPredicate(replaced_col, (replaced_lo, replaced_hi))
+            result = BetweenPredicate(replaced_col, (replaced_lo, replaced_hi))
 
         case UnaryPredicate(expr, op):
             replaced_expr = replacement(expr)
-            return UnaryPredicate(replaced_expr, op)
+            result = UnaryPredicate(replaced_expr, op)
 
         case AndPredicate(children):
             replaced_children = [_replace_expression_in_predicate(child, replacement) for child in children]
-            return CompoundPredicate.create_and(replaced_children)
+            result = CompoundPredicate.create_and(replaced_children)
 
         case OrPredicate(children):
             replaced_children = [_replace_expression_in_predicate(child, replacement) for child in children]
-            return CompoundPredicate.create_or(replaced_children)
+            result = CompoundPredicate.create_or(replaced_children)
 
         case NotPredicate(child):
             replaced_child = _replace_expression_in_predicate(child, replacement)
-            return CompoundPredicate.create_not(replaced_child)
+            result = CompoundPredicate.create_not(replaced_child)
 
         case _:
             pred_type = type(predicate).__name__
             raise ValueError(f"Unknown predicate type {pred_type}: {predicate}")
+
+    return replacement(result)
 
 
 @overload
@@ -1571,7 +1623,6 @@ def rename_columns_in_query(query, available_renamings: Mapping[ColumnReference,
         The updated query
     """
     renamed_cte = rename_columns_in_clause(query.cte_clause, available_renamings)
-    renamed_having = rename_columns_in_clause(query.having_clause, available_renamings)
     renamed_orderby = rename_columns_in_clause(query.orderby_clause, available_renamings)
 
     if isinstance(query, SetQuery):
@@ -1592,6 +1643,7 @@ def rename_columns_in_query(query, available_renamings: Mapping[ColumnReference,
     renamed_from = rename_columns_in_clause(query.from_clause, available_renamings)
     renamed_where = rename_columns_in_clause(query.where_clause, available_renamings)
     renamed_groupby = rename_columns_in_clause(query.groupby_clause, available_renamings)
+    renamed_having = rename_columns_in_clause(query.having_clause, available_renamings)
 
     return SelectStatement(
         select_clause=renamed_select,
@@ -1667,8 +1719,8 @@ def rename_columns_in_expression(expression, available_renamings: Mapping[Column
             array_type=expression.array_type,
         )
     elif isinstance(expression, MathExpression):
-        renamed_first_arg = rename_columns_in_expression(expression.first_arg, available_renamings)
-        renamed_second_arg = rename_columns_in_expression(expression.second_arg, available_renamings)
+        renamed_first_arg = rename_columns_in_expression(expression.lhs, available_renamings)
+        renamed_second_arg = rename_columns_in_expression(expression.rhs, available_renamings)
         return MathExpression(expression.operator, renamed_first_arg, renamed_second_arg)
     elif isinstance(expression, ArrayAccessExpression):
         # NB: ArrayAccessExpression needs to be checked before FunctionExpression, since it is a subclass of it
@@ -1812,33 +1864,41 @@ def rename_columns_in_predicate(predicate, available_renamings: Mapping[ColumnRe
     if not predicate:
         return None
 
-    if isinstance(predicate, BinaryPredicate):
-        renamed_first_arg = rename_columns_in_expression(predicate.lhs, available_renamings)
-        renamed_second_arg = rename_columns_in_expression(predicate.rhs, available_renamings)
-        return BinaryPredicate(predicate.operator, renamed_first_arg, renamed_second_arg)
-    elif isinstance(predicate, BetweenPredicate):
-        renamed_col = rename_columns_in_expression(predicate.column, available_renamings)
-        renamed_interval_start = rename_columns_in_expression(predicate.interval_start, available_renamings)
-        renamed_interval_end = rename_columns_in_expression(predicate.interval_end, available_renamings)
-        return BetweenPredicate(renamed_col, (renamed_interval_start, renamed_interval_end))
-    elif isinstance(predicate, InPredicate):
-        renamed_col = rename_columns_in_expression(predicate.column, available_renamings)
-        renamed_vals = [rename_columns_in_expression(val, available_renamings) for val in predicate.values]
-        return InPredicate(renamed_col, renamed_vals)
-    elif isinstance(predicate, UnaryPredicate):
-        return UnaryPredicate(
-            rename_columns_in_expression(predicate.expression, available_renamings),
-            predicate.operator,
-        )
-    elif isinstance(predicate, CompoundPredicate):
-        renamed_children = (
-            [rename_columns_in_predicate(predicate.children, available_renamings)]
-            if predicate.operation == CompoundOperator.Not
-            else [rename_columns_in_predicate(child, available_renamings) for child in predicate.children]
-        )
-        return CompoundPredicate.create(predicate.operation, renamed_children)
-    else:
-        raise ValueError("Unknown predicate type: " + str(predicate))
+    match predicate:
+        case BinaryPredicate(op, lhs, rhs):
+            renamed_lhs = rename_columns_in_expression(lhs, available_renamings)
+            renamed_rhs = rename_columns_in_expression(rhs, available_renamings)
+            return BinaryPredicate(op, renamed_lhs, renamed_rhs)
+
+        case BetweenPredicate(col, lo, hi):
+            renamed_col = rename_columns_in_expression(col, available_renamings)
+            renamed_lo = rename_columns_in_expression(lo, available_renamings)
+            renamed_hi = rename_columns_in_expression(hi, available_renamings)
+            return BetweenPredicate(renamed_col, (renamed_lo, renamed_hi))
+
+        case InPredicate(col, vals, op):
+            renamed_col = rename_columns_in_expression(col, available_renamings)
+            renamed_vals = [rename_columns_in_expression(val, available_renamings) for val in vals]
+            return InPredicate(renamed_col, renamed_vals, operator=op)
+
+        case UnaryPredicate(expr, op):
+            renamed_expr = rename_columns_in_expression(expr, available_renamings)
+            return UnaryPredicate(renamed_expr, op)
+
+        case AndPredicate(children):
+            renamed_children = [rename_columns_in_predicate(child, available_renamings) for child in children]
+            return AndPredicate(renamed_children)
+
+        case OrPredicate(children):
+            renamed_children = [rename_columns_in_predicate(child, available_renamings) for child in children]
+            return OrPredicate(renamed_children)
+
+        case NotPredicate(child):
+            renamed_child = rename_columns_in_predicate(child, available_renamings)
+            return NotPredicate(renamed_child)
+
+        case _:
+            raise ValueError(f"Unknown predicate type: {predicate}")
 
 
 @overload
@@ -1995,28 +2055,24 @@ def rename_columns_in_clause(clause, available_renamings: Mapping[ColumnReferenc
                 )
                 continue
 
-            if not any(col.belongs_to(cte.target_table) for col in available_renamings):
-                continue
+            renamed_cols = [available_renamings.get(col, col) for col in cte.cols]
+            col_targets = [col.table for col in renamed_cols]
+            if len(col_targets) != 1:
+                raise ValueError(f"Cannot rename a VALUES clause to multiple tables: {col_targets}")
+            updated_target = col_targets[0]
+            if updated_target is None:
+                raise ValueError("Cannot remove the target name from a VALUES CTE")
+            updated_target = updated_target.make_virtual()
+            renamed_cols = [col.bind_to(updated_target) for col in renamed_cols]
 
-            renamed_cte = cte
-            for current_col, target_col in available_renamings.items():
-                if not current_col.belongs_to(cte.target_table):
-                    continue
-                if current_col.table != target_col.table:
-                    raise ValueError("Cannot rename columns in a VALUES table source to a different table")
-
-                # if we found a column that should be renamed, we need to replace the whole column specification
-                # this process might be repeated multiple times, if multiple appropriate renamings exist
-                current_col_spec = cte.cols
-                new_col_spec = [(col if col.name != current_col.name else target_col.name) for col in current_col_spec]
-                renamed_cte = ValuesWithQuery(
+            renamed_ctes.append(
+                ValuesWithQuery(
                     cte.rows,
-                    target_name=cte.target_table,
-                    columns=new_col_spec,
+                    target_name=updated_target,
+                    columns=renamed_cols,
                     materialized=cte.materialized,
                 )
-
-            renamed_ctes.append(renamed_cte)
+            )
 
         return CommonTableExpression(renamed_ctes, recursive=clause.recursive)
     if isinstance(clause, Select):
@@ -2116,16 +2172,27 @@ class _TableReferenceRenamer(
         return Select(projections, distinct=clause.distinct_specifier())
 
     def visit_from_clause(self, clause: From, *args, **kwargs) -> From:
-        used_identifieres = set(tab.identifier() for tab in clause.tables())
-        intersect = used_identifieres & self._renaming_targets
-        if intersect:
+        used_identifiers = set(tab.identifier() for tab in clause.bound_tables())
+        intersect = used_identifiers & self._renaming_targets
+        if intersect and any(isinstance(src, JoinTableSource) for src in clause.items):
             raise ValueError(
                 "Cannot rename explicit JOINs: "
                 f"Renaming targets {intersect} is already present in the query. "
                 "This is currently not supported."
             )
         renamed_items = [self._rename_table_source(item) for item in clause]
-        return From(renamed_items)
+
+        used_identifiers: set[str] = set()
+        no_duplicates: list[TableSource] = []
+        for item in renamed_items:
+            bound_tables = {tab.identifier() for tab in item.bound_tables()}
+            if bound_tables <= used_identifiers:
+                continue
+
+            used_identifiers |= bound_tables
+            no_duplicates.append(item)
+
+        return From(no_duplicates)
 
     def visit_where_clause(self, clause: Where, *args, **kwargs) -> Where:
         renamed_predicate = clause.root.accept_visitor(self)
@@ -2489,11 +2556,13 @@ def merge_tables(query: SetQuery, tables: Iterable[TableReference], *, target: T
 def merge_tables(query: SqlQuery, tables: Iterable[TableReference], *, target: TableReference) -> SqlQuery: ...
 
 
-def merge_tables(query, tables: Iterable[TableReference], *, target: TableReference):
+def merge_tables(query: SqlQuery, tables: Iterable[TableReference], *, target: TableReference):
     """Rewrites a query to replace all references to any of the given tables by references to a single target table.
 
     This is useful, for example, for mat view scenarios where queries should re-written after a materialized view has been
     created over a specific join.
+
+    Note that merging within a JOIN hierarchy is currently not supported.
 
     Examples
     --------
@@ -2519,12 +2588,16 @@ def merge_tables(query, tables: Iterable[TableReference], *, target: TableRefere
 
 
 def _determine_output_shape(
-    query: SqlQuery, *, cte_shapes: Mapping[TableReference, Sequence[Projection]], schema: DatabaseSchema
+    query: SqlQuery,
+    *,
+    target_table: TableReference | None,
+    cte_shapes: Mapping[TableReference, Sequence[Projection]],
+    schema: DatabaseSchema,
 ) -> Sequence[Projection]:
     if isinstance(query, SetQuery):
         # For set queries we can just use the output shape of the left-hand side, since all set operations require the
         # same output shape on both sides.
-        return _determine_output_shape(query.lhs, cte_shapes=cte_shapes, schema=schema)
+        return _determine_output_shape(query.lhs, target_table=target_table, cte_shapes=cte_shapes, schema=schema)
 
     if not is_select_query(query):
         raise ValueError(f"Cannot determine output shape of query: {query}")
@@ -2537,21 +2610,46 @@ def _determine_output_shape(
 
     output_shape: list[Projection] = []
     for projection in query.select_clause:
-        if projection.target_name:
+        if projection.target_name and target_table:
+            output_shape.append(Projection.column(ColumnReference(projection.target_name, target_table)))
+            continue
+        elif projection.target_name:
             output_shape.append(projection)
             continue
 
         match projection.expression:
-            case ColumnExpression():
-                output_shape.append(projection)
+            case ColumnExpression(col):
+                rebound_col = col.bind_to(target_table) if target_table else col
+                output_shape.append(Projection.column(rebound_col))
 
             case StarExpression(tab) if tab is not None:
-                output_shape.extend(col for col in from_shapes[tab])
-            case StarExpression():
-                output_shape.extend(col for col in util.flatten(from_shapes.values()))
+                if target_table is not None:
+                    renamings = {col: col.bind_to(target_table) for col in projection.columns()}
+                    target_projs = [
+                        Projection(rename_columns_in_expression(proj.expression, renamings), proj.target_name)
+                        for proj in from_shapes[tab]
+                    ]
+                else:
+                    target_projs = from_shapes[tab]
 
-            case _:
-                anonymous = ColumnReference("?column?")
+                output_shape.extend(target_projs)
+
+            case StarExpression():
+                if target_table is not None:
+                    renamings = {col: col.bind_to(target_table) for col in projection.columns()}
+                    target_projs = [
+                        Projection(rename_columns_in_expression(proj.expression, renamings), proj.target_name)
+                        for proj in util.flatten(from_shapes.values())
+                    ]
+                else:
+                    target_projs = util.flatten(from_shapes.values())
+
+                output_shape.extend(target_projs)
+
+            case _ if target_table is None:
+                output_shape.append(projection)
+            case _ if target_table is not None:
+                anonymous = ColumnReference("?column?", target_table)
                 output_shape.append(Projection.column(anonymous))
 
     return output_shape
@@ -2577,7 +2675,9 @@ class _ResultSetShape(TableSourceVisitor[Mapping[TableReference, Sequence[Projec
         if src.target_table is None:
             return {}
 
-        subquery_shape = _determine_output_shape(src.query, cte_shapes=self._cte_shapes, schema=self._schema)
+        subquery_shape = _determine_output_shape(
+            src.query, target_table=src.target_table, cte_shapes=self._cte_shapes, schema=self._schema
+        )
         return {src.target_table: subquery_shape}
 
     def visit_values_source(
@@ -2653,9 +2753,11 @@ def expand_select_star(query: SqlQuery, *, schema: DatabaseSchema | None = None)
     # The output shape of b would be (foo, bar)
     cte_shapes: dict[TableReference, Sequence[Projection]] = {}
     for cte in query.cte_clause or []:
-        cte_shapes[cte.target_table] = _determine_output_shape(cte.query, cte_shapes=cte_shapes, schema=schema)
+        cte_shapes[cte.target_table] = _determine_output_shape(
+            cte.query, target_table=cte.target_table, cte_shapes=cte_shapes, schema=schema
+        )
 
-    expanded_projections = _determine_output_shape(query, cte_shapes=cte_shapes, schema=schema)
+    expanded_projections = _determine_output_shape(query, target_table=None, cte_shapes=cte_shapes, schema=schema)
     return replace_clause(query, Select(expanded_projections, distinct=query.select_clause.distinct_specifier()))
 
 
@@ -2677,6 +2779,9 @@ class _JoinRewriter(TableSourceVisitor[TableSource]):
         return src
 
     def visit_join_source(self, src: JoinTableSource, *args, **kwargs) -> JoinTableSource:
+        rewritten_lhs = src.lhs.accept_visitor(self, *args, **kwargs)
+        rewritten_rhs = src.rhs.accept_visitor(self, *args, **kwargs)
+
         nat_joins = (
             JoinType.NaturalInnerJoin,
             JoinType.NaturalOuterJoin,
@@ -2684,45 +2789,40 @@ class _JoinRewriter(TableSourceVisitor[TableSource]):
             JoinType.NaturalRightJoin,
         )
         if src.join_type not in nat_joins:
-            return src
+            return JoinTableSource(
+                rewritten_lhs, rewritten_rhs, join_condition=src.join_condition, join_type=src.join_type
+            )
 
         anon_placeholder = "?column?"
 
-        lhs_proj = src.lhs.accept_visitor(_ResultSetShape(self._cte_shapes, self._schema))
-        lhs_aliases: dict[str, TableReference] = {}
+        lhs_proj = rewritten_lhs.accept_visitor(_ResultSetShape(self._cte_shapes, self._schema))
+        lhs_aliases: dict[str, set[TableReference]] = collections.defaultdict(set)
         for tab, projections in lhs_proj.items():
             for proj in projections:
                 identifier = proj.identifier(placeholder=anon_placeholder)
                 if identifier == "?column?":
                     continue
 
-                if identifier in lhs_aliases:
-                    raise ValueError(
-                        f"Cannot re-write: Ambiguous column reference in LHS of NATURAL JOIN: {identifier}"
-                    )
-                lhs_aliases[identifier] = tab
+                lhs_aliases[identifier].add(tab)
 
-        rhs_proj = src.rhs.accept_visitor(_ResultSetShape(self._cte_shapes, self._schema))
-        rhs_aliases: dict[str, TableReference] = {}
+        rhs_proj = rewritten_rhs.accept_visitor(_ResultSetShape(self._cte_shapes, self._schema))
+        rhs_aliases: dict[str, set[TableReference]] = collections.defaultdict(set)
         for tab, projections in rhs_proj.items():
             for proj in projections:
                 identifier = proj.identifier(placeholder=anon_placeholder)
                 if identifier == "?column?":
                     continue
 
-                if identifier in rhs_aliases:
-                    raise ValueError(
-                        f"Cannot re-write: Ambiguous column reference in RHS of NATURAL JOIN: {identifier}"
-                    )
-                rhs_aliases[identifier] = tab
+                rhs_aliases[identifier].add(tab)
 
         col_overlap = set(lhs_aliases.keys()) & set(rhs_aliases.keys())
         predicates: list[BinaryPredicate] = []
         for col in col_overlap:
-            lhs_col = ColumnReference(col, lhs_aliases[col])
-            rhs_col = ColumnReference(col, rhs_aliases[col])
-            join_pred = as_predicate(lhs_col, "=", rhs_col)
-            predicates.append(join_pred)
+            for lhs_alias, rhs_alias in itertools.product(lhs_aliases[col], rhs_aliases[col]):
+                lhs_col = ColumnReference(col, lhs_alias)
+                rhs_col = ColumnReference(col, rhs_alias)
+                join_pred = as_predicate(lhs_col, "=", rhs_col)
+                predicates.append(join_pred)
 
         final_condition = CompoundPredicate.create_and(predicates)
 
@@ -2736,7 +2836,7 @@ class _JoinRewriter(TableSourceVisitor[TableSource]):
             case JoinType.NaturalRightJoin:
                 updated_type = JoinType.RightJoin
 
-        return JoinTableSource(src.lhs, src.rhs, join_condition=final_condition, join_type=updated_type)
+        return JoinTableSource(rewritten_lhs, rewritten_rhs, join_condition=final_condition, join_type=updated_type)
 
 
 @overload
@@ -2781,7 +2881,9 @@ def expand_natural_joins(query: SqlQuery, *, schema: DatabaseSchema | None = Non
     # see comment on `expand_select_star` for why this is not expressed as a comprehension
     cte_shapes: dict[TableReference, Sequence[Projection]] = {}
     for cte in query.cte_clause or []:
-        cte_shapes[cte.target_table] = _determine_output_shape(cte.query, cte_shapes=cte_shapes, schema=schema)
+        cte_shapes[cte.target_table] = _determine_output_shape(
+            cte.query, target_table=cte.target_table, cte_shapes=cte_shapes, schema=schema
+        )
 
     rewritten_sources = _JoinRewriter(cte_shapes, schema).visit_from_clause(query.from_clause, cte_shapes=cte_shapes)
     return replace_clause(query, From(rewritten_sources))
@@ -2807,7 +2909,7 @@ def normalize_query(query: SqlQuery, *, schema: DatabaseSchema | None = None):
     The following transformation are applied:
 
     - All *NATURAL JOIN* statements are replaced with explicit join predicates.
-    - All implicit joins are re-written to explicit joins.
+    - All explicit joins are re-written to implicit joins.
     - All predicates are moved to the WHERE clause (or HAVING clause for aggregates).
     - All predicates are flattened into a single AND predicate.
     - All SELECT \\* statements are replaced with the actual columns that are selected.
@@ -2844,7 +2946,10 @@ def normalize_query(query: SqlQuery, *, schema: DatabaseSchema | None = None):
     if not isinstance(query, SelectStatement):
         raise ValueError(f"Cannot normalize query. Unknown query type: {query}")
 
-    no_natural = expand_natural_joins(query, schema=schema)
+    # First set the new WITH clause to make sure everything else can rely on up-to-date information from each CTE
+    normalized_cte = replace_clause(query, updated_cte) if updated_cte is not None else query
+
+    no_natural = expand_natural_joins(normalized_cte, schema=schema)
 
     # We re-write to implicit joins after we expanded the natural joins because these still retain the JOIN ON syntax.
     # Now we can get rid of them
