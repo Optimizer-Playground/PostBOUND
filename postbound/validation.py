@@ -271,12 +271,16 @@ class OptimizationPreCheck:
         if isinstance(other, OptimizationPreCheck):
             other = [other]
 
-        all_checks: list[OptimizationPreCheck] = [self]
+        all_checks: list[OptimizationPreCheck] = [] if isinstance(self, EmptyPreCheck) else [self]
         for check in other:
             if check == self:
                 continue
+            if isinstance(check, EmptyPreCheck):
+                continue
             all_checks.append(check)
-        return CompoundCheck(all_checks)
+
+        # if all_checks is empty, self must be an EmptyPreCheck
+        return CompoundCheck(all_checks) if all_checks else self
 
     def describe(self) -> dict:
         """Provides a JSON-serializable representation of the specific check, as well as important parameters.
