@@ -440,7 +440,7 @@ class NativeJoinOrderOptimizer(JoinOrdering):
         super().__init__()
         self.db_instance = db_instance
 
-    def optimize_join_order(self, query: SqlQuery) -> JoinTree | None:
+    def optimize_join_order(self, query: SqlQuery) -> JoinTree:
         query_plan = self.db_instance.optimizer().query_plan(query)
         return jointree_from_plan(query_plan)
 

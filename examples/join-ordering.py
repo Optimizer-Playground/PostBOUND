@@ -8,7 +8,7 @@ import postbound as pb
 
 
 class RandomJoinOrder(pb.JoinOrdering):
-    def optimize_join_order(self, query: pb.SqlQuery) -> pb.JoinTree | None:
+    def optimize_join_order(self, query: pb.SqlQuery) -> pb.JoinTree:
         if not pb.qal.is_select_query(query):
             raise pb.OptimizationError("Expected a SELECT query")
 

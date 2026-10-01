@@ -292,7 +292,7 @@ class RandomJoinOrderOptimizer(JoinOrdering):
         generator_args = generator_args if generator_args is not None else {}
         self._generator = RandomJoinOrderGenerator(**generator_args)
 
-    def optimize_join_order(self, query: SqlQuery) -> JoinTree | None:
+    def optimize_join_order(self, query: SqlQuery) -> JoinTree:
         return next(self._generator.random_join_orders_for(query))
 
     def describe(self) -> dict:
