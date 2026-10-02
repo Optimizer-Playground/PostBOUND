@@ -270,7 +270,7 @@ correct). If the distinction is important for some use case, use :func:`~postbou
 If, at some point in the future, PostBOUND has proper support for DML or DDL queries, these will properly be represented
 by separate query classes similar to the :class:`~postbound.qal.SetQuery`. To make clear that API functions can work with
 queries beyond plain ``SELECT``, we use the :class:`~postbound.qal.SqlStatement`. If you only want
-``SELECT`` queries but are fine with set operations, use :class:`~postbound.qal.SqlQuery`.
+``SELECT`` queries but are fine with set operations, use :class:`~postbound.SqlQuery`.
 
 
 Relational algebra

@@ -32,7 +32,7 @@ the stages for details. In general, it is good practice to do the following:
    class.
 2. Implement the ``describe()`` method to allow introspection of the optimizer configuration. The default implementation
    only provides the name of the optimizer hook. For example, a neural network-based optimizer could use this method to
-   provide information about key model parameters. This is used by the :doc:`benchmarking utilities` to document
+   provide information about key model parameters. This is used by the :doc:`benchmarking utilities <core/benchmarking>` to document
    precisely which configuration was used for a specific run and allows for later debugging or reproduction of results.
 3. Implement the ``pre_check()`` method to ensure that the optimization stage is only called for supported queries. The
    default implementation allows all queries to be optimized.
@@ -111,7 +111,7 @@ as they are:
             subquery = self._target_db.hinting().generate_hints(subquery, plan)
 
             native_cost = self._target_db.optimizer().cost_estimate(subquery)
-            if plan.operator == pb.JoinOperators.NestedLoopJoin:
+            if plan.operator == pb.JoinOperator.NestedLoopJoin:
                 return 2 * native_cost
             return native_cost
 
@@ -146,7 +146,7 @@ relational algebra. However, the enumerator is free to process the query before 
 it can interact with the :mod:`~postbound.relalg` module for relational algebra support.
 
 Since implementing an entire plan enumerator is a complex undertaking, we do not show a full example here. Instead, you
-can check out the implementation of the :class:`~postbound.opt.dynprog.DynamicProgrammingEnumerator` for a textbook-style
+can check out the implementation of the :class:`~postbound.opt.DynamicProgrammingEnumerator` for a textbook-style
 dynamic programming plan enumerator
 (`reference <https://github.com/Optimizer-Playground/PostBOUND/blob/main/postbound/opt/dynprog.py#L79>`__).
 
@@ -417,7 +417,7 @@ For example, consider a data-driven cardinality estimator:
             self,
             query: pb.SqlQuery,
             intermediate: pb.TableReference | Iterable[pb.TableReference]
-        ) -> pb.CardinalityEstimate:
+        ) -> pb.Cardinality:
             subquery = pb.transform.extract_query_fragment(query, intermediate)
             if subquery is None:
                 return pb.Cardinality.unknown()
@@ -444,8 +444,8 @@ Beyond Built-in Hooks
 ---------------------
 
 If your optimization algorithm does not fit into any of the pre-defined optimization stages, you have to implement a
-custom subclass of the :class:`~OptimizationPipeline`. This pipeline could then implement the desired optimization logic
-directly, or rely its own :class:`~OptimizationStage` subclasses. This would allow you to still plug your optimizer into
+custom subclass of the :class:`~postbound.OptimizationPipeline`. This pipeline could then implement the desired optimization logic
+directly, or rely its own :class:`~postbound.OptimizationStage` subclasses. This would allow you to still plug your optimizer into
 the benchmarking utilities, etc. of PostBOUND.
 
 .. note::

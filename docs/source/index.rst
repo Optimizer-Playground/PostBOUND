@@ -120,7 +120,7 @@ The implementation is compared to the native PostgreSQL optimizer on the Stats b
   # Therefore, we do not need to setup any additional optimizers.
 
   # Step 4: execute the workload.
-  # We use the QueryPreparationService to prewarm the database buffer and run all
+  # We use the QueryPreparation to prewarm the database buffer and run all
   # queries as EXPLAIN ANALYZE.
   query_prep = pb.bench.QueryPreparation(
       prewarm=True, analyze=True, preparatory_statements=["SET geqo TO off;"]

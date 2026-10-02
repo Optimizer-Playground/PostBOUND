@@ -40,9 +40,9 @@ of rows produced by each operator in the plan.
 
 The :class:`MultiStageOptimizationPipeline <postbound.MultiStageOptimizationPipeline>` performs the query optimization in
 multiple sequential steps.
-Initially, it computes a join order using the :class:`JoinOrderOptimization <postbound.JoinOrderOptimization>` stage.
+Initially, it computes a join order using the :class:`JoinOrdering <postbound.JoinOrdering>` stage.
 Afterwards, it selects the best physical operators for the join order in the
-:class:`PhysicalOperatorSelection <postbound.PhysicalOperatorSelection>` stage.
+:class:`OperatorSelection <postbound.OperatorSelection>` stage.
 Finally, the :class:`ParameterGeneration <postbound.ParameterGeneration>` can be used to add additional metadata to the
 query plan.
 This stage is especially well-suited for optimization scenarios where only part of the decisions of the native optimizer
@@ -64,7 +64,7 @@ To learn more about optimization pipelines, take a look at the separate :doc:`co
 Query Abstraction
 -----------------
 
-PostBOUND provides a powerful query abstraction centered around :class:`~postbound.qal.SqlQuery`.
+PostBOUND provides a powerful query abstraction centered around :class:`~postbound.SqlQuery`.
 Pretty much all other parts of the framework operate on this abstraction.
 You can obtain an instance of this class by parsing a raw SQL query string using
 :func:`~postbound.parse_query`:
@@ -99,13 +99,13 @@ For more details on the query abstraction, see the separate :doc:`core/qal` docu
 
 .. note::
 
-    The :class:`~postbound.qal.SqlQuery` is only used to represent ``SELECT`` queries and PostBOUND currently
+    The :class:`~postbound.SqlQuery` is only used to represent ``SELECT`` queries and PostBOUND currently
     does not support DDL or DML queries.
     Plain ``SELECT`` queries are modelled as a :class:`~postbound.qal.SelectStatement` subclass.
-    Set operations such as ``UNION`` are modelled in a separate :class:`~postbound.qal.SetQuery>` subclass.
+    Set operations such as ``UNION`` are modelled in a separate :class:`~postbound.qal.SetQuery` subclass.
     The reasons that are explained in the :doc:`core/qal` documentation.
-    Most parts of the framework operate on the abstract :class:`~postbound.qal.SqlQuery`.
-    If some functionalities are only available for set queries or plain ``SELECT``queries, this is indicated in the
+    Most parts of the framework operate on the abstract :class:`~postbound.SqlQuery`.
+    If some functionalities are only available for set queries or plain ``SELECT`` queries, this is indicated in the
     function signature.
 
     We might add support for DDL and DML queries in the future, if there is actual demand for it.

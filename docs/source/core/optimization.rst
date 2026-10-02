@@ -48,9 +48,9 @@ Essentially, you can provide any combination of plan enumerator, cost model, and
 .. tip::
 
     If you do not implement your own plan enumerator, PostBOUND will select a dynamic programming-based algorithm (see
-    :class:`~postbound.opt.dynprog.DynamicProgrammingEnumerator`) by default.
+    :class:`~postbound.opt.DynamicProgrammingEnumerator`) by default.
     If your target database happens to be a Postgres system, a DP algorithm specifically designed to mimic the Postgres
-    algorithm will be used (see :class:`~postbound.opt.dynprog.PostgresDynProg`).
+    algorithm will be used (see :class:`~postbound.opt.PostgresDynProg`).
 
     In contrast to the :ref:`multi-stage pipeline <multistage-optimizer>`, we cannot simply let the target database
     system supply its own enumerator, because it is typically the enumerators job to request cost and cardinality
@@ -85,9 +85,9 @@ See the :class:`~postbound.MultiStageOptimizationPipeline` for a full rundown of
 available methods.
 Essentially, you can provide any combination of join ordering, operator selection and plan parameterization:
 
-1. The :class:`~postbound.JoinOrderOptimization` is responsible for computing the :class:`~postbound.JoinTree` of the
+1. The :class:`~postbound.JoinOrdering` is responsible for computing the :class:`~postbound.JoinTree` of the
    query. If this stage is skipped, the native optimizer has to perform its own join ordering.
-2. The :class:`~postbound.PhysicalOperatorSelection` determines the scan and join operators for each intermediate of the
+2. The :class:`~postbound.OperatorSelection` determines the scan and join operators for each intermediate of the
    query. Those are encoded in the :class:`~postbound.PhysicalOperatorAssignment`. If this stage is skipped, the native
    optimizer has to select its own physical operators. If the join order stage is skipped, the selected operators will
    only be used if their corresponding intermediates are actually calculated.

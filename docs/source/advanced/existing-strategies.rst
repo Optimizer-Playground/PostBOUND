@@ -32,10 +32,10 @@ from an actual database system.
 For full **plan enumeration** PostBOUND offers
 
 - :class:`~postbound.opt.DynamicProgrammingEnumerator` as a rather simple implementation of the traditional DP algorithm.
-  This class is used as a default in the :class:`~postbound.TextbookOptimizationPipeline` if required
+  This class is used as a default in the :class:`~postbound.TextBookOptimizationPipeline` if required
 - :class:`~postbound.opt.PostgresDynProg` as another dynamic programming-based plan enumerator. This algorithm closely
   mirrors the internal enumerator used by Postgres. It functions as the default enumerator in the
-  :class:`~postbound.TextbookOptimizationPipeline` if Postgres is the target database system.
+  :class:`~postbound.TextBookOptimizationPipeline` if Postgres is the target database system.
 
 For **join ordering**, **operator selection**, and **plan parameterization** in the context of a
 :class:`~postbound.MultiStageOptimizationPipeline` PostBOUND contains

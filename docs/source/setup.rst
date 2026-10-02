@@ -73,7 +73,7 @@ in your local project, simply run ``uv add path/to/postbound/directory/``.
     Sadly, at the current time we cannot provide support for different setups.
 
 A key requirement for PostBOUND is a running database server to execute queries against.
-See the :ref:`hinting` description for more details on why this is necessary and what  functionality the database has to
+See the :doc:`core/hinting` description for more details on why this is necessary and what  functionality the database has to
 provide.
 Currently, the most well-supported DBS are PostgreSQL and DuckDB.
 Limited support for MySQL is also available.
@@ -193,7 +193,7 @@ Putting things together, you can create an entirely new Postgres server like so:
     . ./postgres-start.sh
     ./workload-job-setup.sh
     ./postgres-psycopg-setup.sh job imdb
-    cp .psycopg_connect_job ../..
+    cp .psycopg_connection_job ../..
 
 Similar to the Postgres setup, you can also create a local DuckDB installation by compiling it from source.
 However, note that since PostBOUND v0.22, quacklab/DuckDB is a first-party dependency of PostBOUND and is automatically
@@ -217,7 +217,7 @@ See the ``--help`` options for more details.
     source pb-venv/bin/activate  # make sure to activate the venv which contains quacklab
     cd db-support/duckdb
     ./duckdb-setup.sh
-    ./workload-setup.py --workload imdb
+    ./workload-imdb-setup.sh
 
 
 Docker Installation
@@ -254,7 +254,7 @@ Use ``docker logs -f <container name>`` to monitor the installation progress.
 +------------------------+-------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------+
 | ``USE_PGLAB``          | *true* or *false*             | Whether to initialize a `pg_lab <https://github.com/rbergm/pg_lab>`__ server instead of a normal Postgres server. pg_lab provides advanced hinting capabilities and offers additional extension points for the query optimizer.                                                     | *false*       |
 +------------------------+-------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------+
-| ``SETUP_DUCKDB``       | *true* or *false*             | Whether a local DuckDB installation should be created as part of the PostBOUND setup. This will compile DuckDB from source and install it under ``/postbound/db-support/duckdb/duckdb-server``.                                                                                     | *false*       |
+| ``SETUP_DUCKDB``       | *true* or *false*             | Whether a local DuckDB installation should be created as part of the PostBOUND setup. This will compile DuckDB from source and install it under ``/postbound/db-support/duckdb/quacklab``.                                                                                          | *false*       |
 +------------------------+-------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------+
 | ``SETUP_IMDB``         | *true* or *false*             | Whether an `IMDB <https://doi.org/10.14778/2850583.2850594>`__ instance should be created as part of the setup. PostBOUND can connect to the Postgres database using the ``.psycopg_connection_job`` config file. The DuckDB image will be available at ``/postbound/imdb.duckdb``. | *false*       |
 +------------------------+-------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------+

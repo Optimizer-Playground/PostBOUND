@@ -29,10 +29,10 @@ Multi-stage Optimization Pipeline
 .. autoclass:: postbound.MultiStageOptimizationPipeline
     :members:
 
-.. autoclass:: postbound.JoinOrderOptimization
+.. autoclass:: postbound.JoinOrdering
     :members:
 
-.. autoclass:: postbound.PhysicalOperatorSelection
+.. autoclass:: postbound.OperatorSelection
     :members:
 
 .. autoclass:: postbound.ParameterGeneration

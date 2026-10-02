@@ -9,8 +9,8 @@ Even with the necessary hints in place, some limitations remain due to internal 
 the :ref:`limitation <duckdb-limitations>` below.
 
 The DuckDB backend is part of a standard PostBOUND installation, so no extra setup is required. Similar to the Postgres
-tooling, we provide a ``setup-workload.py`` script to load pre-created database instances for commonly used workloads.
-The script is located in the ``db-support/duckdb`` directory of the PostBOUND repository.
+tooling, we provide ``workload-<NAME>-setup.sh`` scripts to load pre-created database instances for commonly used
+workloads. The scripts are located in the ``db-support/duckdb`` directory of the PostBOUND repository.
 
 
 Usage
@@ -130,10 +130,8 @@ The entire setup process might take some time, so feel free to grab a cup of cof
     without conflicts. Other than the name differences, the packages have the exact same API.
 
 Once the setup is complete, you can create commonly-used database instances such as IMDB/JOB or Stats using the
-``workload-setup.py`` script. This script must be executed while the virtual environment containing the quacklab
-installation is active.
-The workload setup shell scripts serve the same purpose but require the DuckDB executable to be available on your *PATH*.
-This is currently not the case when building quacklab due to limitations of the build system.
+``workload-imdb-setup.sh`` and ``workload-stats-setup.sh`` scripts. These download the pre-created database files, so
+they neither require the DuckDB executable nor an active virtual environment.
 
 
 References
