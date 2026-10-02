@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from postbound import parser
 from postbound._core import ColumnReference, TableReference
-from postbound.qal import Limit, SelectStatement, SetOperator, SetQuery, is_select_query, is_set_query
+from postbound.qal import Explain, Limit, SelectStatement, SetOperator, SetQuery, is_select_query, is_set_query
 
 R = TableReference("r")
 S = TableReference("s")
@@ -260,3 +260,17 @@ def test_ast_renders_the_child_of_a_negation() -> None:
 
     assert "+-NotPredicate [NOT]\n" in ast
     assert "+-UnaryPredicate [IS NULL]\n" in ast
+
+
+def test_set_query_accepts_the_same_explain_keyword_as_select_statement() -> None:
+    """Regression guard for cacf542: the rework renamed `SelectStatement`'s ``explain_clause`` parameter to
+    ``explain`` but left `SetQuery` on ``explain_clause``, so the same keyword raised a `TypeError` depending on the
+    kind of query being built.
+    """
+    explain = Explain(analyze=True)
+    lhs = parse("SELECT r.a FROM r")
+    rhs = parse("SELECT s.b FROM s")
+
+    query = SetQuery(lhs, rhs, set_operation=SetOperator.Union, explain=explain)
+
+    assert query.explain == explain

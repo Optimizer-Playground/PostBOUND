@@ -126,8 +126,16 @@ class PreciseStatistics(StatisticsCatalog):
         select_clause = Select(Projection.create_count(column, distinct=True))
         from_clause = From.create_for(column.table)
         sql = as_query(select_clause, from_clause)
+        non_nulls: int = self._db.execute_query(sql)
 
-        return self._db.execute_query(sql)
+        select_clause = Select.constant(42)
+        from_clause = From.create_for(column.table)
+        where_clause = Where(as_predicate(column, "IS NULL"))
+        limit_clause = Limit(limit=1)
+        sql = as_query(select_clause, from_clause, where_clause, limit_clause)
+        contains_nulls = bool(self._db.execute_query(sql, raw=True))
+
+        return non_nulls + (1 if contains_nulls else 0)
 
     def null_frac(self, column: ColumnReference) -> float:
         if not ColumnReference.assert_bound(column):

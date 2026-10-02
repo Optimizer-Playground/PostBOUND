@@ -1172,7 +1172,7 @@ class HintType(Enum):
     certain hints can be checked on the database system interface and should be handled as part of the optimization pre-checks.
     """
 
-    JoinOrder = "Join orderˆˆ"
+    JoinOrder = "Join order"
     JoinDirection = "Join direction"
     Operator = "Physical operators"
     Parallelization = "Par. workers"
@@ -1677,7 +1677,7 @@ def parameters_from_plan(
         card = query_plan.annotation
         parallel_workers = None
     else:
-        if target_cardinality == "estimated":
+        if target_cardinality == "estimates" or target_cardinality == "estimated":
             card = query_plan.estimated_cardinality
         elif target_cardinality == "actual" and not fallback_estimated:
             card = query_plan.actual_cardinality

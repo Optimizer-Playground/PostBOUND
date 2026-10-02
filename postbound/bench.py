@@ -35,6 +35,7 @@ from .db import (
     Database,
     DatabasePool,
     PrewarmingSupport,
+    ResultCache,
     ResultSet,
     StopwatchSupport,
     TimeoutSupport,
@@ -1037,7 +1038,6 @@ def execute_workload(
     query_preparation: QueryPreparation | dict[str, Any] | None = None,
     training_data: TrainingData | TrainingDataRepository | None = None,
     timeout: float | None = None,
-    exec_callback: Callable[[ExecutionResult], None] | None = None,
     pre_exec_callback: Callable[[SqlQuery], dict | None] | None = None,
     post_exec_callback: Callable[[ExecutionResult], dict | None] | None = None,
     repetition_callback: Callable[[int], None] | None = None,
@@ -1083,12 +1083,6 @@ def execute_workload(
         The maximum time in seconds that the query is allowed to run. If the query exceeds this time, the execution is
         cancelled and the execution time is set to *Inf*. If this parameter is omitted, no timeout is enforced. Notice that
         timeouts require the database to implement `TimeoutSupport`.
-    exec_callback : Optional[Callable[[ExecutionResult], None]], optional
-        An optional callback that is executed after each query execution.
-
-        .. deprecated:: v0.21.1
-            This callback is deprecated in favor of post_exec_callback. Both are functionally equivalent. This is really
-            just a renaming to not cause confusion regarding the precise moment when the callback is executed.
     pre_exec_callback : Optional[Callable[[SqlQuery], None | dict]], optional
         An optional callback that is executed right before each query execution. This query includes all hinted optimization
         decisions (if any).
@@ -1182,6 +1176,12 @@ def execute_workload(
     if isinstance(on, OptimizationStage):
         on = _wrap_optimization_stage(on)
     target_db = on if isinstance(on, Database) else on.target_database()
+    if isinstance(target_db, ResultCache):
+        raise ValueError(
+            "Cannot run a benchmark on a ResultCache database. "
+            "ResultCache does not execute queries that were already executed before."
+        )
+
     optimizer = on if isinstance(on, OptimizationPipeline) else None
 
     if optimizer is not None and optimizer.requires_data_training():
@@ -1207,20 +1207,6 @@ def execute_workload(
         QueryPreparation(**query_preparation) if isinstance(query_preparation, dict) else query_preparation
     )
     progressive_output = Path(progressive_output) if progressive_output else None
-
-    if exec_callback is not None:
-        warnings.warn(
-            "exec_callback is deprecated. Use the functionally equivalent post_exec_callback instead.",
-            stacklevel=2,
-            category=DeprecationWarning,
-        )
-        if post_exec_callback is not None:
-            raise ValueError(
-                "Cannot specify both exec_callback and post_exec_callback. "
-                "Use post_exec_callback and remove exec_callback from your code. "
-                "Both are functionally equivalent."
-            )
-        post_exec_callback = exec_callback
 
     log: _LoggerImpl
     if logger == "tqdm":

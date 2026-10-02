@@ -347,3 +347,34 @@ def test_except_and_intersect_also_produce_set_queries() -> None:
 
     assert isinstance(except_query, SetQuery) and except_query.set_operation == SetOperator.Except
     assert isinstance(intersect_query, SetQuery) and intersect_query.set_operation == SetOperator.Intersect
+
+
+# -- regression tests --------------------------------------------------------------------------------------
+
+
+def test_predicates_of_an_outer_join_keep_the_inner_join_and_where_predicates() -> None:
+    """Regression guard for df75e5a: `JoinTableSource.predicates()` raised a `ValueError` for every non-inner join,
+    so `query.predicates()`, `joins()` and `filters()` crashed on any query containing a LEFT/RIGHT/FULL JOIN. The
+    outer join condition is now left out of the predicate tree (with a warning), but everything else is kept.
+    """
+    query = parse("SELECT * FROM r JOIN s ON r.a = s.b LEFT JOIN t ON s.b = t.c WHERE r.x > 5")
+
+    with pytest.warns(UserWarning, match="Outer join conditions are ignored"):
+        predicates = query.predicates()
+
+    assert predicates is not None
+    assert str(predicates) == "r.a = s.b AND r.x > 5"
+
+
+def test_predicates_of_a_natural_join_keep_the_where_predicates() -> None:
+    """Regression guard for df75e5a: like outer joins, NATURAL joins made `JoinTableSource.predicates()` raise a
+    `ValueError` because they are not `JoinType.InnerJoin`. Their implicit condition cannot be represented, but the
+    remaining predicates must still be available.
+    """
+    query = parse("SELECT * FROM r NATURAL JOIN s WHERE r.x > 5")
+
+    with pytest.warns(UserWarning, match="Natural join conditions are ignored"):
+        predicates = query.predicates()
+
+    assert predicates is not None
+    assert str(predicates) == "r.x > 5"

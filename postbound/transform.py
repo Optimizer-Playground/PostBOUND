@@ -233,7 +233,7 @@ def explicit_to_implicit(query):
             orderby_clause=query.orderby_clause,
             limit_clause=query.limit_clause,
             hints=query.hints,
-            explain_clause=query.explain,
+            explain=query.explain,
         )
 
     if query.from_clause is None or query.has_simple_from():
@@ -433,7 +433,7 @@ def extract_query_fragment(
                 orderby_clause=orderby_clause,
                 limit_clause=query.limit_clause,
                 hints=query.hints,
-                explain_clause=query.explain,
+                explain=query.explain,
             )
 
     match projection:
@@ -1636,7 +1636,7 @@ def rename_columns_in_query(query, available_renamings: Mapping[ColumnReference,
             orderby_clause=renamed_orderby,
             limit_clause=query.limit_clause,
             hints=query.hints,
-            explain_clause=query.explain,
+            explain=query.explain,
         )
 
     renamed_select = rename_columns_in_clause(query.select_clause, available_renamings)
@@ -2939,7 +2939,7 @@ def normalize_query(query: SqlQuery, *, schema: DatabaseSchema | None = None):
             cte_clause=updated_cte,
             orderby_clause=query.orderby_clause,
             limit_clause=query.limit_clause,
-            explain_clause=query.explain,
+            explain=query.explain,
             hints=query.hints,
         )
 

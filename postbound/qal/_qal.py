@@ -3116,7 +3116,7 @@ class UnaryPredicate(BasePredicate):
                 return str(column)
 
             case UnaryOperator.Exists:
-                return f"EXISTS ({column})"
+                return f"EXISTS {column}"  # don't need parentheses here, SubqueryExpression adds them automatically
 
             case UnaryOperator.IsNull:
                 return f"{column} IS NULL"
@@ -6057,6 +6057,12 @@ class Select(BaseClause):
         return Select(Projection.star(), distinct=distinct)
 
     @staticmethod
+    def constant(value: object, target_name: str = "") -> Select:
+        """Shorthand to create a SELECT clause with a single constant value."""
+        value = as_expression(value, allow_star=False)
+        return Select(Projection(value, target_name=target_name))
+
+    @staticmethod
     def create_for(
         columns: ColumnReference | SqlExpression | Iterable[ColumnReference | SqlExpression],
         *,
@@ -6933,6 +6939,18 @@ AutoJoins = {
 Examples include *CROSS JOIN* and *NATURAL JOIN*.
 """
 
+NaturalJoins = {
+    JoinType.NaturalInnerJoin,
+    JoinType.NaturalOuterJoin,
+    JoinType.NaturalLeftJoin,
+    JoinType.NaturalRightJoin,
+    JoinType.NaturalRightJoin,
+}
+"""Natural joins are based on column names rather than an explicit join condition."""
+
+OuterJoins = {JoinType.OuterJoin, JoinType.LeftJoin, JoinType.RightJoin}
+"""Outer joins are *FULL OUTER JOIN*, *LEFT OUTER JOIN*, and *RIGHT OUTER JOIN*."""
+
 
 class JoinTableSource(TableSource):
     """Models a table that is referenced in a *FROM* clause using the explicit *JOIN* syntax.
@@ -7062,9 +7080,6 @@ class JoinTableSource(TableSource):
         return self._left.columns() | self._right.columns() | condition_columns
 
     def predicates(self) -> PredicateTree | None:
-        if self._join_type != JoinType.InnerJoin:
-            raise ValueError("Predicates can only be extracted from inner joins")
-
         all_predicates: list[AbstractPredicate] = []
 
         left_predicates = self._left.predicates()
@@ -7073,7 +7088,13 @@ class JoinTableSource(TableSource):
         right_predicates = self._right.predicates()
         if right_predicates:
             all_predicates.append(right_predicates.root)
-        if self._join_condition:
+
+        if self._join_type in NaturalJoins:
+            warnings.warn("Natural join conditions are ignored in the predicate tree", stacklevel=2)
+
+        if self._join_type in OuterJoins:
+            warnings.warn("Outer join conditions are ignored in the predicate tree", stacklevel=2)
+        elif self._join_condition:
             all_predicates.append(self._join_condition)
 
         return PredicateTree(CompoundPredicate.create_and(all_predicates)) if all_predicates else None
@@ -7784,10 +7805,10 @@ class UnionClause(SetOpClause):
 
     Parameters
     ----------
-    left_query: SqlQuery
+    lhs: SqlQuery
         The left input to the UNION operation. Since UNIONs are commutative, the assignment of left and right does not
         really matter.
-    right_query: SqlQuery
+    rhs: SqlQuery
         The right input to the UNION operation. Since UNIONs are commutative, the assignment of left and right does not
         really matter.
     union_all : bool, optional
@@ -7797,13 +7818,13 @@ class UnionClause(SetOpClause):
 
     def __init__(
         self,
-        left_query: SqlQuery,
-        right_query: SqlQuery,
+        lhs: SqlQuery,
+        rhs: SqlQuery,
         *,
         union_all: bool = False,
     ) -> None:
-        self._lhs = left_query
-        self._rhs = right_query
+        self._lhs = lhs
+        self._rhs = rhs
         self._union_all = union_all
         hash_val = hash((self._lhs, self._rhs, self._union_all))
         super().__init__(hash_val)
@@ -7910,16 +7931,16 @@ class ExceptClause(SetOpClause):
 
     Parameters
     ----------
-    left_query: SqlQuery
+    lhs: SqlQuery
         The left query that is part of the *EXCEPT* operation. This is the result set from which tuples are removed.
-    right_query: SqlQuery
+    rhs: SqlQuery
         The right query that is part of the *EXCEPT* operation. This is the result set of the tuples that should be
         removed.
     """
 
-    def __init__(self, left_query: SqlQuery, right_query: SqlQuery) -> None:
-        self._lhs = left_query
-        self._rhs = right_query
+    def __init__(self, lhs: SqlQuery, rhs: SqlQuery) -> None:
+        self._lhs = lhs
+        self._rhs = rhs
         super().__init__(hash((self._lhs, self._rhs)))
 
     __slots__ = ("_lhs", "_rhs")
@@ -7982,17 +8003,17 @@ class IntersectClause(SetOpClause):
 
     Parameters
     ----------
-    left_query: SqlQuery
+    lhs: SqlQuery
         The left query that is part of the *INTERSECT* operation. Since set intersection is commutative, the assignment
         of left and right does not really matter.
-    right_query: SqlQuery
+    rhs: SqlQuery
         The right query that is part of the *INTERSECT*. Since set intersection is commutative, the assignment of left
         and right does not really matter.
     """
 
-    def __init__(self, left_query: SqlQuery, right_query: SqlQuery) -> None:
-        self._lhs = left_query
-        self._rhs = right_query
+    def __init__(self, lhs: SqlQuery, rhs: SqlQuery) -> None:
+        self._lhs = lhs
+        self._rhs = rhs
         super().__init__(hash((self._lhs, self._rhs)))
 
     __slots__ = ("_lhs", "_rhs")
@@ -9326,9 +9347,9 @@ class SetQuery(SqlQuery):
 
     Parameters
     ----------
-    left_query : SqlQuery
+    lhs : SqlQuery
         The left-hand side of the set operation
-    right_query : SqlQuery
+    rhs : SqlQuery
         The right-hand side of the set operation
     set_operation : SetOperator
         The actual operation to combine the two result sets.
@@ -9355,37 +9376,37 @@ class SetQuery(SqlQuery):
 
     def __init__(
         self,
-        left_query: SqlQuery,
-        right_query: SqlQuery,
+        lhs: SqlQuery,
+        rhs: SqlQuery,
         *,
         set_operation: SetOperator,
         cte_clause: CommonTableExpression | None = None,
         orderby_clause: OrderBy | None = None,
         limit_clause: Limit | None = None,
         hints: Hint | None = None,
-        explain_clause: Explain | None = None,
+        explain: Explain | None = None,
     ) -> None:
-        if left_query.is_explain():
+        if lhs.is_explain():
             warnings.warn(
                 "Left query is an EXPLAIN query. Ignoring the EXPLAIN clause.",
                 stacklevel=2,
             )
-            left_query = build_query(left_query.clauses(skip=Explain))
-        if right_query.is_explain():
+            lhs = build_query(lhs.clauses(skip=Explain))
+        if rhs.is_explain():
             warnings.warn(
                 "Right query is an EXPLAIN query. Ignoring the EXPLAIN clause.",
                 stacklevel=2,
             )
-            right_query = build_query(right_query.clauses(skip=Explain))
+            rhs = build_query(rhs.clauses(skip=Explain))
 
-        self._lhs = left_query
-        self._rhs = right_query
+        self._lhs = lhs
+        self._rhs = rhs
         self._op = set_operation
         self._cte = cte_clause
         self._orderby = orderby_clause
         self._limit = limit_clause
         self._hints = hints
-        self._explain = explain_clause
+        self._explain = explain
         self._hash_val = hash(
             (
                 self._lhs,
@@ -9896,7 +9917,7 @@ def build_query(query_clauses):
             orderby_clause=orderby_clause,
             limit_clause=limit_clause,
             hints=hints_clause,
-            explain_clause=explain_clause,
+            explain=explain_clause,
         )
 
     if select_clause is None:

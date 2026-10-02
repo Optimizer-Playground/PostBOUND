@@ -121,99 +121,6 @@ class Workload(Mapping[L, Q]):
     can be used wherever a ``Workload[str, SqlQuery]`` is expected.
     """
 
-    @staticmethod
-    def read(
-        root_dir: str | Path,
-        *,
-        query_file_pattern: str = "*.sql",
-        name: str = "",
-        label_prefix: str = "",
-        file_encoding: str = "utf-8",
-        bind_columns: bool = True,
-        include_hints: bool = True,
-        on_error: Literal["raise", "warn", "ignore"] = "raise",
-        verbose: bool = False,
-    ) -> Workload[str, SqlQuery]:
-        """Reads all SQL queries from a specific directory into a workload object.
-
-        .. deprecated:: 0.20.2
-            Use the `read_workload` function instead, which provides more flexibility and features.
-            We will unify the workload API in 0.21.0 to make sure all workload loading functions are methods of the
-            `workloads` module.
-
-        This method assumes that the queries are stored in individual files, one query per file. The query labels will be
-        constructed based on the file name of the source files. For example, a query contained in file ``q-1-1.sql`` will
-        receive label ``q-1-1`` (note that the trailing file extension is dropped). If the `label_prefix` is given, it will be
-        inserted before the file name-based label.
-
-        Parameters
-        ----------
-        root_dir : str
-            Directory containing the individual query files
-        query_file_pattern : str, optional
-            File name pattern that is shared by all query files. Only files matching the pattern will be read and each matching
-            file is assumed to be a valid workload query. This is resolved as a glob expression. Defaults to ``"*.sql"``
-        name : str, optional
-            An optional name that can be used to identify the workload. Empty by default.
-        label_prefix : str, optional
-            A prefix to add before each query label. Empty by default. Notice that the prefix will be prepended as-is, i.e. no
-            separator character is inserted. If a separator is desired, it has to be part of the prefix.
-        file_encoding : str, optional
-            The encoding of the query files. All files must share the same encoding. Defaults to UTF-8 encoding.
-        bind_columns : bool, optional
-            Whether the parser should try to infer tables for all column references which do not use the explicit *alias.column*
-            syntax. This requires an active database connection. If no such connection exists, this setting is ignored.
-        include_hints : bool, optional
-            Whether the parser should try to infer and extract hint blocks from the queries
-        on_error : Literal["raise", "warn", "ignore"], optional
-            How to react to parser errors. By default, the exception is propagated to the parent process.
-        verbose : bool, optional
-            Whether progress information should be printed.
-
-        Returns
-        -------
-        Workload[str]
-            A workload consisting of all query files contained in the root directory.
-
-        See Also
-        --------
-        Path.glob
-        parser.parse_query
-        """
-        queries: dict[str, SqlQuery] = {}
-        root = Path(root_dir)
-
-        if verbose:
-            matching_files = list(root.glob(query_file_pattern))
-            matching_files = tqdm.tqdm(matching_files, desc=root.name, unit="q")
-        else:
-            matching_files = root.glob(query_file_pattern)
-
-        for query_file_path in matching_files:
-            with open(query_file_path, encoding=file_encoding) as query_file:
-                raw_contents = query_file.readlines()
-            query_contents = "\n".join([line for line in raw_contents])
-
-            try:
-                parsed_query = parser.parse_query(
-                    query_contents,
-                    include_hints=include_hints,
-                    bind_columns=bind_columns,
-                )
-            except Exception as e:
-                match on_error:
-                    case "raise":
-                        raise ValueError(f"Could not parse query from {query_file_path}", e) from e
-                    case "warn":
-                        warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})", stacklevel=2)
-                    case "ignore":
-                        pass
-
-            query_label = query_file_path.stem
-            queries[label_prefix + query_label] = parsed_query
-
-        return Workload(queries, name=name, root=root)
-
     def __init__(
         self,
         queries: Mapping[L, Q],
@@ -593,8 +500,9 @@ class Workload(Mapping[L, Q]):
         return Workload(reduced_workload, name=self._name, root=self._root)
 
     def __or__[Q2: SqlQuery](self, other: Mapping[L, Q2]) -> Workload[L, Q | Q2]:
-        merged: dict[L, Q | Q2] = cast("dict[L, Q | Q2]", dict(self._entries))
+        merged: dict[L, Q | Q2] = {}
         merged.update(other)
+        merged.update(self._entries)
         return Workload(merged, name=self._name, root=self._root)  # retain own labels in case of conflict
 
     def __getitem__(self, key: L) -> Q:
@@ -959,7 +867,7 @@ def job(
 
     workload_dir = _fetch_workload("JOB")
     # JOB only uses aliases column references, so no need for explicit binding
-    job_workload = Workload.read(workload_dir, name="JOB", file_encoding=file_encoding, bind_columns=False)
+    job_workload = read_workload(workload_dir, name="JOB", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(job_workload, workload_dir)
     return cast(Workload[str, SelectStatement], job_workload)
 
@@ -984,7 +892,7 @@ def job_light(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]
     """
     workload_dir = _fetch_workload("job-light")
     # JOB-light only uses aliases column references, so no need for explicit binding
-    job_light_workload = Workload.read(workload_dir, name="JOB-light", file_encoding=file_encoding, bind_columns=False)
+    job_light_workload = read_workload(workload_dir, name="JOB-light", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(job_light_workload, workload_dir)
     return cast(Workload[str, SelectStatement], job_light_workload)
 
@@ -1010,7 +918,7 @@ def job_complex(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatemen
     """
     workload_dir = _fetch_workload("job-complex")
     # JOB-complex only uses aliases column references, so no need for explicit binding
-    job_complex_workload = Workload.read(
+    job_complex_workload = read_workload(
         workload_dir,
         name="JOB-complex",
         file_encoding=file_encoding,
@@ -1044,7 +952,7 @@ def ssb(*, file_encoding: str = "utf-8", bind_columns: bool | None = None) -> Wo
     """
     bind_columns = bind_columns if bind_columns is not None else not DatabasePool.get_instance().empty()
     workload_dir = _fetch_workload("ssb")
-    ssb_workload = Workload.read(workload_dir, name="SSB", file_encoding=file_encoding, bind_columns=bind_columns)
+    ssb_workload = read_workload(workload_dir, name="SSB", file_encoding=file_encoding, bind_columns=bind_columns)
     _assert_workload_loaded(ssb_workload, workload_dir)
     return cast(Workload[str, SelectStatement], ssb_workload)
 
@@ -1112,7 +1020,7 @@ def stats(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:
     .. Yuxing Han et al.: Cardinality Estimation in DBMS: A Comprehensive Benchmark Evaluation (Proc. VLDB Endow. 15, 4 (2022))
     """
     workload_dir = _fetch_workload("stats")
-    stats_workload = Workload.read(workload_dir, name="Stats", file_encoding=file_encoding, bind_columns=False)
+    stats_workload = read_workload(workload_dir, name="Stats", file_encoding=file_encoding, bind_columns=False)
     _assert_workload_loaded(stats_workload, workload_dir)
     return cast(Workload[str, SelectStatement], stats_workload)
 

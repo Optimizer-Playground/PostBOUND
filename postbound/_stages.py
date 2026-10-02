@@ -700,7 +700,8 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
         for join in self.generate_intermediates(query):
             estimate = self.calculate_estimate(query, join)
             if not estimate.is_valid():
-                parameterization.add_cardinality(join, estimate)
+                continue
+            parameterization.add_cardinality(join, estimate)
         return parameterization
 
     def generate_plan_parameters(

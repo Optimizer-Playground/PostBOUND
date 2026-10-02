@@ -748,3 +748,20 @@ def test_simple_filter_with_a_mirrored_operator_still_wraps_the_original_predica
 
     assert wrapped.unwrap() == pred
     assert str(wrapped) == "42 > r.a"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM r WHERE EXISTS (SELECT 1 FROM s WHERE s.a = r.a)",
+        "SELECT * FROM r WHERE NOT EXISTS (SELECT 1 FROM s WHERE s.a = r.a)",
+    ],
+    ids=["exists", "not-exists"],
+)
+def test_exists_predicate_renders_a_single_pair_of_parentheses(sql: str) -> None:
+    """Regression guard for cacf542: `UnaryPredicate.__str__` wrapped its operand in parentheses for EXISTS, but the
+    operand is a `SubqueryExpression` that already renders its own, producing ``EXISTS ((SELECT ...))``.
+    """
+    query = parse(sql)
+
+    assert str(query) == f"{sql};"

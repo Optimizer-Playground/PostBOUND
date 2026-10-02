@@ -1341,7 +1341,7 @@ class QueryPlan:
         if not self.is_join() and self._input_node is None:
             raise ValueError(f"Cannot check right-deepness on node with {len(self._children)} children: {self}")
         elif self._input_node is not None:
-            return self._input_node.is_bushy()
+            return self._input_node.is_right_deep()
 
         outer_child, inner_child = self.join_nodes
         outer_join = outer_child.find_first_node(QueryPlan.is_join)
