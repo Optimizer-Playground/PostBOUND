@@ -53,6 +53,7 @@ from ._qal import (
     ValuesWithQuery,
     Where,
     WindowExpression,
+    all_simple_from,
 )
 
 DefaultIndent = 2
@@ -306,7 +307,10 @@ def _quick_format_implicit_from(from_clause: From, *, flavor: SqlDialect) -> lis
     list[str]
         The pretty-printed parts of the clause, indented as necessary.
     """
-    tables = list(from_clause.tables())
+    if not all_simple_from(from_clause.items):
+        raise ValueError("Implicit FROM clause contains non-simple table sources, cannot format")
+
+    tables = [source.table for source in from_clause.items]
     if not tables:
         return []
     elif len(tables) > 3:

@@ -9716,6 +9716,47 @@ def all_binary_predicates(predicates):
     return all(isinstance(pred, BinaryPredicate) for pred in predicates)
 
 
+@overload
+def all_simple_from(items: list[TableSource]) -> TypeGuard[list[DirectTableSource]]: ...
+
+
+@overload
+def all_simple_from(items: tuple[TableSource, ...]) -> TypeGuard[tuple[DirectTableSource, ...]]: ...
+
+
+@overload
+def all_simple_from(items: set[TableSource]) -> TypeGuard[set[DirectTableSource]]: ...
+
+
+@overload
+def all_simple_from[V](items: dict[TableSource, V]) -> TypeGuard[dict[DirectTableSource, V]]: ...
+
+
+@overload
+def all_simple_from[V](items: Mapping[TableSource, V]) -> TypeGuard[Mapping[DirectTableSource, V]]: ...
+
+
+@overload
+def all_simple_from(items: Sequence[TableSource]) -> TypeGuard[Sequence[DirectTableSource]]: ...
+
+
+@overload
+def all_simple_from(items: Collection[TableSource]) -> TypeGuard[Collection[DirectTableSource]]: ...
+
+
+@overload
+def all_simple_from(items: Iterable[TableSource]) -> TypeGuard[Iterable[DirectTableSource]]: ...
+
+
+def all_simple_from(items):
+    """Checks whether all items in the given collection are direct table sources.
+
+    If they are, the type guard allows the type checker to narrow the type of the collection to a collection of
+    `DirectTableSource` instances. Otherwise, it remains a collection of `TableSource` instances.
+    """
+    return all(isinstance(item, DirectTableSource) for item in items)
+
+
 class QueryTypeError(RuntimeError):
     """Error to indicate that a different type of query was expected (e.g. a `SelectStatement` instead of a `SetQuery`)."""
 
