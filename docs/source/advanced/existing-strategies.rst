@@ -1,57 +1,56 @@
 Existing Optimizer Implementations
 ==================================
 
-PostBOUND comes with some existing optimizer implementations from influential or interesting works of the last couple of
-years.
-These can be used to compare your novel idea against existing approaches.
-In addition to the actual research strategies, there are also some "pseudo-strategies" such as using the native optimizer
-of a database system or just randomly deciding.
-All strategies are directly available form the :mod:`postbound.opt` package, e.g. as `pb.opt.dynprog` for the dynamic programming-based optimizer.
-Internally, the algorithms are available as lazy imports. This prevents unnecessary dependencies from being installed with
-PostBOUND. For example, many learned estimators require Pytorch for their implementation. Lazy imports ensure that you do not
-need to install Pytorch if you do not want to use such an estimator.
-
-Currently, the following optimizers are implemented:
+The core PostBOUND framework focuses on providing a flexible and extensible architecture to implement novel optimization
+strategies. As part of the `Optimization-Techniques <https://github.com/Optimizer-Playground/Optimization-Techniques>`
+companion-project these abstractions are used to implement influential research from the last couple of years.
+For example, the project includes implementations of the MSCN cardinality estimator, the BAO learned optimizer, or the
+SafeBound pessimistic estimator.
 
 .. important::
 
     We are constantly looking for new contributions to the PostBOUND optimimzer library.
     Our goal is to provide a comprehensive collection of optimizers that can be used for research and benchmarking.
-    If you have developed an optimizer prototype we would be happy to include it in PostBOUND.
-    Just reach out to us at our `GitHub repository <https://github.com/Optimizer-Playground/PostBOUND>`_ or by emailing us at
-    `rico.bergmann1@tu-dresden.de <mailto:rico.bergmann1@tu-dresden.de>`_.
+    If you have developed an optimizer prototype we would be happy to make it available.
+    Just reach out to us at our `GitHub repository <https://github.com/Optimizer-Playground/Optimization-Techniques>`_
+    or by emailing us at `rico.bergmann1@tu-dresden.de <mailto:rico.bergmann1@tu-dresden.de>`_.
 
-.. warning::
+In addition to the research prototypes, the core framework also provides a set of simple baseline optimizers. These
+serve as fallbacks in the optimization pipelines, or provide functionality that is so frequently used that it is worth
+having it in the core framework. Currently the following baseline optimizers are available:
 
-    The optimizers from related work (i.e. UES and TONIC) have been moved to a separate "optimizer playground" library and
-    are no longer part of the main PostBOUND library. They are still listed below for reference.
+For **cardinality estimation** PostBOUND provides:
 
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| Name            | Description                                                                                                                                                                 | Reference        | Package                                          |
-+=================+=============================================================================================================================================================================+==================+==================================================+
-| UES             | Upper-bound driven join order optimizer. Bounds are derived from base statistics, specifically most-common values.                                                          | [Hertzschuch21]_ | *moved out of PostBOUND*                         |
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| TONIC           | Learned physical operator selection. Operators are selected based on past experience and optional pretraining. Learning utilizes a prefix tree instead of a neural network. | [Hertzschuch22]_ | *moved out of PostBOUND*                         |
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| DP              | Dynamic programming-based join order optimizer, with an alternative algorithm that mimics the actual Postgres enumerator.                                                   |                  | :mod:`dynprog <postbound.opt.dynprog>`           |
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| *native*.       | Native optimization uses the built-in query optimizer of a database system.                                                                                                 |                  | :mod:`native <postbound.opt.native>`             |
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| *random*        | Random selection of join orders and physical operators.                                                                                                                     |                  | :mod:`randomized <postbound.opt.randomized>`     |
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| *exhaustive*    | These algorithms do not actually select a plan, but rather enumerate all possible plans (or join orders, or operator assignments).                                          |                  | :mod:`enumeration <postbound.opt.enumeration>`   |
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
-| *cardinalities* | A collection of cardinality estimation utilities.                                                                                                                           |                  | :class:`~postbound.opt.PreComputedCardinalities` |
-|                 |                                                                                                                                                                             |                  | :class:`~postbound.opt.PreciseCardinalities`     |
-|                 |                                                                                                                                                                             |                  | :class:`~postbound.opt.CardinalityDistortion`    |
-+-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+--------------------------------------------------+
+- :class:`~postbound.opt.PerfectCardinalities` to compute the true cardinalities of an intermediate
+- :class:`~postbound.opt.NativeCardinalityEstimator` to use the cardinality estimates from an actual database system
+- :class:`~postbound.opt.OfflineCardinalities` to read pre-computed cardinalities from a file
+- :class:`~postbound.opt.CardinalityCache` to avoid repeated computations for costly estimation algorithms
 
-.. [Hertzschuch21]
-    Axel Hertzschuch, Claudio Hartmann, Dirk Habich and Wolfgang Lehner:
-    "*Simplicity Done Right for Join Ordering*"
-    CIDR 2021 (Link: https://www.cidrdb.org/cidr2021/papers/cidr2021_paper01.pdf)
+For **cost modeling** PostBOUND provides the :class:`~postbound.opt.NativeCostModel` which extracts the estimated cost
+from an actual database system.
 
-.. [Hertzschuch22]
-    Axel Hertzschuch, Claudio Hartmann, Dirk Habich and Wolfgang Lehner:
-    "*Turbo-Charging SPJ Query Plans with Learned Physical Join Operator Selections*"
-    VLDB 2022 (DOI: https://doi.org/10.14778/3551793.3551825)
+For full **plan enumeration** PostBOUND offers
+
+- :class:`~postbound.opt.DynamicProgrammingEnumerator` as a rather simple implementation of the traditional DP algorithm.
+  This class is used as a default in the :class:`~postbound.TextbookOptimizationPipeline` if required
+- :class:`~postbound.opt.PostgresDynProg` as another dynamic programming-based plan enumerator. This algorithm closely
+  mirrors the internal enumerator used by Postgres. It functions as the default enumerator in the
+  :class:`~postbound.TextbookOptimizationPipeline` if Postgres is the target database system.
+
+For **join ordering**, **operator selection**, and **plan parameterization** in the context of a
+:class:`~postbound.MultiStageOptimizationPipeline` PostBOUND contains
+
+- native strategies that extract join order, physical operators, and plan parameters (cardinalities + parallel workers)
+  from an actual database system. These are defined in :class:`~postbound.opt.NativeJoinOrderOptimizer`,
+  :class:`~postbound.opt.NativePhysicalOperatorSelection`, and :class:`~postbound.opt.NativePlanParameterization`
+  respectively
+- a whole :class:`~postbound.opt.NativeOptimizer` which extracts an entire query plan
+- random strategies that select join order and physical operators at random. These are defined in
+  :class:`~postbound.opt.RandomJoinOrderOptimizer` and :class:`~postbound.opt.RandomOperatorOptimizer`
+- the random strategies can also be combined in the :class:`~postbound.opt.RandomPlanOptimizer` to obtain an entire
+  query plan
+
+In addition to these pre-defined optimization stages, the :mod:`~postbound.opt` module also contains a number of
+utilities to load/store the output of different optimization stages (e.g., query plans, join orders, etc.).
+Furthermore, the module provides enumerators to iterate over random join orders, query plans, etc., and enumerators to
+exhaustively generate them. Check the module documentation for more details.

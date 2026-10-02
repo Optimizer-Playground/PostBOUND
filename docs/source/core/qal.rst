@@ -2,8 +2,9 @@ Query Abstraction
 =================
 
 The query abstraction is used to represent SQL queries in a unified way, and to make accessing different parts of them
-easier. This section walks you through the most important parts of the query abstraction.
-Everything query-related is contained in the *query abstraction layer*, or :mod:`~postbound.qal` for short.
+easier. This document walks you through the most important parts of the query abstraction.
+Everything query-related is contained in the *query abstraction layer*, or :mod:`~postbound.qal` for short. Support
+functionality (such as query modification) is available in additional moduls.
 
 In the next sections, we are going to use the following example query:
 
@@ -36,7 +37,7 @@ PostBOUND uses a query abstraction that consists of three main components:
 
 1. The top-level :class:`~postbound.SqlQuery` object, which represents an entire, ready-to-run SQL query
 2. Each query consists of one or multiple clauses, such as *SELECT*, *FROM*, *WHERE*, etc. These are represented by
-   subclasses of the abstract :class:`~postbound.qal.BaseClause`.
+   subclasses of the abstract :class:`~postbound.qal.SqlClause`.
 3. Clauses are composed of expressions. These can be simple predicates, function calls, or even subqueries (which in turn
    contain :class:`~postbound.SqlQuery` instances). Expressions are represented by subclasses of the abstract
    :class:`~postbound.qal.SqlExpression`.
@@ -56,8 +57,8 @@ even :class:`qualified star expressions <postbound.qal.StarExpression>` (e.g., `
 .. important::
 
     The query parser is based on the actual Postgres parser (thanks to `pglast <https://github.com/lelit/pglast>`_!).
-    While this means that we have pretty good coverage of the SQL standard, it also means that we cannot parse queries that
-    Postgres does not understand.
+    While this means that we have pretty good coverage of the SQL standard, it also means that we cannot parse queries
+    that Postgres does not understand.
 
 
 Working with queries
@@ -77,8 +78,9 @@ The :mod:`~postbound.transform` module has a large suite of functions that make 
 All of the qal building blocks provide a visitor-based interface that allows you to traverse the query structure in a
 consistent way. These are defined in the :class:`~postbound.qal.ClauseVisitor` and
 :class:`~postbound.qal.SqlExpressionVisitor`. There is also a dedicated :class:`~postbound.qal.PredicateVisitor`, even
-though predicates are just a special case of expressions. You can make use of Python multiple inheritance to create single
-visitor class that traverses an entire query.
+though predicates are just a special case of expressions. You can make use of Python multiple inheritance to create
+single visitor class that traverses an entire query. Finally, the :class:`~postbound.qal.TableSourceVisitor` can be used
+to traverse the ``FROM`` hierarchy.
 
 .. tip::
 
@@ -89,9 +91,9 @@ visitor class that traverses an entire query.
 Working with joins and filters
 ------------------------------
 
-A core part of query optimization tasks is to analyze which join conditions and filter predicates are present in the query.
-You can either analyze queries manually and traverse the :class:`~postbound.qal.Where` clause. At the same time, the query
-abstraction also provides :class:`~postbound.qal.PredicateTree` for a more high-level access:
+A core part of query optimization tasks is to analyze which join conditions and filter predicates are present in the
+query. You can either analyze queries manually and traverse the :class:`~postbound.qal.Where` clause. At the same time,
+the query abstraction also provides :class:`~postbound.qal.PredicateTree` for a more high-level access:
 
 .. ipython:: python
 
@@ -117,22 +119,22 @@ The query predicates can be used to directly retrieve predicates that are releva
     contain join conditions that where specified with the ``JOIN ... ON ...`` syntax, e.g.,
     ``SELECT * FROM t1 JOIN t2 ON t1.id = t2.id``.
 
-The query abstraction uses a full-blown recursive structure to represent predicates. While this approach allows for a large
-expressivity, it makes extracting specific bits of information a bit cumbersome. For example, to get any
+The query abstraction uses a full-blown recursive structure to represent predicates. While this approach allows for a
+large expressivity, it makes extracting specific bits of information a bit cumbersome. For example, to get any
 :class:`~postbound.TableReference` from a join predicate, one would need to do something like the following:
 
 .. ipython:: python
 
     full_pred = pb.util.collections.get_any(query.predicates().joins())
     full_pred.join_partners()
-    single_pred = pb.util.simplify(full_pred.join_partners())
+    single_pred = pb.util.collections.get_any(full_pred.join_partners())
     single_pred
     any_table = single_pred[0]
     any_table
 
 This is because the query abstraction needs to handle cases of complex conjunctiontive or disjunctive predicates accross
-multiple tables such as ``R.a = S.b OR R.a = T.c``. However, such complicated structures do not occur in the commonly used
-benchmarks.
+multiple tables such as ``R.a = S.b OR R.a = T.c``. However, such complicated structures do not occur in the commonly
+used benchmarks.
 
 To ease the development experience, PostBOUND also has a **simplified version of query predicates** for cases where the
 predicates follow simple structures:
@@ -162,13 +164,13 @@ Compare this output to the listing of the full AST above.
 .. attention::
 
     :class:`~postbound.qal.PredicateTree` also has a convenience method :meth:`~postbound.qal.PredicateTree.simplify`
-    that returns simplified version of all predicates that can actually be simplified. However, if some predicates are more
-    complicated than the simplification can handle, these are silently dropped form the result. Never forget to check
-    :meth:`~postbound.qal.PredicateTree.all_simple` first to be sure you don't lose any important predicates!
+    that returns simplified version of all predicates that can actually be simplified. However, if some predicates are
+    more complicated than the simplification can handle, these are silently dropped form the result. Never forget to
+    check :meth:`~postbound.qal.PredicateTree.all_simple` first to be sure you don't lose any important predicates!
 
-Many query optimizers derive **equivalence classes** from the query predicates to detect more worthwhile joins that are not
-explicitly listed in the query. You can do the same (currently somewhat clunkily) by adding all predicates that can be
-derived from equivalence classes to the query. Use :func:`~postbound.qal.determine_join_equivalence_classes` and
+Many query optimizers derive **equivalence classes** from the query predicates to detect more worthwhile joins that are
+not explicitly listed in the query. You can do the same (currently somewhat clunkily) by adding all predicates that can
+be derived from equivalence classes to the query. Use :func:`~postbound.qal.determine_join_equivalence_classes` and
 :func:`~postbound.qal.generate_predicates_for_equivalence_classes` or the shorthand transformation
 :func:`~postbound.transform.add_ec_predicates`.
 
@@ -176,15 +178,21 @@ derived from equivalence classes to the query. Use :func:`~postbound.qal.determi
 DML and DDL queries
 -------------------
 
-Sadly, the :class:`~postbound.SqlQuery` abstraction is currently limited to plain ``SELECT`` queries.
-Since large portions of the code base rely on this assumption, it is unlikely to change in the future. This also applies to
-queries with set operations such as ``UNION`` or ``INTERSECT``. These are handled by a dedicated
-:class:`~postbound.SetQuery`. See the class documentations for more details on how to use them.
+Sadly, the :class:`~postbound.SqlQuery` abstraction is currently limited to plain ``SELECT`` queries (including set
+operations).
+To distinguish between plain ``SELECT`` queries and those with set operations (e.g., ``UNION``, ``INTERSECT``, etc.), we
+use the :class:`~postbound.qal.SelectStatement` and :class:`~postbound.qal.SetQuery` classes.
+This design tries to achieve a difficult balance: on the one hand, most research in query optimization is only concerned
+with plain ``SELECT`` queries (SPJ-queries). On the other hand, the query abstraction should be universal and many parts
+of the framework do not really care whether a query contains a set operation or not. Therefore, both classes share
+largely the same interface (i.e. a set query also has a ``from_clause`` property, even if this is technically not
+correct). If the distinction is important for some use case, use :func:`~postbound.qal.is_select_query` or
+:func:`~postbound.qal.is_set_query` to narrow the query type down.
 
 If, at some point in the future, PostBOUND has proper support for DML or DDL queries, these will properly be represented
 by separate query classes similar to the :class:`~postbound.qal.SetQuery`. To make clear that API functions can work with
 queries beyond plain ``SELECT``, we use the :class:`~postbound.qal.SqlStatement`. If you only want
-``SELECT`` queries but are fine with set operations, use :class:`~postbound.qal.SelectStatement`.
+``SELECT`` queries but are fine with set operations, use :class:`~postbound.qal.SqlQuery`.
 
 
 Relational algebra
@@ -196,5 +204,5 @@ equivalent tree of :class:`~postbound.relalg.RelNode` instances.
 
 .. note::
 
-    The relational algebra is currently not integrated with the optimization pipelines. Instead, you can use it internalliy
-    within the different optimization stages when calculating the query plan.
+    The relational algebra is currently not integrated with the optimization pipelines. Instead, you can use it
+    internally within the different optimization stages when calculating the query plan.

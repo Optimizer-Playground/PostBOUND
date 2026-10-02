@@ -1,12 +1,12 @@
 Postgres Interface
 ==================
 
-Postgres is the primary supported backend for PostBOUND. Historically, it was the first and only supported backend and has
-influenced the overall design of the :doc:`database abstraction <databases>`. The Postgres backend was eventually
+Postgres is the primary supported backend for PostBOUND. Historically, it was the first and only supported backend and
+has influenced the overall design of the :doc:`database abstraction <databases>`. The Postgres backend was eventually
 generalized into the database abstraction. Therefore, all features of the database abstraction are supported by the
-Postgres backend. Additionally, the Postgres backend provides a number of features that make working with a Postgres server
-easier. Since these are specific to Postgres, they are not part of the general database abstraction. This document outlines
-the general usage as well as the special features of the Postgres backend.
+Postgres backend. Additionally, the Postgres backend provides a number of features that make working with a Postgres
+server easier. Since these are specific to Postgres, they are not part of the general database abstraction. This
+document outlines the general usage as well as the special features of the Postgres backend.
 
 
 Setup
@@ -25,8 +25,8 @@ will detect the available hinting mechanism automatically.
 The PostBOUND repository contains utility scripts to setup a local Postgres server with pg_hint_plan from scratch. These
 are located in the ``db-support/postgres`` directory. The ``postgres-setup.sh`` script will install Postgres, create a
 new database cluster, and setup a Postgres server with the pg_hint_plan extension enabled. The
-``postgres-config-generator.py`` utility will generate an optimized Postgres configuration based on your hardware based on
-`PGTune <https://pgtune.leopard.in.ua/>`_. Finally, the ``workloadXYZ-setup.sh`` scripts will create commonly-used
+``postgres-config-generator.py`` utility will generate an optimized Postgres configuration based on your hardware based
+on `PGTune <https://pgtune.leopard.in.ua/>`_. Finally, the ``workload-<NAME>-setup.sh`` scripts will create commonly-used
 database instances such as IMDB/JOB, Stats, or Stack on your Postgres server.
 
 
@@ -78,13 +78,13 @@ Advanced Backend Features
 In addition to the standardized database abstraction features, the Postgres backend provides the following additional
 features:
 
-* cache warmup via :meth:`~postbound.postgres.PostgresDatabase.prewarm_tables`
-* cold starts via :meth:`~postbound.postgres.PostgresDatabase.cooldown_tables` (requires pg_lab)
-* server configuration via :meth:`~postbound.postgres.PostgresDatabase.apply_configuration`
-* statistics maintenance via :meth:`~postbound.postgres.PostgresStatistics.update_statistics`
-* server management with :func:`~postbound.postgres.start`, :func:`~postbound.postgres.stop`, and
+- cache warmup via :meth:`~postbound.postgres.PostgresDatabase.prewarm_tables`
+- cold starts via :meth:`~postbound.postgres.PostgresDatabase.cooldown_tables` (requires pg_lab)
+- server configuration via :meth:`~postbound.postgres.PostgresDatabase.apply_configuration`
+- statistics maintenance via :meth:`~postbound.postgres.PostgresStatistics.update_statistics`
+- server management with :func:`~postbound.postgres.start`, :func:`~postbound.postgres.stop`, and
   :func:`~postbound.postgres.is_running`
-* query execution with timeouts via the ``timeout`` parameter of
+- query execution with timeouts via the ``timeout`` parameter of
   :meth:`~postbound.postgres.PostgresDatabase.execute_query`
 
 
@@ -118,8 +118,8 @@ contains the necessary ``ALTER SYSTEM`` commands to modify the *postgresql.conf*
 heuristics that might not be optimal for your workload. Furthermore, the settings are intended for a dedicated database
 server and a single user, single query at-a-time scenario.
 
-One fragile aspect of the script is figuring out whether the database is stored on an SSD or HDD. If the script misdetects
-the storage type or raises an error, you can manually specify it via ``--disk-type``.
+One fragile aspect of the script is figuring out whether the database is stored on an SSD or HDD. If the script
+mis-detects the storage type or raises an error, you can manually specify it via ``--disk-type``.
 
 
 .. _postgres-pghintplan-vs-pglab:
@@ -130,9 +130,9 @@ Hinting Backends
 The :class:`~postbound.postgres.PostgresDatabase` supports two different hinting backends: the widely-used
 `pg_hint_plan <https://github.com/ossc-db/pg_hint_plan>`_ and the research-focused
 `pg_lab <https://github.com/rbergm/pg_lab>`_. pg_lab is a fork of vanilla Postgres that adds additional extension points
-to the server. These extension points allow to control optimizer internals in a fine-grained manner. The hinting extension
-shipped with pg_lab uses these extension points to provide more reliable and more detailed hinting features compared to
-pg_hint_plan.
+to the server. These extension points allow to control optimizer internals in a fine-grained manner. The hinting
+extension shipped with pg_lab uses these extension points to provide more reliable and more detailed hinting features
+compared to pg_hint_plan.
 
 Upon establishing a server connection, the Postgres interface automatically detects which hinting backend is available on
 the server and adjusts its hinting dialect used in :meth:`~postbound.postgres.PostgresHinting.generate_hints`

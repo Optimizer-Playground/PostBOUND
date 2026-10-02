@@ -8,43 +8,17 @@ DuckDB called `quacklab <https://github.com/rbergm/quacklab>`_ that adds support
 Even with the necessary hints in place, some limitations remain due to internal design of DuckDB. These are outlined in
 the :ref:`limitation <duckdb-limitations>` below.
 
+The DuckDB backend is part of a standard PostBOUND installation, so no extra setup is required. Similar to the Postgres
+tooling, we provide a ``setup-workload.py`` script to load pre-created database instances for commonly used workloads.
+The script is located in the ``db-support/duckdb`` directory of the PostBOUND repository.
 
-Setup
------
-
-To setup DuckDB, use the ``duckdb-setup.sh`` script located in the ``db-support/duckdb`` directory of the PostBOUND
-repository. This script will:
-
-1. pull the most recent (or a selected) version of quacklab
-2. compile DuckDB from source and create the Python wheel file
-3. optionally install the wheel in the current Python environment
-
-DuckDB uses `uv <https://docs.astral.sh/uv/>` for the build process. If this is not installed on your system, the setup
-script will install it automatically into a Python virtual environment. This environment can be controlled by a CLI
-parameter and will default to *.venv* in the DuckDB directory. It might be a good idea to point this to the venv that you
-use for your PostBOUND installation. In addition, you need a recent (C++ 17 compliant) C++ compiler on your system. Other
-dependencies such as CMake will be installed by the script as needed.
-
-The entire setup process might take some time, so feel free to grab a cup of coffee after starting the script.
-
-.. tip::
-    Once the setup is complete, you can import the database interface in your Python code directly by doing an
-    ``import quacklab``. We use *quacklab* instead of *duckdb* to distinguish the modified version from the original
-    DuckDB. As a nice side effect, you can install vanilla DuckDB as well as quacklab in the same Python environment
-    without conflicts. Other than the name differences, the packages have the exact same API.
-
-Once the setup is complete, you can create commonly-used database instances such as IMDB/JOB or Stats using the
-``workload-setup.py`` script. This script must be executed while the virtual environment containing the quacklab
-installation is active.
-The workload setup shell scripts serve the same purpose but require the DuckDB executable to be available on your *PATH*.
-This is currently not the case when building quacklab due to limitations of the build system.
 
 Usage
 -----
 
-The DuckDB backend is available from the :mod:`~postbound.duckdb` module. You can create a connection to a DuckDB database
-file using the :func:`~postbound.duckdb.connect` function. The returned database instance functions like any regular
-:class:`~postbound.Database` interface:
+The DuckDB backend is available from the :mod:`~postbound.duckdb` module. You can create a connection to a DuckDB
+database file using the :func:`~postbound.duckdb.connect` function. The returned database instance functions like any
+regular :class:`~postbound.Database` interface:
 
 .. code-block:: python
 
@@ -55,9 +29,9 @@ file using the :func:`~postbound.duckdb.connect` function. The returned database
     duck_instance.execute_query(stats["q-1"])
 
 You can also import the "raw" database interface in your Python code directly by doing an ``import quacklab``. We use
-*quacklab* instead of *duckdb* to distinguish the modified version from the original DuckDB. As a nice side effect, vanilla
-DuckDB and quacklab can be installed side-by-side in the same Python environment without conflicts. Other than the name
-differences, the packages have the exact same API.
+*quacklab* instead of *duckdb* to distinguish the modified version from the original DuckDB. As a nice side effect,
+vanilla DuckDB and quacklab can be installed side-by-side in the same Python environment without conflicts. Other than
+the name differences, the packages have the exact same API.
 
 
 Supported Backend Features
@@ -116,8 +90,8 @@ joins are used whenever possible and nested loop joins are only used as a last r
 Limitations
 -----------
 
-The current implementation of the DuckDB execution engine imposes some strict limitations on the kind of hints we use
-reliably. In particular, the implementation of the physical operators is tightly coupled with their selection rules.
+The current implementation of the DuckDB execution engine imposes some strict limitations on the kind of hints we can
+use reliably. In particular, the implementation of the physical operators is tightly coupled with their selection rules.
 For example, if the optimizer selects one join operator based on some property of the input query, the implementation of
 that operator will rely on this property being satisfied. Using a different operator typically leads to execution errors.
 As a consequence, operator hints can be specified, but should only be used with great care if at all.
@@ -127,6 +101,39 @@ Based on these limitations, the following features can be used reliably with the
 
 - Join order hints and corresponding optimization strategies
 - Cardinality hints and corresponding estimation strategies
+
+
+Manual setup
+-------------
+
+While the DuckDB backend is part of each PostBOUND installation, you can also setup the backend manually.
+Use the ``duckdb-setup.sh`` script located in the ``db-support/duckdb`` directory of the PostBOUND
+repository. This script will:
+
+1. pull the most recent (or a selected) version of quacklab
+2. compile DuckDB from source and create the Python wheel file
+3. optionally install the wheel in the current Python environment
+
+DuckDB uses `uv <https://docs.astral.sh/uv/>` for the build process. If this is not installed on your system, the setup
+script will install it automatically into a Python virtual environment. This environment can be controlled by a CLI
+parameter and will default to *.venv* in the DuckDB directory. It might be a good idea to point this to the venv that you
+use for your PostBOUND installation. In addition, you need a recent (C++ 17 compliant) C++ compiler on your system. Other
+dependencies such as CMake will be installed by the script as needed.
+
+The entire setup process might take some time, so feel free to grab a cup of coffee after starting the script.
+
+.. tip::
+
+    Once the setup is complete, you can import the database interface in your Python code directly by doing an
+    ``import quacklab``. We use *quacklab* instead of *duckdb* to distinguish the modified version from the original
+    DuckDB. As a nice side effect, you can install vanilla DuckDB as well as quacklab in the same Python environment
+    without conflicts. Other than the name differences, the packages have the exact same API.
+
+Once the setup is complete, you can create commonly-used database instances such as IMDB/JOB or Stats using the
+``workload-setup.py`` script. This script must be executed while the virtual environment containing the quacklab
+installation is active.
+The workload setup shell scripts serve the same purpose but require the DuckDB executable to be available on your *PATH*.
+This is currently not the case when building quacklab due to limitations of the build system.
 
 
 References

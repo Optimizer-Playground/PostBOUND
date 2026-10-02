@@ -7,7 +7,8 @@ PostBOUND documentation
 =======================
 
 PostBOUND is a Python framework for research in query optimization.
-It provides a high-level interface to implement novel optimization algorithms and to analyze their performance.
+It provides a high-level interface to implement novel optimization algorithms and to analyze their performance in a
+transparent and reproducible way.
 
 .. tip::
   New users should start by reading the :doc:`10minutes` tutorial and the
@@ -22,7 +23,7 @@ In general, using the PostBOUND framework for optimizer research uses a workflow
    Typical workflow for using PostBOUND for optimizer research.
 
 For an input query, PostBOUND provides a large set of infrastructure tools to prepare and analyze the query to limit the
-boilerplate parts of the optimizer. This includes :doc:`query parsing <core/qal>`,
+boilerplate parts of any prototype. This includes :doc:`query parsing <core/qal>`,
 :ref:`join graph analysis <optimizer-utilities>`, and :ref:`others <database-infrastructure>`.
 Rearchers specify their optimizer prototypes in terms of :doc:`optimization pipelines <core/optimization>`. Essentially,
 these are mental models for different optimizer architectures that provide different interfaces to be implemented.
@@ -79,37 +80,39 @@ The implementation is compared to the native PostgreSQL optimizer on the Stats b
   # Step 1: define our optimization strategy.
   # In this example we develop a simple join order optimizer that
   # selects a linear join order at random.
-  # We delegate most of the actual work to the pre-defined join grap
-  # that keeps track of free tables.
-  class RandomJoinOrderOptimizer(pb.JoinOrderOptimization):
-      def optimize_join_order(self, query: pb.SqlQuery) -> pb.LogicalJoinTree:
-          join_tree = pb.LogicalJoinTree()
-          join_graph = pb.opt.JoinGraph(query)
+  # In order to do so, we implement the JoinOrdering interface, which
+  # requires us to provide an optimize_join_order() method.
+  class RandomJoinOrder(pb.JoinOrdering):
+      def optimize_join_order(self, query: pb.SqlQuery) -> pb.JoinTree:
+          if not pb.qal.is_select_query(query):
+              raise pb.OptimizationError("Expected a SELECT query")
 
-          while join_graph.contains_free_tables():
-              candidate_tables = [
-                  path.target_table for path in join_graph.available_join_paths()
+          initial_table, *free_tables = random.sample(
+              list(query.tables()), k=len(query.tables())
+          )
+          join_tree = pb.JoinTree(base_table=initial_table)
+
+          while free_tables:
+              candidates = [
+                  table for table in free_tables
+                  if query.joins_between(table, join_tree.tables())
               ]
-              next_table = random.choice(candidate_tables)
-
+              next_table = random.choice(candidates)
               join_tree = join_tree.join_with(next_table)
-              join_graph.mark_joined(next_table)
+              free_tables.remove(next_table)
 
           return join_tree
-
-      def describe(self) -> pb.util.jsondict:
-          return {"name": "random-join-order"}
 
 
   # Step 2: connect to the target database, load the workload and
   # setup the optimization pipeline.
-  # In our case, we evaluate on the Join Order Benchmark on Postgres
-  pg_imdb = pb.postgres.connect(config_file=".psycopg_connection_job")
-  job = pb.workloads.job()
+  # In our case, we evaluate the Stats workload on Postgres
+  pg_stats = pb.postgres.connect(config_file=".psycopg_connection_stats")
+  stats = pb.workloads.stats()
 
   optimization_pipeline = (
-      pb.MultiStageOptimizationPipeline(pg_imdb)
-      .use(RandomJoinOrderOptimizer())
+      pb.MultiStageOptimizationPipeline(pg_stats)
+      .use(RandomJoinOrder())
       .build()
   )
 
@@ -123,19 +126,19 @@ The implementation is compared to the native PostgreSQL optimizer on the Stats b
       prewarm=True, analyze=True, preparatory_statements=["SET geqo TO off;"]
   )
   native_results = pb.bench.execute_workload(
-      job,
-      on=pg_imdb,
+      stats,
+      on=pg_stats,
       query_preparation=query_prep,
       workload_repetitions=3,
-      progressive_output="job-results-native.csv",
+      progressive_output="stats-results-native.csv",
       logger="tqdm",
   )
   optimized_results = pb.bench.execute_workload(
-      job,
+      stats,
       on=optimization_pipeline,
       query_preparation=query_prep,
       workload_repetitions=3,
-      progressive_output="job-results-optimized.csv",
+      progressive_output="stats-results-optimized.csv",
       logger="tqdm",
   )
 

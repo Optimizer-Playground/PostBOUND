@@ -4,27 +4,27 @@ Setup
 Each installation of PostBOUND consists of two parts: the PostBOUND framework itself, as well as at least one database
 instance (such as PostgreSQL or DuckDB) that is used to actually execute the optimized queries
 (see :ref:`10minutes-db-connection`).
-Depending on your use case, you can use an integrated setup where PostBOUND takes care of installing the framework as well
-as the database instance(s), or you can manage the database instances on your own.
+Depending on your use case, you can use an integrated setup where PostBOUND takes care of installing the framework as
+well as the database instance(s), or you can manage the database instances on your own.
 
 In the following, we describe the different installation methods for PostBOUND:
 
-1. Installing PostBOUND via pip. This requires you to setup and manage the database instances on your own.
+1. Installing PostBOUND via pip. This requires you to setup and manage the database instances on your own. Optionally,
+   you can use the build tools shipped with PostBOUND to setup database instances.
 2. A Docker-based installation that automates the entire setup of PostBOUND along with a Postgres and/or DuckDB instance.
 3. A manual installation of PostBOUND. Optionally, you can use the build tools shipped with PostBOUND to setup database
    instances.
 
 .. tip::
 
-    If you do not use the pip-based setup and want to update an existing (virtual environment-based) installation of
-    PostBOUND, you can just use the ``tools/setup-py-venv.sh`` script. It takes care of loading the latest PostBOUND
-    release and updating all required packages. This also works within the Docker-based installation.
+    Local installations of PostBOUND can be managed via `uv <https://docs.astral.sh/uv/>`_. Just update the local files
+    via Git and sync the uv state. This also works within the Docker-based installation.
 
 
 .. tip::
 
-    For PostgreSQL, we support two different hinting backends: `pg_hint_plan <https://github.com/ossc-db/pg_hint_plan>`__
-    and `pg_lab <https://github.com/rbergm/pg_lab>`__. While the former is widely used and easy to setup, it provides
+    For PostgreSQL, we support two different hinting backends: `pg_hint_plan <https://github.com/ossc-db/pg_hint_plan>`_
+    and `pg_lab <https://github.com/rbergm/pg_lab>`_. While the former is widely used and easy to setup, it provides
     only basic hinting capabilities. In contrast, pg_lab allows for more fine-grained control over the optimizer's
     behavior. See :ref:`postgres-pghintplan-vs-pglab` for more details on the differences between both backends and which
     one to choose for your use case.
@@ -48,15 +48,14 @@ Afterwards, you need to setup and configure the database instances on your own.
 For Postgres, this includes installing the `pg_hint_plan <https://github.com/ossc-db/pg_hint_plan>`_ extension to enable
 query hinting (or `pg_lab <https://github.com/rbergm/pg_lab>`_).
 Finally, create a connection file that contains the connection string to connect to your database.
-See the documentation of :func:`postgres.connect() <postbound.postgres.connect>` for details.
+See the documentation of :func:`~postbound.postgres.connect` for details.
 
 If you want to use DuckDB, **do not install the official DuckDB Python package from PyPI**.
 The reason is that DuckDB does not provide any hinting functionality out-of-the-box.
 Therefore, we developed `quacklab <https://github.com/rbergm/quacklab>`_, a fork of DuckDB that adds hinting capabilities
 very similar to pg_lab. It has Python bindings available via
 `quacklab-python <https://github.com/rbergm/quacklab-python>`_.
-Follow the installation instructions from the quacklab-python repository and make sure to install the resulting Python
-package into the same environment where PostBOUND is installed.
+By default, the latest stable release of quacklab is shipped with PostBOUND.
 
 
 Manual Installation
@@ -64,17 +63,14 @@ Manual Installation
 
 A manual installation requires a UNIX-based system, with Linux being the most well supported.
 Windows users should use the Windows Subsystem for Linux (WSL) to run PostBOUND (which we do as well).
-By default, PostBOUND is installed within a Python virtual environment using the ``tools/setup-py-venv.sh`` script.
+By default, PostBOUND is installed within a Python virtual environment using `uv <https://docs.astral.sh/uv/>`_:
+in your local project, simply run ``uv add path/to/postbound/directory/``.
 
 .. note::
 
     We test PostBOUND mostly on a WSL-based Ubuntu system and sporadically on MacOS.
     Therefore, these are the most well-supported platforms.
     Sadly, at the current time we cannot provide support for different setups.
-
-Basically, the setup script takes care of all the necessary installation steps of the framework you should be good to go
-after running it. Use ``--help`` to view the available options.
-Once the framework is installed, you just need to configure the database connection.
 
 A key requirement for PostBOUND is a running database server to execute queries against.
 See the :ref:`hinting` description for more details on why this is necessary and what  functionality the database has to
@@ -83,25 +79,26 @@ Currently, the most well-supported DBS are PostgreSQL and DuckDB.
 Limited support for MySQL is also available.
 In the following, we assume that PostBOUND should interact with a Postgres server.
 
-To ensure the smoothest interaction between PostBOUND and Postgres and to have the least configuration effort, the Postgres
-server and PostBOUND should run in the same address space (i.e. on the same machine or within the same virtualized
-environment. Notably, a manual installation of PostBOUND and a Docker-based installation of Postgres does not work).
-Basically, there are three different options to setup a Postgres server:
+To ensure the smoothest interaction between PostBOUND and Postgres and to have the least configuration effort, the
+Postgres server and PostBOUND should run in the same address space (i.e. on the same machine or within the same
+virtualized environment). Basically, there are three different options to setup a Postgres server:
 
 1. Installing Postgres on your own using the package manager or a binary distribution. This requires you to also install
    the `pg_hint_plan <https://github.com/ossc-db/pg_hint_plan>`_ extension to enable query hinting.
-2. Installing Postgres using the `pg_lab <https://github.com/rbergm/pg_lab>`_ build tools. This provides the most complete
-   hinting functionality, e.g. with support for base table cardinalities and parallel query plans.
-3. Using the build tools that are shipped with PostBOUND. These create a local Postgres server by compiling from source and
-   take care of setting up all required extensions (such as *pg_hint_plan*). The remainder of this section documents this
-   installation method in detail.
+2. Installing Postgres using the `pg_lab <https://github.com/rbergm/pg_lab>`_ build tools. This provides the most
+   complete hinting functionality, e.g. with support for base table cardinalities and parallel query plans.
+3. Using the build tools that are shipped with PostBOUND. These create a local Postgres server by compiling from source
+   and take care of setting up all required extensions (such as *pg_hint_plan*). The remainder of this section documents
+   this installation method in detail.
 
 .. admonition:: pg_lab vs. pg_hint_plan
 
     On the surface, *pg_hint_plan* and *pg_lab* provide very similar functionality.
     Both provide a hinting mechanism to embed optimizer decisions into the raw query text using special SQL comments.
-    However, *pg_lab* goes far beyond query hinting.
-    In fact, it is an extension of Postgres that adds additional extension points to the query optimizer.
+    However, *pg_lab*  provides much more extensive hinting support, including for example cardinality hints for base
+    tables, reliable hints for memoize and materialize operators and proper parallelization support.
+    At the same time, *pg_lab* goes far beyond query hinting: it is an extension of Postgres that adds additional
+    extension points to the query optimizer.
     These allow extensions to modify the optimizer's behavior in a fine-grained manner.
     In a way, *pg_lab* can be thought of as a low-level alternative to PostBOUND for Postgres-specific research.
     That is, if you want to learn all of the internal details of the Postgres optimizer and how to modify them.
@@ -119,8 +116,8 @@ For Ubuntu-based distributions, these can be installed like so:
         git unzip zstd
 
 Adjust the packages depending on your distribution.
-Once the required packages are installed, you can use the build tools from the ``db-support/postgres`` directory to set up
-a Postgres server.
+Once the required packages are installed, you can use the build tools from the ``db-support/postgres`` directory to set
+up a Postgres server.
 All scripts support ``--help`` to view the available options.
 
 .. code-block:: bash
@@ -129,8 +126,8 @@ All scripts support ``--help`` to view the available options.
     ./postgres-setup.sh --pg-ver 18 --stop
     . ./postgres-start.sh
 
-This will pull the latest stable release of Postgres 18, compile it from source and initialize a new database cluster along
-with all required extensions (e.g., pg_hint_plan).
+This will pull the latest stable release of Postgres 18, compile it from source and initialize a new database cluster
+along with all required extensions (e.g., pg_hint_plan).
 The server will have a default user that corresponds to your system username.
 All binaries, data directory, etc. are placed under *postgres-server* in the working directory.
 A central challenge of this manual setup is that the Postgres binaries, etc. are not globally available, e.g., on your
@@ -172,8 +169,8 @@ parameters).
 One last question is how to connect to the database server from within PostBOUND.
 Internally, PostBOUND uses the `psycopg <https://www.psycopg.org/>`_ library to connect to Postgres.
 You can use the ``postgres-psycopg-setup.sh`` script to create a connection file with the necessary parameters to connect
-to the Postgres.
-See the documentation of :func:`postgres.connect() <postbound.postgres.connect>` for more details on the config file
+to the Postgres installation.
+See the documentation of :func:`~postbound.postgres.connect` for more details on the config file
 and alternative ways to establish a connection.
 
 Now, you should be able to connect to the Postgres server using the following code:
@@ -197,7 +194,10 @@ Putting things together, you can create an entirely new Postgres server like so:
     cp .psycopg_connect_job ../..
 
 Similar to the Postgres setup, you can also create a local DuckDB installation by compiling it from source.
-To do so, use the ``db-support/duckdb/duckdb-setup.sh`` script.
+However, note that since PostBOUND v0.22, quacklab/DuckDB is a first-party dependency of PostBOUND and is automatically
+installed when you install PostBOUND via pip/uv.
+
+For a manual installation, use the ``db-support/duckdb/duckdb-setup.sh`` script.
 This script will automatically install the Python package into your PostBOUND virtual environment.
 See the ``--help`` options for more details.
 
@@ -272,6 +272,12 @@ pg_lab servers are installed at ``/pg_lab``.
 If the pg_lab volume points to an existing (i.e. non-empty) directory, the setup assumes that this is already a valid
 pg_lab installation and skips the corresponding setup.
 This can be useful if multiple containers should share the same pg_lab installation.
+
+.. danger::
+
+    The setup script uses the existence of the target volumes as an indicator that the PostBOUND/pg_lab have already
+    been set up. If you run into any troubles and need to re-run the setup script, make sure to remove the volumes or
+    use a different volume path.
 
 Once you log in to the container, the PostBOUND virtual environment will be activated automatically.
 Likewise, all Postgres and DuckDB binaries are available on the *PATH*.
