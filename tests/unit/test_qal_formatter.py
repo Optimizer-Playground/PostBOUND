@@ -3,18 +3,13 @@
 Most tests here check the *round trip*: format a parsed query, reparse the result, and assert the two query
 objects are equal -- rather than pinning an exact formatted string, which is both more brittle and less
 informative about what actually matters (that formatting is a lossless, semantics-preserving operation).
-
-One deliberate exception: queries with more than one table in an *implicit* (comma-separated) FROM clause are
-avoided in the round-trip checks. `_quick_format_implicit_from` builds its output from
-``list(from_clause.tables())``, and `tables()` returns a `set` -- so the printed order of such a FROM clause
-is not guaranteed to match the order the query was written in, and (since Python's string hashing is salted
-per process) is not even guaranteed to be stable across interpreter runs. That does not lose any information
-(the table set itself round-trips correctly, and this qal has no ORDINALITY-sensitive implicit joins), so it
-is not treated as a bug here -- just something the round-trip tests route around by using explicit JOIN
-syntax or single-table FROM clauses instead.
 """
 
 from __future__ import annotations
+
+import itertools
+
+import pytest
 
 from postbound import parser
 from postbound.qal import format_quick
@@ -90,23 +85,16 @@ def test_round_trips_a_query_with_a_subquery_in_the_where_clause() -> None:
 
 
 def test_round_trips_a_query_with_more_than_three_joined_tables() -> None:
-    """Exercises the multi-line branch of `_quick_format_implicit_from` (more than 3 tables) -- using
-    explicit joins throughout so table order is well-defined and the round trip is exact.
-    """
     assert_round_trips("SELECT * FROM r JOIN s ON r.a = s.b JOIN t ON s.c = t.d JOIN u ON t.e = u.f WHERE r.g = 1")
 
 
-def test_multi_table_implicit_from_preserves_the_table_set_even_if_not_the_order() -> None:
-    """The documented exception: table *order* in an implicit FROM clause is not guaranteed to survive
-    formatting, but the table *set* -- and therefore the query's meaning -- always does.
-    """
-    query = parse("SELECT * FROM r, s, t WHERE r.a = s.b AND s.c = t.d")
+def test_round_trips_a_multi_table_implicit_from() -> None:
+    assert_round_trips("SELECT * FROM r, s, t WHERE r.a = s.b AND s.c = t.d")
 
-    formatted = format_quick(query)
-    reparsed = parse(formatted)
 
-    assert reparsed.tables() == query.tables()
-    assert reparsed.predicates() == query.predicates()
+def test_round_trips_an_implicit_from_with_more_than_three_tables() -> None:
+    """Exercises the multi-line branch of `_quick_format_implicit_from`, which puts each table on its own line."""
+    assert_round_trips("SELECT * FROM r, s, t, u WHERE r.a = s.b AND s.c = t.d AND t.e = u.f")
 
 
 # -- hint block placement ----------------------------------------------------------------------------------
@@ -174,3 +162,15 @@ def test_and_predicate_formatting_brackets_a_leading_or_child() -> None:
 
     assert "WHERE (f.b = 2 OR f.b = 3)" in formatted
     assert parse(formatted) == query
+
+
+@pytest.mark.parametrize("tables", [("r", "s", "t"), ("r", "s", "t", "u")], ids=["single-line", "multi-line"])
+def test_format_quick_preserves_the_table_order_of_an_implicit_from(tables: tuple[str, ...]) -> None:
+    """Regression guard for a2e08cf: `_quick_format_implicit_from` printed the tables of an implicit FROM clause in
+    the iteration order of `from_clause.tables()`, which is a `set`. The printed order therefore depended on the
+    process's hash seed rather than on the query. Since query equality respects the FROM order, the formatted query
+    did not round-trip. Checking every permutation makes the test fail deterministically on the old code: a set
+    iterates in the same order for all of them, so at most one permutation could have been printed correctly.
+    """
+    for order in itertools.permutations(tables):
+        assert_round_trips(f"SELECT * FROM {', '.join(order)}")

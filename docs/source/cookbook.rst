@@ -71,7 +71,7 @@ You can easily generate hinted queries and execution plans using any of the fund
 
     In [5]: print(pb.qal.format_quick(query))
     SELECT COUNT(*)
-    FROM comments AS c, users AS u, posts AS p
+    FROM comments AS c, posts AS p, users AS u
     WHERE c.userid = u.id
       AND u.id = p.owneruserid
       AND c.creationdate >= CAST('2010-08-05 00:36:02' AS timestamp)

@@ -6,6 +6,8 @@ As with expressions and predicates, clauses are obtained by parsing real SQL thr
 
 from __future__ import annotations
 
+import pytest
+
 from postbound import parser
 from postbound._core import ColumnReference, TableReference
 from postbound.qal import (
@@ -16,6 +18,7 @@ from postbound.qal import (
     JoinType,
     SubqueryTableSource,
     ValuesTableSource,
+    all_simple_from,
 )
 
 R = TableReference("r")
@@ -129,6 +132,32 @@ def test_join_table_source_left_outer_join_type() -> None:
 
     source = query.from_clause.items[0]
     assert source.join_type == JoinType.LeftJoin
+
+
+def test_all_simple_from_accepts_plain_base_tables() -> None:
+    query = parse("SELECT * FROM r, s AS sa")
+
+    assert all_simple_from(query.from_clause.items) is True
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM r, (SELECT * FROM s) AS sub",
+        "SELECT * FROM r JOIN s ON r.a = s.b",
+        "SELECT * FROM r, (VALUES (1, 2)) AS t (a, b)",
+        "SELECT * FROM r, my_table_function(42) AS foo",
+    ],
+    ids=["subquery", "explicit-join", "values", "table-function"],
+)
+def test_all_simple_from_rejects_any_other_table_source(sql: str) -> None:
+    query = parse(sql)
+
+    assert all_simple_from(query.from_clause.items) is False
+
+
+def test_all_simple_from_holds_vacuously_for_no_table_sources() -> None:
+    assert all_simple_from([]) is True
 
 
 def test_join_table_source_pattern_match_extracts_all_four_fields() -> None:
