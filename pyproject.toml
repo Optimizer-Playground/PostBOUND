@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PostBOUND"
-version = "0.22.0.dev8"
+version = "0.22.0"
 authors = [{ name = "Rico Bergmann", email = "rico.bergmann1@tu-dresden.de" }]
 description = "PostBOUND is a research framework to prototype and benchmark database query optimizers"
 readme = "README.md"
@@ -59,7 +59,7 @@ dev = [
     "pyarrow>=23.0.0",
     # pytest is the test runner. Existing unittest.TestCase classes are collected unchanged;
     # new tests are written as plain functions so they can use fixtures and parametrization.
-    # xdist parallelises the offline tier, timeout stops a hung test from blocking a push.
+    # timeout stops a hung test from blocking a push.
     "pytest>=8.4",
     "pytest-timeout>=2.4",
     "ruff==0.16.6",
