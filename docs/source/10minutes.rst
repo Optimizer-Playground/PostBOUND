@@ -12,10 +12,11 @@ To learn how to install PostBOUND check the :doc:`Setup Guide<setup>` guide.
 
 By convention, we use the following imports in this tutorial:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    import pandas as pd
-    import postbound as pb
+    In [1]: import pandas as pd
+
+    In [2]: import postbound as pb
 
 
 Optimization Pipelines
@@ -68,12 +69,14 @@ Pretty much all other parts of the framework operate on this abstraction.
 You can obtain an instance of this class by parsing a raw SQL query string using
 :func:`~postbound.parse_query`:
 
-.. ipython:: python
-    :okwarning:
+.. code-block:: ipython
 
-    raw_query = "SELECT p.creationdate, min(p.score) FROM posts p GROUP BY p.creationdate"
-    query = pb.parse_query(raw_query)
-    query
+    In [3]: raw_query = "SELECT p.creationdate, min(p.score) FROM posts p GROUP BY p.creationdate"
+
+    In [4]: query = pb.parse_query(raw_query)
+
+    In [5]: query
+    Out[5]: SELECT p.creationdate, MIN(p.score) FROM posts AS p GROUP BY p.creationdate;
 
 Alternatively, you can use the :ref:`workload functionality <10minutes-workloads>` to load an entire set of queries at
 once.
@@ -84,10 +87,13 @@ a query.
 Once you have a query object, you can access different properties, such as the tables that are referenced in the query,
 or the raw clauses:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    query.tables()
-    query.select_clause
+    In [6]: query.tables()
+    Out[6]: {TableReference(full_name='posts', alias='p', virtual=False, schema='', catalog='')}
+
+    In [7]: query.select_clause
+    Out[7]: SELECT p.creationdate, MIN(p.score)
 
 For more details on the query abstraction, see the separate :doc:`core/qal` documentation.
 
@@ -124,11 +130,12 @@ optimization decisions made within the framework.
 As a consequence, PostBOUND requires a connection to a database system for much of its functionality.
 For Postgres, you can connect to the database like so:
 
-.. ipython:: python
-    :okwarning:
+.. code-block:: ipython
 
-    pg_instance = pb.postgres.connect(config_file=".psycopg_connection")
-    pg_instance
+    In [8]: pg_instance = pb.postgres.connect(config_file=".psycopg_connection")
+
+    In [9]: pg_instance
+    Out[9]: stats @ Postgres (v18.1)
 
 Here, the ``config_file`` parameter points to a file that contains the connection parameters as a
 `psycopg-compatible <https://www.psycopg.org/psycopg3/docs/api/connections.html#psycopg.Connection.connect>`__ string.
@@ -163,11 +170,12 @@ These can be accessed from the :mod:`~postbound.workloads` module.
 Specifically, the Join Order Benchmark (JOB, including variations such as JOB-light), the Stats Benchmark and the
 Stack Benchmark are available out-of-the-box:
 
-.. ipython:: python
-    :okwarning:
+.. code-block:: ipython
 
-    stats = pb.workloads.stats()
-    stats
+    In [10]: stats = pb.workloads.stats()
+
+    In [11]: stats
+    Out[11]: Workload: Stats (146 queries)
 
 You can also load your own workloads by using :func:`~postbound.workloads.read_workload` or
 :func:`~postbound.workloads.read_csv_workload`.
@@ -183,11 +191,18 @@ Once you have implemented you own optimization algorithm, you can benchmark it u
 
 It produces a pandas DataFrame with the results of the executed queries:
 
-.. ipython:: python
-    :okwarning:
+.. code-block:: ipython
 
-    results = pb.bench.execute_workload(stats.first(3), pg_instance)
-    results
+    In [12]: results = pb.bench.execute_workload(stats.first(3), pg_instance)
+
+    In [13]: results
+    Out[13]:
+       exec_index label  ... optimization_pipeline  optimized_query
+    0           1   q-1  ...                  None             None
+    1           2   q-2  ...                  None             None
+    2           3   q-3  ...                  None             None
+
+    [3 rows x 15 columns]
 
 If you want to store the results in a file file, you can use :func:`~postbound.util.write_df`.
 Even simpler, you can pass a file to the *progressive_output* parameter to automatically flush all results to disk as

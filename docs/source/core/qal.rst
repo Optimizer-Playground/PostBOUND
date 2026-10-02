@@ -8,26 +8,38 @@ functionality (such as query modification) is available in additional moduls.
 
 In the next sections, we are going to use the following example query:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    import postbound as pb
-    raw_query = """
-        SELECT u.Id, u.DisplayName, avg(p.Score)
-        FROM Users u
-            JOIN Posts p ON u.Id = p.OwnerUserId
-        WHERE p.PostTypeId = 2
-            AND p.AcceptedAnswerId > 0
-        GROUP BY u.Id, u.DisplayName
-        ORDER BY avg(p.Score) DESC
-    """
+    In [1]: import postbound as pb
+
+    In [2]: raw_query = """
+       ...:     SELECT u.Id, u.DisplayName, avg(p.Score)
+       ...:     FROM Users u
+       ...:         JOIN Posts p ON u.Id = p.OwnerUserId
+       ...:     WHERE p.PostTypeId = 2
+       ...:         AND p.AcceptedAnswerId > 0
+       ...:     GROUP BY u.Id, u.DisplayName
+       ...:     ORDER BY avg(p.Score) DESC
+       ...: """
 
 You can parse this query into a proper :class:`~postbound.SqlQuery` object using the :func:`~postbound.parse_query`
 function:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    query = pb.parse_query(raw_query)
-    print(pb.qal.format_quick(query))
+    In [3]: query = pb.parse_query(raw_query)
+
+    In [4]: print(pb.qal.format_quick(query))
+    SELECT u.id,
+      u.displayname,
+      AVG(p.score)
+    FROM
+      users AS u
+        JOIN posts AS p ON u.id = p.owneruserid
+    WHERE p.posttypeid = 2
+      AND p.acceptedanswerid > 0
+    GROUP BY u.id, u.displayname
+    ORDER BY AVG(p.score) DESC;
 
 
 Basic query structure
@@ -45,9 +57,33 @@ PostBOUND uses a query abstraction that consists of three main components:
 Use the :meth:`~postbound.SqlQuery.ast` method to inspect the structure of a query. For example, our example query
 looks like this:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    print(query.ast())
+    In [5]: print(query.ast())
+    +-SelectStatement
+      +-Select
+        + ColumnExpression [u.id]
+        + ColumnExpression [u.displayname]
+        +-FunctionExpression [AVG]
+          + ColumnExpression [p.score]
+      +-From
+        +-JoinTableSource
+          +-DirectTableSource [users AS u]
+          +-DirectTableSource [posts AS p]
+      +-Where
+        +-AndPredicate [AND]
+          +-BinaryPredicate [=]
+            + ColumnExpression [p.posttypeid]
+            +-StaticValueExpression [2]
+          +-BinaryPredicate [>]
+            + ColumnExpression [p.acceptedanswerid]
+            +-StaticValueExpression [0]
+      +-GroupBy
+        + ColumnExpression [u.id]
+        + ColumnExpression [u.displayname]
+      +-OrderBy
+        +-FunctionExpression [AVG]
+          + ColumnExpression [p.score]
 
 The query structure is quite flexible and we try to model a large portion of the scope of SQL features with it.
 For example, we support (recursive) :class:`CTEs <postbound.qal.CommonTableExpression>`,
@@ -69,11 +105,16 @@ This means that once created, a query cannot be changed anymore.
 Instead, you need to create a new query object that contains your desired changes.
 The :mod:`~postbound.transform` module has a large suite of functions that make these updates much easier:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    pb.transform.as_count_star_query(query)
-    pb.transform.drop_clause(query, pb.qal.Where)
-    pb.transform.add_clause(query, pb.qal.Limit(limit=10))
+    In [6]: pb.transform.as_count_star_query(query)
+    Out[6]: SELECT COUNT(*) FROM users AS u JOIN posts AS p ON u.id = p.owneruserid WHERE p.posttypeid = 2 AND p.acceptedanswerid > 0 GROUP BY u.id, u.displayname ORDER BY AVG(p.score) DESC;
+
+    In [7]: pb.transform.drop_clause(query, pb.qal.Where)
+    Out[7]: SELECT u.id, u.displayname, AVG(p.score) FROM users AS u JOIN posts AS p ON u.id = p.owneruserid GROUP BY u.id, u.displayname ORDER BY AVG(p.score) DESC;
+
+    In [8]: pb.transform.add_clause(query, pb.qal.Limit(limit=10))
+    Out[8]: SELECT u.id, u.displayname, AVG(p.score) FROM users AS u JOIN posts AS p ON u.id = p.owneruserid WHERE p.posttypeid = 2 AND p.acceptedanswerid > 0 GROUP BY u.id, u.displayname ORDER BY AVG(p.score) DESC FETCH FIRST 10 ROWS ONLY;
 
 All of the qal building blocks provide a visitor-based interface that allows you to traverse the query structure in a
 consistent way. These are defined in the :class:`~postbound.qal.ClauseVisitor` and
@@ -95,23 +136,35 @@ A core part of query optimization tasks is to analyze which join conditions and 
 query. You can either analyze queries manually and traverse the :class:`~postbound.qal.Where` clause. At the same time,
 the query abstraction also provides :class:`~postbound.qal.PredicateTree` for a more high-level access:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    query.from_clause
-    query.where_clause
-    query.predicates()
+    In [9]: query.from_clause
+    Out[9]: FROM users AS u JOIN posts AS p ON u.id = p.owneruserid
+
+    In [10]: query.where_clause
+    Out[10]: WHERE p.posttypeid = 2 AND p.acceptedanswerid > 0
+
+    In [11]: query.predicates()
+    Out[11]: u.id = p.owneruserid AND p.posttypeid = 2 AND p.acceptedanswerid > 0
 
 The query predicates can be used to directly retrieve predicates that are relevant for specific tables, e.g.,
 
-.. ipython:: python
+.. code-block:: ipython
 
-    query.predicates().joins()
-    query.predicates().joins_for(pb.TableReference("users", "u"))
-    query.predicates().filters_for(pb.TableReference("posts", "p"))
-    query.predicates().joins_between(
-        pb.TableReference("users", "u"),
-        pb.TableReference("posts", "p")
-    )
+    In [12]: query.predicates().joins()
+    Out[12]: {u.id = p.owneruserid}
+
+    In [13]: query.predicates().joins_for(pb.TableReference("users", "u"))
+    Out[13]: [u.id = p.owneruserid]
+
+    In [14]: query.predicates().filters_for(pb.TableReference("posts", "p"))
+    Out[14]: p.acceptedanswerid > 0 AND p.posttypeid = 2
+
+    In [15]: query.predicates().joins_between(
+        ...:     pb.TableReference("users", "u"),
+        ...:     pb.TableReference("posts", "p")
+        ...: )
+    Out[15]: u.id = p.owneruserid
 
 .. attention::
 
@@ -123,14 +176,26 @@ The query abstraction uses a full-blown recursive structure to represent predica
 large expressivity, it makes extracting specific bits of information a bit cumbersome. For example, to get any
 :class:`~postbound.TableReference` from a join predicate, one would need to do something like the following:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    full_pred = pb.util.collections.get_any(query.predicates().joins())
-    full_pred.join_partners()
-    single_pred = pb.util.collections.get_any(full_pred.join_partners())
-    single_pred
-    any_table = single_pred[0]
-    any_table
+    In [16]: full_pred = pb.util.collections.get_any(query.predicates().joins())
+
+    In [17]: full_pred.join_partners()
+    Out[17]:
+    {(ColumnReference(name='owneruserid', table=TableReference(full_name='posts', alias='p', virtual=False, schema='', catalog='')),
+      ColumnReference(name='id', table=TableReference(full_name='users', alias='u', virtual=False, schema='', catalog='')))}
+
+    In [18]: single_pred = pb.util.collections.get_any(full_pred.join_partners())
+
+    In [19]: single_pred
+    Out[19]:
+    (ColumnReference(name='owneruserid', table=TableReference(full_name='posts', alias='p', virtual=False, schema='', catalog='')),
+     ColumnReference(name='id', table=TableReference(full_name='users', alias='u', virtual=False, schema='', catalog='')))
+
+    In [20]: any_table = single_pred[0]
+
+    In [21]: any_table
+    Out[21]: ColumnReference(name='owneruserid', table=TableReference(full_name='posts', alias='p', virtual=False, schema='', catalog=''))
 
 This is because the query abstraction needs to handle cases of complex conjunctiontive or disjunctive predicates accross
 multiple tables such as ``R.a = S.b OR R.a = T.c``. However, such complicated structures do not occur in the commonly
@@ -148,16 +213,29 @@ Since these simplifications only apply to a subset of all possible predicates, y
 actually of a supported form before creating the simplified version. See the class documentations for more details.
 Once you have obtained a simplified predicate, its components can be accessed in a more straightforward way:
 
-.. ipython:: python
+.. code-block:: ipython
 
-    simple_filters = pb.qal.SimpleFilter.wrap_all(query.predicates().filters())
-    filter_pred = pb.util.collections.get_any(simple_filters)
-    filter_pred.column
-    filter_pred.operation
-    filter_pred.value
-    simple_joins = pb.qal.SimpleJoin.wrap_all(query.predicates().joins())
-    join_pred = pb.util.simplify(simple_joins)
-    join_pred.lhs, join_pred.rhs
+    In [22]: simple_filters = pb.qal.SimpleFilter.wrap_all(query.predicates().filters())
+
+    In [23]: filter_pred = pb.util.collections.get_any(simple_filters)
+
+    In [24]: filter_pred.column
+    Out[24]: ColumnReference(name='acceptedanswerid', table=TableReference(full_name='posts', alias='p', virtual=False, schema='', catalog=''))
+
+    In [25]: filter_pred.operation
+    Out[25]: <BinaryOperator.Greater: '>'>
+
+    In [26]: filter_pred.value
+    Out[26]: 0
+
+    In [27]: simple_joins = pb.qal.SimpleJoin.wrap_all(query.predicates().joins())
+
+    In [28]: join_pred = pb.util.simplify(simple_joins)
+
+    In [29]: join_pred.lhs, join_pred.rhs
+    Out[29]:
+    (ColumnReference(name='id', table=TableReference(full_name='users', alias='u', virtual=False, schema='', catalog='')),
+     ColumnReference(name='owneruserid', table=TableReference(full_name='posts', alias='p', virtual=False, schema='', catalog='')))
 
 Compare this output to the listing of the full AST above.
 

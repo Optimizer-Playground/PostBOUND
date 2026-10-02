@@ -175,12 +175,14 @@ and alternative ways to establish a connection.
 
 Now, you should be able to connect to the Postgres server using the following code:
 
-.. ipython:: python
-    :okwarning:
+.. code-block:: ipython
 
-    import postbound as pb
-    pg_instance = pb.postgres.connect(config_file=".psycopg_connection")
-    pg_instance
+    In [1]: import postbound as pb
+
+    In [2]: pg_instance = pb.postgres.connect(config_file=".psycopg_connection")
+
+    In [3]: pg_instance
+    Out[3]: stats @ Postgres (v18.1)
 
 Putting things together, you can create an entirely new Postgres server like so:
 
