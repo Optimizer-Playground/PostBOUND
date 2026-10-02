@@ -232,3 +232,31 @@ def test_set_query_is_ordered_reflects_a_trailing_orderby() -> None:
 
     assert isinstance(query, SetQuery)
     assert query.is_ordered() is True
+
+
+# -- regression tests --------------------------------------------------------------------------------------
+
+
+def test_ast_renders_both_operands_of_a_binary_predicate() -> None:
+    """Regression guard for cacf542: `_create_ast()` still read the pre-rework `BinaryPredicate.first_argument` and
+    `second_argument` instead of `lhs`/`rhs`, so `ast()` raised an `AttributeError` for every query with a comparison.
+    """
+    query = parse("SELECT * FROM r WHERE r.a = 1")
+
+    ast = query.ast()
+
+    assert "+-BinaryPredicate [=]\n" in ast
+    assert "+ ColumnExpression [r.a]\n" in ast
+    assert "+-StaticValueExpression [1]" in ast
+
+
+def test_ast_renders_the_child_of_a_negation() -> None:
+    """Regression guard for cacf542: `_create_ast()` passed `NotPredicate.children` to the recursion, but the rework
+    reduced negations to a single `child` property, so `ast()` raised an `AttributeError` for every ``NOT`` predicate.
+    """
+    query = parse("SELECT * FROM r WHERE NOT r.a IS NULL")
+
+    ast = query.ast()
+
+    assert "+-NotPredicate [NOT]\n" in ast
+    assert "+-UnaryPredicate [IS NULL]\n" in ast

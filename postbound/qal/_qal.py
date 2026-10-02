@@ -8916,13 +8916,13 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
     item_str = type(item).__name__
     match item:
         # Predicates
-        case CompoundPredicate() if not item.is_negation():
+        case AndPredicate() | OrPredicate():
             children = [_create_ast(c, indentation=indentation + 2) for c in item.children]
             child_str = "\n".join(children)
             item_str = f"{item_str} [{item.operation.value}]"
             return f"{prefix}+-{item_str}\n{child_str}"
-        case CompoundPredicate() if item.is_negation():
-            child = _create_ast(item.children, indentation=indentation + 2)
+        case NotPredicate():
+            child = _create_ast(item.child, indentation=indentation + 2)
             item_str = f"{item_str} [NOT]"
             return f"{prefix}+-{item_str}\n{child}"
         case UnaryPredicate():
@@ -8930,8 +8930,8 @@ def _create_ast(item: Any, *, indentation: int = 0) -> str:
             item_str = f"{item_str} [{item.operator.value}]" if item.operator else item_str
             return f"{prefix}+-{item_str}\n{child}"
         case BinaryPredicate():
-            lhs = _create_ast(item.first_argument, indentation=indentation + 2)
-            rhs = _create_ast(item.second_argument, indentation=indentation + 2)
+            lhs = _create_ast(item.lhs, indentation=indentation + 2)
+            rhs = _create_ast(item.rhs, indentation=indentation + 2)
             item_str = f"{item_str} [{item.operator.value}]"
             return f"{prefix}+-{item_str}\n{lhs}\n{rhs}"
         case AbstractPredicate():
