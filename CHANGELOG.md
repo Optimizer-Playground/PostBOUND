@@ -12,575 +12,169 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-# Version 0.22.0 (unreleased)
+## Version 0.22.0
+
+PostBOUND v0.22.0 is one of the largest releases of the framework so far. With
+this release, we modernized key parts of the codebase, especially by eliminating
+a lot of surprising or unexpected behavior and by cutting of legacy design decisions
+that did not stand the test of time. Sadly, this means that this release brings
+a rather large number of breaking changes. However, most of them should have a
+pretty straightforward fix. Definitely check out the list below.
+
+In terms of new functionality, highlights include first-class support for DuckDB,
+a proper `ResultCache` for expensive SQL queries, `PreciseStatistics` available
+across database backends, and better support for set queries (UNION, INTERSECT,
+etc.).
 
 ## 🐣 New features
 
-- Added a standalone `ResultCache` (`postbound.db.ResultCache`). It wraps an arbitrary `Database` and transparently
-  caches the results of `execute_query()` calls, optionally persisting them to a JSON file. Use
-  `ResultCache.create_cache()` to obtain a shared instance for a given database.
-- Added a standalone `PreciseStatistics` (`postbound.db.PreciseStatistics`). It implements the full
-  `StatisticsCatalog` interface by computing every statistic with a live SQL query.
-  `PreciseStatistics.create_cached()` combines it with a `ResultCache` in one step.
-
-## 📰 Updates
-
-- Databases no longer provide result caching out-of-the-box. The `cache_enabled` parameters and properties on
-  `Database`, `execute_query()` and the statistics catalogs have been removed in favor of `ResultCache`.
-  This completes the deprecation announced in version 0.21.6.
-- The statistics interfaces no longer have a built-in emulation mode. The `emulated`, `enable_emulation_fallback` and
-  `cache_enabled` attributes are gone; use `PreciseStatistics` instead. Whether a native catalog falls back to
-  computing an unsupported statistic is now controlled by the module-level `postbound.db.enable_emulation_fallback`.
-- Simplified the names of the central database abstractions:
-  `DatabaseStatistics` → `StatisticsCatalog`, `PostgresInterface` → `PostgresDatabase`,
-  `PostgresSchemaInterface` → `PostgresSchema`, `PostgresStatisticsInterface` → `PostgresStatistics`,
-  `PostgresHintService` → `PostgresHinting`, and `PostgresExplainNode`/`PostgresExplainPlan` →
-  `PostgresExplain`/`PostgresPlan`. `Database.database_system_version()` is now `Database.dbms_version()`.
-- The `postgres` and `duckdb` backends are now packages (`postbound/postgres/`, `postbound/duckdb/`) rather than
-  single modules. The public import path (`pb.postgres`, `pb.duckdb`) is unchanged.
-- The `DatabasePool` can now hold connections to several databases of the same system at the same time, which removes
-  the need for the `private=True`/`refresh=True` workarounds when connecting to more than one database.
-- The test suite now runs under `pytest` instead of `unittest`. Existing `unittest.TestCase` classes are collected
-  unchanged, but new tests should be written as plain functions, since fixtures and `parametrize` do not work inside a
-  `TestCase`. Tests are grouped into cumulative **tiers** by the environment they need, selected with `--tier`:
-  0 = pure code plus test doubles (no server, no network; the default), 1 = embedded engines, 2 = a live database,
-  3 = slow workload sweeps. Only tier 0 is enforced automatically, as a `pre-push` hook beside ruff and ty.
-- Added hand-written database test doubles under `tests/doubles/` (`ScriptedCursor`, `FakeDatabase`, `StaticSchema`,
-  `FakeStatistics`, `FakeHintService`, `FakeOptimizer`). Because `DatabaseSchema` has no abstract methods, scripting a
-  cursor exercises its `information_schema` implementations for real and lets a test assert on the SQL that was
-  generated. Doubles subclass the real ABCs rather than using `unittest.mock`, so an interface change fails loudly
-  instead of silently passing.
-
-## 🏥 Fixes
-
-- Fixed the JOB and Stats result-set equivalence tests executing the parsed query on both sides of the comparison, so
-  they compared a query against itself and could never fail on a parser regression.
-- Deferred the database-availability probe in `tests.regression_suite.skip_if_no_db` to collection time. It previously
-  connected at decoration time, i.e. during module import, so merely collecting the suite opened one throwaway
-  connection per decorated class. It also caught only `psycopg.OperationalError`, which let an authentication failure
-  or a malformed connection file abort collection of the whole module.
-- `DatabasePool` state no longer leaks between tests. A database registered by one test module stayed visible to every
-  later one, which made `parse_query` bind columns against an arbitrary leaked database.
-- Added offline test coverage for `postgres/_explain.py`, pg_lab/pg_hint_plan hint generation, the Postgres
-  timeout-query state machine, and the `validation.py` pre-check hierarchy, none of which had any tests before.
-  Several of these tests originally documented then-current bugs rather than fixes for them; all of those
-  have since been fixed (see Fixes below) and the tests updated to match.
-- Added test coverage for the `postbound.qal` package itself (`SqlExpression`, `AbstractPredicate` and
-  `PredicateTree`, the clause hierarchy including every `TableSource` variant, the `SqlQuery`/
-  `SelectStatement`/`SetQuery` aggregate API, and `format_quick`), replacing the ad-hoc `SqlQueryTests` and
-  `PredicateTests` in `tests/test_qal.py`. `tests/test_qal.py` now holds only the parser/transform tests and
-  the JOB/Stats workload sweeps.
-- Removed the undocumented `SKIP_ONLINE` environment variable, which defaulted to skipping and therefore kept six
-  whole-workload tests permanently dead even against a fully provisioned server. Tier selection replaces it, and
-  requesting a tier whose environment is unavailable now fails instead of reporting a green, all-skipped run.
-
-- Fixed `ResultCache` and `DuckDBDatabase` being impossible to instantiate: both still declared the pre-rename
-  `database_system_version()` and were missing `__eq__`/`__hash__`, so they remained abstract.
-- Fixed `MysqlStatisticsInterface.min_max()` being named `min_max_`, which left the abstract method unimplemented.
-  `MysqlInterface` was missing `__eq__`/`__hash__` for the same reason.
-- Fixed the DuckDB and MySQL statistics catalogs naming the wrong statistic in their
-  `UnsupportedDatabaseFeatureError` messages.
-- Removed the dead `Database.reset_cache()` and the leftover cache handling in the Postgres timeout executor. Both
-  accessed a `_query_cache` attribute that no longer exists.
-- Fixed `vis.optimizer` passing the removed `cache_enabled`/`emulated` arguments to `execute_query()` and
-  `total_rows()`.
-- Fixed several Postgres statistics being less accurate than necessary. The root cause was that Postgres maintains
-  statistics over all non-NULL values in addition to a `null_frac` statistic, which skewed count-based statistics that
-  also relied on the total number of rows.
-
-## ⚠️ Deprecations
-
-- The `ues`, `tonic` and `experiments` modules have been removed and moved to the separate optimizer repository, as
-  announced in version 0.21.6. The `tools/ceb-generator.py` and `tools/query-generator.py` scripts were removed along
-  with them.
-
-## 🪲 Known bugs
-
-- The automatic optimization of the Postgres server configuration as part of the Docker installation does not work
-  on MacOS. Currently, this should be considered as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
-  currently exploring alternative, more reliable solutions.
-
----
-
-# Version 0.21.6
-
-## 🐣 New features
-
-- Connections to DuckDB can now be established in read-only mode.
-
-## 📰 Updates
-
-- `transform.expand_to_query()` now supports different output projections
-
-## 🏥 Fixes
-
-- Fixed string representation of _NOT_ predicates omitting brackets for complex
-  negated predicates. For example, _NOT (a = 42 AND b = 24)_ was wrongly turned
-  into _NOT a = 42 AND b = 24_.
-- Fixed `transform.infer_between_predicates()` dropping unrelated predicates
-- Fixed `transform.extract_subquery()` and `transform.extract_query_fragment()`
-  breaking for negated unary predicates.
-- Fixed `DatabaseStatistics.most_common_values()` breaking if NULL is one of
-  the MCVs.
-
-## ⚠️ Deprecations
-
-- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
-  favor of the more flexible _projection_ and _output_ parameters. However, we
-  currently have no plans to remove the old API.
-- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
-  will be moved to the separate optimizer repository for version 0.22.0.
-- `Workload.read()` is deprecated in favor of `read_workload()`. The old method
-  will be removed in version 0.22.0.
-  This change unifies the workload API and consistently uses `read_workload_XXX`
-  functions for input.
-- `CompoundPredicate` will no longer be used to represent NOT predicates from
-  version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
-- `MathExpression` will no longer accept sequences of expressions as the second
-  argument. To encode operations involving more than 2 operands, a hierarchy of
-  binary math expressions should be used instead.
-- Databases will no longer support the database cache out-of-the-box. Instead,
-  the cache will become a proper high-level component that can be used with any
-  database. This change is planned for version 0.22.0
-- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
-  This should prevent confusion regarding the precise timing of the callback execution,
-  especially since we have now also introduced a _pre_exec_callback_.
-
-## 🪲 Known bugs
-
-- The automatic optimization of the Postgres server configuration as part of the
-  Docker installation does not work on MacOS. Currently, this should be considered
-  as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying
-  data server crashed and we are currently exploring alternative, more reliable
-  solutions.
-
----
-
-# Version 0.21.5
-
-## 🐣 New features
-
-- Added an `infer_between_predicates()` transformation. It translates predicates
-  such as _col >= 24 AND col <= 42_ into _col BETWEEN 24 AND 42_.
-- Added an `load_operator_json()` "parser" to turn JSONized operator representations
-  back into their PostBOUND equivalents
-- `write_df()` now accepts the input "dataframe" in additional formats, such as
-  struct-of-arrays and array-of-structs.
-
-## 📰 Updates
-
-- `parse_query` now plays nice when faced with the output of a JSON-ize operation
-  over a query.
-- `write_df` no longer modifies the source data frame to serialize complex values
-
-## 🏥 Fixes
-
-- Fix syntax error in DuckDB's `foreign_keys_on()`
-
-## ⚠️ Deprecations
-
-- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
-  favor of the more flexible _projection_ and _output_ parameters. However, we
-  currently have no plans to remove the old API.
-- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
-  will be moved to the separate optimizer repository for version 0.22.0.
-- `Workload.read()` is deprecated in favor of `read_workload()`. The old method
-  will be removed in version 0.22.0.
-  This change unifies the workload API and consistently uses `read_workload_XXX`
-  functions for input.
-- `CompoundPredicate` will no longer be used to represent NOT predicates from
-  version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
-- `MathExpression` will no longer accept sequences of expressions as the second
-  argument. To encode operations involving more than 2 operands, a hierarchy of
-  binary math expressions should be used instead.
-- Databases will no longer support the database cache out-of-the-box. Instead,
-  the cache will become a proper high-level component that can be used with any
-  database. This change is planned for version 0.22.0
-- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
-  This should prevent confusion regarding the precise timing of the callback execution,
-  especially since we have now also introduced a _pre_exec_callback_.
-
-## 🪲 Known bugs
-
-- The automatic optimization of the Postgres server configuration as part of the
-  Docker installation does not work on MacOS. Currently, this should be considered
-  as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying
-  data server crashed and we are currently exploring alternative, more reliable
-  solutions.
-
----
-
-# Version 0.21.4
-
-## 📰 Updates
-
-- By default, the database schema will now provide all datatypes in lower case.
-  This should make the live of clients easier since they no longer need to deal
-  with system-specific formats (only system-specific names such as _varchar_
-  vs. _character varying_)
-
-## 🏥 Fixes
-
-- Fixed the database schema sometimes being case-sensitive. This caused weird interactions
-  with the pre-defined workloads, which are typically lower-case. The schema is
-  now always based on the lower-case representation of the table and column names,
-  oriented around the Postgres behavior.
-- Fixed the database schema not respecting the schema/catalog of a passed
-  table/column reference.
-
-## ⚠️ Deprecations
-
-- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
-  favor of the more flexible _projection_ and _output_ parameters. However, we
-  currently have no plans to remove the old API.
-- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
-  will be moved to the separate optimizer repository for version 0.22.0.
-- `Workload.read()` is deprecated in favor of `read_workload()`. The old method
-  will be removed in version 0.22.0.
-  This change unifies the workload API and consistently uses `read_workload_XXX`
-  functions for input.
-- `CompoundPredicate` will no longer be used to represent NOT predicates from
-  version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
-- `MathExpression` will no longer accept sequences of expressions as the second
-  argument. To encode operations involving more than 2 operands, a hierarchy of
-  binary math expressions should be used instead.
-- Databases will no longer support the database cache out-of-the-box. Instead,
-  the cache will become a proper high-level component that can be used with any
-  database. This change is planned for version 0.22.0
-- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
-  This should prevent confusion regarding the precise timing of the callback execution,
-  especially since we have now also introduced a _pre_exec_callback_.
-
-## 🪲 Known bugs
-
-- The automatic optimization of the Postgres server configuration as part of the
-  Docker installation does not work on MacOS. Currently, this should be considered
-  as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying
-  data server crashed and we are currently exploring alternative, more reliable
-  solutions.
-
----
-
-# Version 0.21.3
-
-## 🐣 New features
-
-- Table references can now keep track of their catalog.
-- Database schemas now have a utility `is_string_column()` function
-- Added two new utilities for created QAL objects. `as_func_expr()` and `as_math_expr()`.
-  As a consequence, `as_expression()` can no longer create function expressions.
-- The `read_df` and `write_df` utilities now work for SQLite databases.
-- `write_df` now allows to append to existing files. Support is currently limited
-  to CSV files, but we plan to expand this to other formats in the future.
-
-## 🏥 Fixes
-
-- Fixed `execute_query` in the Postgres interface raising an error for
-  queries that do (correctly) not return a result set (e.g., _SET_).
-- Fixed table-based access of the database schema being sensitive to the
-  alias of a table.
-
-## ⚠️ Deprecations
-
-- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
-  favor of the more flexible _projection_ and _output_ parameters. However, we
-  currently have no plans to remove the old API.
-- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
-  will be moved to the separate optimizer repository for version 0.22.0.
-- `Workload.read()` is deprecated in favor of `read_workload()`. The old method
-  will be removed in version 0.22.0.
-  This change unifies the workload API and consistently uses `read_workload_XXX`
-  functions for input.
-- `CompoundPredicate` will no longer be used to represent NOT predicates from
-  version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
-- `MathExpression` will no longer accept sequences of expressions as the second
-  argument. To encode operations involving more than 2 operands, a hierarchy of
-  binary math expressions should be used instead.
-- Databases will no longer support the database cache out-of-the-box. Instead,
-  the cache will become a proper high-level component that can be used with any
-  database. This change is planned for version 0.22.0
-- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
-  This should prevent confusion regarding the precise timing of the callback execution,
-  especially since we have now also introduced a _pre_exec_callback_.
-
-## 🪲 Known bugs
-
-- The automatic optimization of the Postgres server configuration as part of the Docker installation does not work
-  on MacOS. Currently, this should be considered as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
-  currently exploring alternative, more reliable solutions.
-
----
-
-# Version 0.21.2
-
-## 🐣 New features
-
-- Added a new (optional) argument to function expressions to represent keyword arguments.
-  Specifically, this allows to now create functions like
-  `substring(foo FROM 3 FOR 42)`. Note that parser support is still limited and
-  will be added on a per-function basis.
-- Added a lot of utilities to create QAL objects, specifically SELECT clauses.
-- `as_expression()` can now be used to create function expressions.
-- Added an `as_query()` utility similar to `as_expression()` or `as_predicate()`.
-  It has a slightly nicer API than the existing `build_query()`.
-- Improved the creation of `SimpleFilter` and `SimpleJoin` predicates to make double
-  checks redundant. `attempt_wrap()` methods are now the preferred entry point into
-  the simplification.
-
-## 📰 Updates
-
-- Added jsonize support for optimization pipelines, optimization stages, and databases.
-
-## 🏥 Fixes
-
-- Fixed plan parameterizations not being JSON-serializable.
-- Fixed the shorthand method for creating _COUNT(\*)_ select clauses accepting a
-  distinct parameter instead of a target name.
-- Fixed `as_predicate()` creating star expressions instead of literal star-strings.
-  For example, the predicate _foo = '\*'_ was wrongly turned into the (illegal)
-  predicate _foo = \*_ (note the missing quotes).
-- Fixed database setup scripts for Postgres breaking if the number of CPU cores
-  exceeded the number of allowed connections.
-
-## ⚠️ Deprecations
-
-- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
-  favor of the more flexible _projection_ and _output_ parameters. However, we
-  currently have no plans to remove the old API.
-- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
-  will be moved to the separate optimizer repository for version 0.22.0.
-- `Workload.read()` is deprecated in favor of `read_workload()`. The old method
-  will be removed in version 0.22.0.
-  This change unifies the workload API and consistently uses `read_workload_XXX`
-  functions for input.
-- `CompoundPredicate` will no longer be used to represent NOT predicates from
-  version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
-- `MathExpression` will no longer accept sequences of expressions as the second
-  argument. To encode operations involving more than 2 operands, a hierarchy of
-  binary math expressions should be used instead.
-- Databases will no longer support the database cache out-of-the-box. Instead,
-  the cache will become a proper high-level component that can be used with any
-  database. This change is planned for version 0.22.0
-- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
-  This should prevent confusion regarding the precise timing of the callback execution,
-  especially since we have now also introduced a _pre_exec_callback_.
-
-## 🪲 Known bugs
-
-- The automatic optimization of the Postgres server configuration as part of the Docker installation does not work
-  on MacOS. Currently, this should be considered as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
-  currently exploring alternative, more reliable solutions.
-
----
-
-# Version 0.21.1
-
-## 🐣 New features
-
-- Added a `pre_exec_callback` parameter to the benchmarking utilities. This is
-  called right before the query execution.
-- Pre-execution and post-execution callbacks for the benchmarking utilities can
-  now optionally return a dictionary. The key/value pairs of this dictionary will
-  be automatically added to the result data frame as additional columns. This allows
-  to incorporate custom measurements into the benchmarking process.
-- Added a lot of convenience functions to manually create QAL objects
-
-## 📰 Updates
-
-- Added an `extract_subquery()` transformation as a saner alternative to `extract_query_fragment()`.
-- Improved the performance of `PreComputedCardinalities` for large queries
-
-## 🏥 Fixes
-
-- Lifted the restriction of only one parallel hint per plan for Postgres.
-  We have been under the impression that Postgres can only run a single subtree
-  of a plan in parallel. As it turns out, this is not the case if the two subtrees
-  are "independent" of each other, i.e. appear in parallel branches of the plan.
-- Fixed hinting a plan for pg_lab messing up the placement of parallel workers.
-  The bug occurred when a join computed its outer child in parallel. Instead of
-  placing the parallel workers on that child, the hinting process placed them on
-  the inner child.
-- Fix TableReference `with_alias()` dropping the schema.
-
-## ⚠️ Deprecations
-
-- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in
-  favor of the more flexible _projection_ and _output_ parameters. However, we
-  currently have no plans to remove the old API.
-- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and
-  will be moved to the separate optimizer repository for version 0.22.0.
-- `Workload.read()` is deprecated in favor of `read_workload()`. The old method
-  will be removed in version 0.22.0.
-  This change unifies the workload API and consistently uses `read_workload_XXX`
-  functions for input.
-- `CompoundPredicate` will no longer be used to represent NOT predicates from
-  version 0.22.0 onwards. Instead, a dedicated `NotPredicate` class will be introduced.
-- `MathExpression` will no longer accept sequences of expressions as the second
-  argument. To encode operations involving more than 2 operands, a hierarchy of
-  binary math expressions should be used instead.
-- Databases will no longer support the database cache out-of-the-box. Instead,
-  the cache will become a proper high-level component that can be used with any
-  database. This change is planned for version 0.22.0
-- Renamed the _exec_callback_ parameter in `bench.execute_workload` to `post_exec_callback`.
-  This should prevent confusion regarding the precise timing of the callback execution,
-  especially since we have now also introduced a _pre_exec_callback_.
-
-## 🪲 Known bugs
-
-- The automatic optimization of the Postgres server configuration as part of the Docker installation does not work
-  on MacOS. Currently, this should be considered as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
-  currently exploring alternative, more reliable solutions.
-
----
-
-# Version 0.21.0
-
-This is a rather large release with a lot of new features and improvements. Some highlights include:
-
-- Optimization stages now provide high-level support for learning from different kinds of data, such as workloads,
-  databases, etc.
-- Lots of usability improvements throughout the framework, e.g. for better retrieval of information from the database
-  schema, easier specification of query preparations in benchmarks, etc.
-- The usability of the database schema has been improved significantly. You can now iterate over the schema to obtain all
-  contained tables, or use dict-style access to obtain more information about specific tables or columns.
-- Introduction of new histogram and most common values types for high-level access to these statistics.
-
-While this release does not contain any major breaking changes, we are preparing to clean up some old and unfortunate parts of
-the framework. Currently, these are planned for version 0.22.0.
-
-## 🐣 New features
-
-- Optimization stages can now specify whether they require training on data samples or actual query executions. The
-  benchmarking tools and optimization pipeline will automatically trigger the training of such stages if they have not been
-  trained already. This allows to easily use data-driven and workload-driven optimization stages without any explicit
-  action needed by the user.
-- The database interface now provides a shortcut `explain()` method to obtain the query plan for a given query. This can be
-  used instead of calling the optimizer and it's explain method.
-- The database schema now provides a high-level API centered around iteration and dict-style access. This makes the repeated
-  calls to different schema methods somewhat redundant.
-- Database statistics now also provide histograms.
-- The `OptimizerInterface` (e.g. `pg_instance.optimizer()`) now provides a `parse_plan` method to parse an existing
-  system-specific query plan to the generalized `QueryPlan`. This can be used as follows:
-
-    ```python
-    explain_query = pb.transform.as_explain(query)
-    raw_plan = database.execute_query(explain_query)
-    plan = database.optimizer().parse_plan(raw_plan)
-    ```
-
-- `execute_workload()` now supports many new output formats for writing the progressive output.
-  Currently supported are: CSV, Parquet, JSON, HDF
-- Workloads now support transformations of their queries, e.g. `workload.map(pb.transform.as_star_query)`
-- Added a `fetch_workload()` function to the workloads module. It allows to load a pre-defined workload by name.
-- Added a `n_buffered()` and `buffer_state()` methods to the Postgres statistics interface to retrieve the number of
-  currently buffered pages of a relation.
-- Added an additional `BoundColumnReference` core type. Instances guarantee to be bound to a `TableReference`.
-  The new `assert_bound()` serves as a type guard to narrow references. This should prevent constant checks for valid
-  table references on columns.
-- Added a `joins_tables()` and `joins_columns()` utilities to query predicates.
-- Added a `merge_tables()` transformation to rewrite queries for materialized views.
-- `util.simplify()` now supports single-item mappings as well.
-- `util.to_json()` now supports the standard date-like objects (_datetime_, _date_, _time_, and _timedelta_)
-- `util.write_df()` now automatically transforms complex objects in the data frame into their JSON representation before
-  writing.
-- In IPython and Jupyter sessions, common PostBOUND objects like SQL queries or query plans are now automatically
-  pretty-printed. Instead of calling `print(plan.explain())`, one can now simply make `plan` the result of a cell.
-
-## 📰 Updates
-
-- `DatabaseStatistics.most_common_values()` now returns an actual `MostCommonValues` object instead of a list of tuples.
-  The `MostCommonValues` can be used as a drop-in replacement for the old tuple-based API. In addition, it provides more
-  high-level methods for working with the most common values.
-- Enabled the MySQL and DuckDB backends to fall back to emulated statistics if the database does not provide them.
-- The Postgres `execute_query()` method now accepts hint parameters and automatically applies them. For example, the
-  following can now be done without explicit hinting:
-
-    ```python
-    query, plan = ...  # whatever
-    pg_instance.execute_query(query, plan=plan)
-
-    # this is equivalent to
-    hinted_query = pg_instance.hinting().generate_hints(query, plan)
-    pg_instance.execute_query(hinted_query)
-    ```
-
-- The Postgres interface now has a `rollback()` method to put connections back into a valid state.
-- The Postgres statistics interface now consistently supports table references with a schema.
-- Much improved handling of database schemas during query parsing. We now omit clear warnings in case the database pool
-  looks weird.
-- The `QueryPreparation` API now provides the `projection` and `output` parameters to modify the SELECT\* clause and the
-  type of results to gather for all queries in a more flexible and intuitive way (how did _explain=True_ and
-  _analyze=True_ interact?).
-  The old API using _analyze=True_, etc. is now deprecated in favor of these new parameters.
-- Column references now provide a `drop_table_alias()` method to obtain a normalized-ish representation of the column.
-  This should be helpful in situations where references to the same column are not consistent in their table references,
-  e.g., when one was obtained from the schema and the other was obtained from the query.
-- While obtaining a join graph for a query, aliased tables can now be merged into the same node.
-- The `PredicateVisitor` can now be started at the query. It will extract the predicates as needed.
-- The `extract_query_fragment()` tranformation now supports modifying the output projection.
-- The `to_json()` and `to_json_dump()` utilities now support dataclasses out-of-the-box.
-- Expose `argmax()` directly in _util_ module
-
-## 🏥 Fixes
-
-- Fixed `n_buffered()` method of the Postgres statistics interface raising an error if no pages of the relation are
-  currently buffered. We now return 0 in this case.
-- Fixed string representation of `COUNT(DISTINCT ...)` for multiple arguments. We now generate the correct
-  `COUNT(DISTINCT (a, b))` instead of `COUNT(DISTINCT a, b)`.
-- Fixed `DatabaseSchema.as_graph()` having the assignment of primary key and foreign key columns reversed on join edges.
-- Fixed output format of the benchmarking log if additional entries are appended to an existing log. Essentially, we fix
-  such entries being escaped twice.
-- Fixed the `standard_logger` sometimes logging internal module names.
-- Fixed parser for column JSON
-- Updated all database setup scripts for Postgres and DuckDB. Since our data server that hosted the raw input data
-  crashed once again and broke all download links, we now moved the entire setup to Zenodo. Hopefully, this setup is
-  more stable. There are several practical implications of this change:
-    1. Instead of distributing raw CSV data, we now provide pre-build database images for Postgres and DuckDB. This should
-       lower the setup time significantly
-    2. The JOB-complex and JOB-light workloads now use a different indexing scheme. Instead of queries 1, 2, 3, ... we now
-       label them similar to Stats, i.e. q-1, q-2, ...
-    3. The DuckDB workload-setup.py script was removed - as a consequence of 1., we no longer need to create the database
-       files, but distribute them directly.
-    4. The SSB queries can currently not be loaded from the workloads module.
+- Each installation of PostBOUND now ships with DuckDB dependencies. It is no
+  longer necessary to request the backend explicitly.
+- Introduced `AndPredicate`, `OrPredicate` and `NotPredicate` as subclasses of
+  `CompoundPredicate`. This resolves the issues around different data types of
+  the `children` property.
+- Introduced a number of _TypeGuard_ checks for the QAL. This includes
+  `is_set_query`, `is_select_query`, `all_binary_predicates`, and `all_simple_from`.
+- Introduced a `TableSourceVisitor` to traverse FROM item hierarchies.
+- The type hierachy of SQL clauses was updated to better reflect the actual SQL
+  grammar. Specifically, `SqlClause` is now at the root of the hierarchy. Clauses
+  that only apply to plain SELECT queries are `BaseClauses` (a breaking change).
+  Clauses that only apply to set queries are `SetOpClause` (another breaking change).
+  Clauses that apply to both types of queries (e.g., ORDER BY) are `ModifierClause`.
+- A new `CardinalitiesCache` can be used to store cardinalities from expensive estimation
+  calls.
+- The new `ResultCache` acts as a wrapper around a `Database` and can be used to
+  store result sets of expensive queries.
+- The `StatisticsCatalog` (formerly `DatabaseStatistics`) now has a `null_frac`
+  statistic.
 
 ## 💀 Breaking changes
 
-- Renamed `PreciseCardinalityHintGenerator` to `PreciseCardinalities` to align with the other pre-defined cardinality
-  "estimators".
+Regarding the **query abstraction layer**:
+
+- `SqlQuery` now functions as a super-type of `SelectStatement`
+  (plain SELECT queries) and `SetQuery` (including UNION, INTERSECT, etc.).
+- Removed `ImplicitSqlQuery`, `ExplicitSqlQuery` and `MixedSqlQuery` along with
+  derived classes (e.g., `ImplicitFromClause`). `SqlQuery` now captures all of
+  these cases. FROM clauses have a new `has_simple_from` method and the
+  `all_simple_from` check can be used to better narrow the data type.
+- The type hierachy of SELECT clauses was updated to better reflect the actual SQL
+  grammar. See _New features_ for details.
+- WHERE predicates now actually call the root of their predicate tree `root` instead
+  of `predicate`.
+- INTERSECT clauses no longer have an `input_queries` method.
+- `CompoundPredicate` is now abstract. Use `AndPredicate`, `OrPredicate` or
+  `NotPredicate` instead. As a consequence, the `PredicateVisitor` no longer receives
+  the children as argument.
+- Predicate types have been cleaned up, including unary predicates and IN predicates.
+  See _Updates_ for details.
+- `BasePredicate` no longer exposes an `operation` property. This is now entirely
+  dependent on the actual predicate type.
+- BETWEEN predicates now call their interval bounds `lower` and `upper` to adapt
+  standard community lingo.
+- `MathExpression` is now always composed of a left-hand expression and (optionally)
+  exactly one right-hand expression. It is no longer possible to represent a math
+  expression with more than two children. Practically speaking, instead of representing
+  the sum of three expressions as `MathExpression(a, +, [b, c])`, it is now represented
+  as `MathExpression(MathExpression(a, +, b), +, c)`.
+- `LogicalOperator` has been split into `BinaryOperator` and `UnaryOperator`.
+- QAL elements that are composed of two children (e.g., set operations, math
+  expressions, or binary predicates) now consistently call their children
+  `lhs` and `rhs`.
+- `BaseProjection` is now just `Projection`
+- `OrderByExpression` is now just `Ordering`
+- `QueryPredicates` is now more aptly called `PredicateTree` and can no longer be
+  empty. As a side effect, `SqlQuery.predicates()` can now return _None_.
+
+Regarding the **database abstraction**:
+
+- Result caching is no longer mixed with regular database functionality. Instead,
+  the new `ResultCache` acts as a wrapper around a `Database`.
+- Statistics no longer have an emulation mode. Instead, the new `PreciseStatistics`
+  should be used. Emulation is still allowed for unsupported statistics. To make
+  these changes more apparent, `DatabaseStatistics` has been renamed to `StatisticsCatalog`.
+- Names of the standard backend interfaces have been simplified: `PostgresInterface`
+  is now `PostgresDatabase`, `PostgresSchemaInterface` is now `PostgresSchema`,
+  `PostgresStatisticsInterface` is now `PostgresStatistics`, `PostgresExplainNode`
+  is now `PostgresExplain`, and `PostgresExplainPlan` is now `PostgresPlan`.
+  Similarly, the `DuckDBInterface` is now `DuckDBDatabase`.
+- The `ParallelQueryExecutor`, `TimeoutQueryExecutor`, and `WorkloadShifter` have
+  been removed from the Postgres module. For timeout support, use the `PostgresDatabase`
+  directly.
+
+Regarding the **optimization pipelines**:
+
+- `JoinOrderOptimization` is now just `JoinOrdering`
+- `PhysicalOperatorSelection` is now just `OperatorSelection`
+- `JoinOrdering.optimize_join_order` may no longer return _None_.
+- `JoinOperator.IndexNestedLoopJoin` was removed.
+
+Regarding the **optimizer module**:
+
+- The module hierarchy was flattened. `dynprog`, etc. are gone. Their types are
+  now available directly in the `opt` module.
+- The `noopt` module has been removed.
+- The deprecated `presets`, `ues`, and `tonic` modules have been removed.
+- `PreciseCardinalities` are now `PerfectCardinalities`. The overall interface and
+  performance have been significantly improved.
+- `PreComputedCardinalities` are now `OfflineCardinalities`. The overall interface
+  and performance have been significantly improved.
+- `CardinalityDistortion` has been removed.
+- The legacy `JoinGraph` and helper classes have been removed.
+
+Others:
+
+- `Workload` is now an immutable _Mapping_.
+- The deprecated `ceb` module has been removed.
+- `util.enlist` has been removed.
+
+## 📰 Updates
+
+- Each `OptimizationStage` now checks whether its required hints are available on
+  the target database system as a pre-check. As a consequence, subclasses should
+  now merge their checks with the base class.
+- `InPredicate` can now be used to represent both IN filters as well as NOT IN filters.
+- IS NULL and related operations are now proper `UnaryPredicate` instances instead
+  of weird cases of `BinaryPredicates`. This aligns with the SQL standard.
+- The `DatabasePool` now takes the actual database into account when caching, not
+  just the system name. Therefore, it is now possible to open connections to two
+  different Postgres databases without setting _private_ or _refresh_ during `connect()`.
+- `postgres.connect()` now accepts the _config_file_ as a positional argument.
+
+## 🏥 Fixes
+
+- The string representation of SQL queries now puts parentheses around NOT.
+- The SQL parser can now handle NATURAL JOINs properly.
+- `transform.extract_subquery` now ignores anything not SELECT, FROM, or WHERE -
+  as it was originally intended to do.
+- `transform.replace_predicate` can now handle replacements of the root.
+- `transform.add_ec_predicates` keeps non-equi joins
+- Tons of smaller bug fixes for edge cases in the `transform` module.
+- Creating a negative `Cardinality` instance now properly raises an error.
+- Infinite `Cardinality` instances now compare properly.
+- `PostgresStatistics` now account for the NULL fraction.
 
 ## ⚠️ Deprecations
 
-- The old `QueryPrepration` API using _analyze=True_, etc. is now deprecated in favor of the more flexible _projection_
-  and _output_ parameters. However, we currently have no plans to remove the old API.
-- The _ues_, _tonic_, _presets_, and _experiments_ module are now deprecated and will be moved to the separate optimizer
-  repository for version 0.22.0.
-- `Workload.read()` is deprecated in favor of `read_workload()`. The old method will be removed in version 0.22.0.
-  This change unifies the workload API and consistently uses `read_workload_XXX` functions for input.
-- `CompoundPredicate` will no longer be used to represent NOT predicates from version 0.22.0 onwards. Instead, a dedicated
-  `NotPredicate` class will be introduced.
-- Databases will no longer support the database cache out-of-the-box. Instead, the cache will become a proper high-level
-  component that can be used with any database. This change is planned for version 0.22.0
+None
 
 ## 🪲 Known bugs
 
-- The automatic optimization of the Postgres server configuration as part of the Docker installation does not work
-  on MacOS. Currently, this should be considered as wontfix.
-- The SSB queries can currently not be loaded from the workloads module. The underlying data server crashed and we are
-  currently exploring alternative, more reliable solutions.
+- The automatic optimization of the Postgres server configuration as part of the
+  Docker installation does not work on MacOS. Currently, this should be considered
+  as wontfix.
+- The SSB queries can currently not be loaded from the workloads module. The underlying
+  data server crashed and we are currently exploring alternative, more reliable
+  solutions.
 
----
+## 🛣 Roadmap
 
-# 🛣 Roadmap
+The next months are going to be pretty exciting due to the imminent release of
+PostgreSQL 19. As it looks like, this will be the first Postgres version that
+provides official support for query hinting via the `pg_plan_advice` extension.
+We will definitely add support for pg_plan_advice as a hinting backend, potentially
+even making it the standard one and sunsetting development of the `pg_hint_plan`
+backend. We will have to wait and see whether pg_hint_plan will be maintained in
+the future.
 
-Currently, we plan to implement the following features in the future (in no particular order):
-
-- Providing a Substrait export for query plans
-- Better benchmarking setup, mostly focused on comparing one or multiple optimization pipelines and creating better
-  experiment logs and the ability to cancel/resume long-running benchmarks
+Additionally, the `relalg` module is due for a major overhaul.
