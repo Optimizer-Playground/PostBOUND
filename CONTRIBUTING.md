@@ -1,5 +1,9 @@
 # Contributing to PostBOUND
 
+PostBOUND is a community-driven project. We welcome contributions of all kinds, from bug reports, documentation, and
+pull requests to general feedback on the project. This document focuses on the mechanics of contributing code
+and tests, and the conventions that keep the codebase consistent and maintainable.
+
 ## Development setup
 
 PostBOUND is managed with [uv](https://docs.astral.sh/uv/). It is required — the pinned tool
@@ -23,18 +27,30 @@ uv run pytest --tier 2                                   # ... plus the tests ne
 uv run pytest tests/test_qal.py -v                        # a single module
 ```
 
+## LLM policy
+
+We follow a nuanced approach to LLMs during development. On the one hand, we do not use LLMs to generate
+code in the core framework. This is to ensure that the code base remains maintainable and the architecture
+as well as the user experience are consistent.
+
+With that being said, we welcome LLMs for brainstorming and we use LLMs to aid in the project tooling,
+such as integrations. Futhermore, we use LLMs to develop tests and to ensure that the documentation stays up
+to date.
+
+We kindly ask you to follow these guidelines when contributing to PostBOUND.
+
 ## Code style
 
 Formatting, linting and type checking are enforced by the git hooks. All three are configured in
 `pyproject.toml`, so your editor, the hooks and a manual run always agree:
 
-| Tool | What it owns | Manual invocation |
-| --- | --- | --- |
-| `ruff format` | formatting, line length 120 | `uv run ruff format .` |
-| `ruff check` | lint rules `E,W,F,I,UP,B,SIM,RUF` | `uv run ruff check --fix .` |
-| `ty` | type checking | `uv run ty check` |
+| Tool          | What it owns                      | Manual invocation           |
+| ------------- | --------------------------------- | --------------------------- |
+| `ruff format` | formatting, line length 120       | `uv run ruff format .`      |
+| `ruff check`  | lint rules `E,W,F,I,UP,B,SIM,RUF` | `uv run ruff check --fix .` |
+| `ty`          | type checking                     | `uv run ty check`           |
 
-Rules that are deliberately *not* enforced are listed with their reasoning in the `ignore` array of
+Rules that are deliberately _not_ enforced are listed with their reasoning in the `ignore` array of
 `[tool.ruff.lint]`. Files with type-check suppressions are listed under `[[tool.ty.overrides]]`, each
 with a comment saying what would allow the override to be deleted. Prefer fixing an issue over adding
 to either list; if you must suppress, suppress the narrowest thing at the narrowest scope and say why.

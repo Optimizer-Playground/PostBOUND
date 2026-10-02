@@ -33,11 +33,18 @@ uv run ty check                             # type checker
 uv run pre-commit run --all-files           # everything the hooks would run
 ```
 
-Docs (Sphinx, published to readthedocs):
+Docs (Sphinx, published to readthedocs; Sphinx is part of the `dev` group):
 
 ```sh
-cd docs && uv run --group doc sphinx-build -M html source build
+cd docs && uv run sphinx-build -M html source build
 ```
+
+The examples in the hand-written pages are **static** IPython sessions (`.. code-block:: ipython` with captured
+`In [n]:`/`Out[n]:` output), so the Read the Docs build executes nothing and needs no database. Do not reintroduce the
+executing `.. ipython::` directive — its extension is no longer loaded. `tests/test_docs.py` replays every session and
+compares the output against the docs (tier 0 for offline blocks, tier 2 against the Stats database for the rest), so a
+code change that alters a documented output fails there: re-capture the output in the RST file. Outputs that
+legitimately vary (server versions, plan estimates, set order) are listed with a reason in its `UNSTABLE_OUTPUTS`.
 
 ### Tests and database connections
 
@@ -78,7 +85,7 @@ SqlQuery  --(pipeline: optimization stages)-->  QueryPlan  --(HintService)-->  h
   (join order → operator selection → plan parameters), `IntegratedOptimizationPipeline` (one algorithm computes
   everything), `IncrementalOptimizationPipeline` (successive plan rewrites). Pipelines are configured by chained
   `use(...)`/`setup_*(...)` calls followed by `build()`, which runs compatibility pre-checks.
-- `postbound/_stages.py` — the user-facing extension points (`JoinOrderOptimization`, `PhysicalOperatorSelection`,
+- `postbound/_stages.py` — the user-facing extension points (`JoinOrdering`, `OperatorSelection`,
   `CardinalityEstimator`, `CostModel`, `PlanEnumerator`, `ParameterGeneration`, `IncrementalOptimizationStep`,
   `CompleteOptimizationAlgorithm`). Every stage also declares its training needs (`fit_database`, `fit_workload`,
   `fit_samples`, `learn_from_feedback`) — the pipeline and `bench` drive these automatically.
@@ -121,9 +128,11 @@ anywhere.
 - `postbound/bench.py` — `execute_workload`, `QueryPreparation`, result frames; drives pipelines reproducibly.
 - `postbound/workloads.py` — `Workload`, the generic `read_workload()` reader, and ready-made loaders `job()`,
   `job_light()`, `job_complex()`, `stats()`, `stack()`, `ssb()`.
-- `postbound/opt/` — ready-made algorithms and helpers: `dynprog.py`, `enumeration.py`, `randomized.py`, `native.py`,
-  `noopt.py`, plan/JSON helpers (`_helpers.py`), cardinality wrappers (`_cardinalities.py`). The `JoinGraph` abstraction
-  was removed; `README.md` and `docs/source/core/{index,optimization}.rst` still reference it.
+- `postbound/opt/` — ready-made algorithms and helpers in private modules, all re-exported flat from `postbound.opt`
+  (e.g. `postbound.opt.DynamicProgrammingEnumerator`, not `postbound.opt.dynprog.…`): `_dynprog.py`, `_enumeration.py`,
+  `_randomized.py`, `_native.py`, plan/JSON helpers (`_helpers.py`), cardinality wrappers (`_cardinalities.py`). The
+  former `noopt.py` dummy optimizers and the `JoinGraph` abstraction were removed; `README.md` still references
+  `JoinGraph`.
   `postbound/experiments/`, `postbound/opt/ues.py` and `postbound/opt/tonic.py` have been removed (moved to the separate
   optimizer repository), as were the `tools/ceb-generator.py` and `tools/query-generator.py` scripts.
 - `postbound/util/` — generic helpers (collections, dicts, `jsonize`, logging, networkx, stats).
