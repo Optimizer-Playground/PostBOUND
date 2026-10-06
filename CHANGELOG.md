@@ -12,7 +12,10 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-## Version 0.22.0
+## Version 0.22.1
+
+**Due to the extensive changes of v0.22.0, we combine the changelog from v0.22.0
+and v0.22.1 here.**
 
 PostBOUND v0.22.0 is one of the largest releases of the framework so far. With
 this release, we modernized key parts of the codebase, especially by eliminating
@@ -153,6 +156,10 @@ Others:
 - Creating a negative `Cardinality` instance now properly raises an error.
 - Infinite `Cardinality` instances now compare properly.
 - `PostgresStatistics` now account for the NULL fraction.
+- Fixed DuckDB backend not being able to run any EXPLAIN queries.
+- Fixed `DuckDBOptimizer.analyze_plan()` crashing when parsing the
+  `EXPLAIN ANALYZE` output.
+- Scan nodes in DuckDB query plans are now bound to their tables.
 
 ## ⚠️ Deprecations
 

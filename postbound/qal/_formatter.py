@@ -59,7 +59,7 @@ from ._qal import (
 DefaultIndent = 2
 """The default amount of whitespace that is used to indent specific parts of the SQL query."""
 
-SqlDialect = Literal["vanilla", "postgres"]
+SqlDialect = Literal["vanilla", "postgres", "duckdb"]
 """The different flavors of SQL syntax that are supported by the formatter."""
 
 
@@ -156,16 +156,31 @@ class FormattingCaseExpression(CaseExpression):
 
 
 def _quick_format_explain(explain_clause: Explain, *, flavor: SqlDialect) -> list[str]:
-    if flavor != "postgres":
-        return [str(explain_clause)]
+    match flavor:
+        case "vanilla":
+            return [str(explain_clause)]
 
-    options = ["SETTINGS", "SUMMARY", "VERBOSE"]
-    if explain_clause.analyze:
-        options.append("ANALYZE")
-    options.append("FORMAT JSON")
+        case "postgres":
+            options = ["SETTINGS", "SUMMARY", "VERBOSE"]
+            if explain_clause.analyze:
+                options.append("ANALYZE")
+            options.append("FORMAT JSON")
 
-    args = ", ".join(options)
-    return [f"EXPLAIN ({args})"]
+            args = ", ".join(options)
+            return [f"EXPLAIN ({args})"]
+
+        case "duckdb":
+            options = []
+            if explain_clause.analyze:
+                options.append("ANALYZE")
+            options.append("FORMAT JSON")
+
+            args = ", ".join(options)
+            return [f"EXPLAIN ({args})"]
+
+        case _:
+            warnings.warn("Unknown SQL flavor for EXPLAIN clauses. Falling back to naive formatting", stacklevel=2)
+            return [str(explain_clause)]
 
 
 def _quick_format_cte(cte_clause: CommonTableExpression, *, flavor: SqlDialect) -> list[str]:
@@ -547,7 +562,7 @@ def _quick_format_limit(limit_clause: Limit, *, flavor: SqlDialect) -> list[str]
             else:
                 return []
 
-        case "postgres" if limit_clause.fetch_direction in {"first", "next"}:
+        case "postgres" | "duckdb" if limit_clause.fetch_direction in {"first", "next"}:
             if limit_clause.limit and limit_clause.offset:
                 return [
                     f"LIMIT {limit_clause.limit}",
@@ -559,7 +574,7 @@ def _quick_format_limit(limit_clause: Limit, *, flavor: SqlDialect) -> list[str]
                 return [f"OFFSET {limit_clause.offset}"]
             return []
 
-        case "postgres" if limit_clause.fetch_direction in {"prior", "last"}:
+        case "postgres" | "duckdb" if limit_clause.fetch_direction in {"prior", "last"}:
             warnings.warn(
                 "Postgres does not support FETCH PRIOR and FETCH LAST. Falling back to naive formatting", stacklevel=2
             )
@@ -673,9 +688,9 @@ def _expression_prettifier[T: SqlExpression](
                 indentation=indentation,
             )
             return (
-                target(replaced_cast, typ, type_params=params)
-                if flavor == "vanilla"
-                else _PostgresCastExpression(replaced_cast, typ, type_params=params, array_type=array)
+                _PostgresCastExpression(replaced_cast, typ, type_params=params, array_type=array)
+                if flavor == "postgres"
+                else target(replaced_cast, typ, type_params=params)
             )
 
         case MathExpression(op, lhs, rhs):

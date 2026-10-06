@@ -174,3 +174,31 @@ def test_format_quick_preserves_the_table_order_of_an_implicit_from(tables: tupl
     """
     for order in itertools.permutations(tables):
         assert_round_trips(f"SELECT * FROM {', '.join(order)}")
+
+
+#: Options that only Postgres understands. DuckDB rejects them (`NotImplementedException: Unimplemented explain type: ...`).
+POSTGRES_ONLY_EXPLAIN_OPTIONS = ("SETTINGS", "SUMMARY", "VERBOSE")
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected_header"),
+    [
+        ("EXPLAIN SELECT * FROM r WHERE r.a = 1", "EXPLAIN (FORMAT JSON)"),
+        ("EXPLAIN ANALYZE SELECT * FROM r WHERE r.a = 1", "EXPLAIN (ANALYZE, FORMAT JSON)"),
+    ],
+    ids=["explain", "explain-analyze"],
+)
+def test_duckdb_flavor_formats_explain_without_postgres_only_options(sql: str, expected_header: str) -> None:
+    """Regression guard for the v0.22.1 DuckDB EXPLAIN fix: v0.22.0 made the *postgres* flavor of
+    `_quick_format_explain` emit `EXPLAIN (SETTINGS, SUMMARY, VERBOSE, ...)`, and DuckDB had no flavor of its own,
+    so its hint service formatted queries with the *postgres* flavor. DuckDB does not know these options, so every
+    EXPLAIN that PostBOUND sent to DuckDB failed. The *duckdb* flavor must keep the options DuckDB needs (JSON output,
+    and ANALYZE when requested) and leave out the Postgres-only ones.
+    """
+    query = parse(sql)
+
+    formatted = format_quick(query, flavor="duckdb")
+
+    header = formatted.splitlines()[0]
+    assert header == expected_header
+    assert not any(option in header for option in POSTGRES_ONLY_EXPLAIN_OPTIONS)

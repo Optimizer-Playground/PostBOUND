@@ -500,11 +500,41 @@ class DuckDBStatistics(StatisticsCatalog):
 
 def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> TableReference | None:
     tables = query.tables()
-    relname = scan_node.get("extra_info", {}).get("Table", "")
+    relname: str = scan_node.get("extra_info", {}).get("Table", "")
     if not relname:
         return None
 
-    candidate_tables = [tab for tab in tables if tab.full_name == relname]
+    # DuckDB reports fully qualified table names in the scan node, while the query might reference just the table name
+    # or a schema-qualified name. We try our best to match these differences.
+    # The code below is pretty ugly, but works for now ¯\_(ツ)_/¯
+    n_comps = relname.count(".")
+    match n_comps:
+        case 0:
+            candidate_tables = [tab for tab in tables if tab.full_name == relname]
+        case 1:
+            schema, name = relname.split(".")
+            needle = TableReference(name, schema=schema)
+            candidate_tables = [tab for tab in tables if tab.drop_alias() == needle]
+            if not candidate_tables:
+                needle = TableReference(name)
+                candidate_tables = [tab for tab in tables if tab.drop_alias() == needle]
+        case 2:
+            cat, schema, name = relname.split(".")
+            needle = TableReference(name, schema=schema, catalog=cat)
+            candidate_tables = [tab for tab in tables if tab.drop_alias() == needle]
+            if not candidate_tables:
+                needle = TableReference(name, schema=schema)
+                candidate_tables = [tab for tab in tables if tab.drop_alias() == needle]
+            if not candidate_tables:
+                needle = TableReference(name)
+                candidate_tables = [tab for tab in tables if tab.drop_alias() == needle]
+        case _:
+            warnings.warn(
+                f"Unexpected table format '{relname}'. Only binding based on final name component", stacklevel=2
+            )
+            needle = relname.split(".")[-1]
+            candidate_tables = [tab for tab in tables if tab.full_name == needle]
+
     if not candidate_tables:
         return None
     elif len(candidate_tables) == 1:
@@ -655,7 +685,7 @@ class DuckDBOptimizer(OptimizerInterface):
 
         raw_explain = result_set[1]
         parsed = json.loads(raw_explain)
-        return parse_duckdb_plan(parsed[0], query=query)
+        return parse_duckdb_plan(parsed, query=query)
 
     def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
         # Similar to the Postgres implementation of parse_plan(), we try to be graceful
@@ -814,7 +844,7 @@ class DuckDBHintService(HintService):
 
     def format_query(self, query: SqlQuery) -> str:
         # DuckDB uses the Postgres SQL dialect, so this part is easy..
-        return qal.format_quick(query, flavor="postgres")
+        return qal.format_quick(query, flavor="duckdb")
 
     def supports_hint(self, hint: PhysicalOperator | HintType) -> bool:
         return hint in {
