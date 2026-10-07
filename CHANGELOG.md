@@ -12,10 +12,10 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-## Version 0.22.1
+## Version 0.22.2
 
 **Due to the extensive changes of v0.22.0, we combine the changelog from v0.22.0
-and v0.22.1 here.**
+and later patches here.**
 
 PostBOUND v0.22.0 is one of the largest releases of the framework so far. With
 this release, we modernized key parts of the codebase, especially by eliminating
@@ -50,6 +50,15 @@ etc.).
   store result sets of expensive queries.
 - The `StatisticsCatalog` (formerly `DatabaseStatistics`) now has a `null_frac`
   statistic.
+- **v0.22.2:** `Histogram.frequency_below()` and `Histogram.frequency_above()` now
+  return a `float`, since the `"approx-uni"` strategy produces fractional estimates
+  (it already did, despite the `int` annotation). `"approx-uni"` guarantees
+  `frequency_below(v) + frequency_above(v) == n_rows`.
+- **v0.22.2:** The `"bound"` strategy of `Histogram` now always provides an
+  _upper bound_. It counts the entire bucket that contains the queried value, and
+  it is exact on bucket bounds. Previously, `frequency_below()` left that bucket
+  out and therefore provided a lower bound.
+- **v0.22.2:** `PreciseStatistics.histogram()` now excludes NULL values
 
 ## 💀 Breaking changes
 
@@ -156,10 +165,28 @@ Others:
 - Creating a negative `Cardinality` instance now properly raises an error.
 - Infinite `Cardinality` instances now compare properly.
 - `PostgresStatistics` now account for the NULL fraction.
-- Fixed DuckDB backend not being able to run any EXPLAIN queries.
-- Fixed `DuckDBOptimizer.analyze_plan()` crashing when parsing the
+- **v0.22.1:** Fixed DuckDB backend not being able to run any EXPLAIN queries.
+- **v0.22.1:** Fixed `DuckDBOptimizer.analyze_plan()` crashing when parsing the
   `EXPLAIN ANALYZE` output.
-- Scan nodes in DuckDB query plans are now bound to their tables.
+- **v0.22.1:** Scan nodes in DuckDB query plans are now bound to their tables.
+- **v0.22.2:** Fixed `Histogram.frequency_below()` with the `"approx-uni"` strategy
+  being off by one bucket. Values in the first bucket are now interpolated as well.
+- **v0.22.2:** Fixed `Histogram.frequency_above()` with the `"bound"` strategy
+  returning the number of rows _below_ the value. With `"approx-uni"`, it no longer
+  interpolates against the wrong bucket or raises an `IndexError` for values in
+  the last bucket.
+- **v0.22.2:** `Histogram` estimates now use the per-bucket frequencies instead
+  of the average bucket frequency. This fixes the estimates for non-equi-depth
+  histograms, such as the MCV-merged Postgres histograms.
+- **v0.22.2:** The `Histogram` constructor now rejects unknown `bucket_interpolation`
+  strategies with a `ValueError`, like the setter.
+- Fixed several construction bugs in `PreciseStatistics.histogram()`:
+    - rows after the last complete bucket are no longer dropped;
+    - columns with a single distinct value no longer crash;
+    - the NULL group no longer becomes a bucket bound;
+    - NULL rows no longer inflate the bucket size;
+    - `n_bins=0` (or a negative value) now raises a `ValueError` instead of a
+      `ZeroDivisionError`.
 
 ## ⚠️ Deprecations
 

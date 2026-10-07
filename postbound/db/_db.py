@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import bisect
 import collections
+import itertools
 import textwrap
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -1610,13 +1611,16 @@ class Histogram[T: _HistElem]:
 
     Currently, we only provide two high-level methods for cardinality estimation: `frequency_below` and `frequency_above`.
     The former estimates the number of elements that are less than or equal to a given value, while the latter estimates
-    the number of elements that are greater than a given value. If the queried value does not align perfectly with the
-    bucket bounds, the behavior depends on the selected `bucket_interpolation` strategy:
+    the number of elements that are greater than a given value. Both estimates are based on the cumulative frequencies of
+    the buckets, so equi-depth and arbitrary other bucketizations are handled alike. If the queried value lies on a
+    bucket bound, both estimates are exact. Otherwise, the behavior depends on the selected `bucket_interpolation`
+    strategy:
 
-    - "bound" is a conservative strategy. It *bounds* the frequency of the queried value by the frequency of the entire
-      bucket that contains it.
+    - "bound" is a conservative strategy. It *bounds* the frequency by counting the entire bucket that contains the
+      queried value, i.e. it always provides an *upper bound* on the true frequency.
     - "approx-uni" is a more aggressive strategy. It assumes that the values within each bucket are uniformly distributed
-      and uses a simple linear interpolation to estimate the frequency of the queried value.
+      and uses a simple linear interpolation to estimate which share of the bucket that contains the queried value lies
+      below the value. With this strategy, ``frequency_below(v) + frequency_above(v) == n_rows`` holds for every value.
 
     Histograms can be iterated over to access the individual (bucket bound, frequency) pairs. In addition, we provide
     *__getitem__* access to get the i-th bucket bound and its frequency.
@@ -1634,6 +1638,12 @@ class Histogram[T: _HistElem]:
     bucket_interpolation : Literal["approx-uni", "bound"], optional
         The strategy to estimate the frequency of values that fall into a bucket, but are not exactly on the bucket bounds.
         The default is "bound".
+
+    Raises
+    ------
+    ValueError
+        If `bounds` is empty, if `bounds` and `frequencies` differ in length, or if `bucket_interpolation` is not a
+        supported strategy.
     """
 
     def __init__(
@@ -1657,7 +1667,8 @@ class Histogram[T: _HistElem]:
         self._n_rows = sum(self._frequencies)
         self._lower = lower
         self._freq_per_bucket = self._n_rows // len(self._bounds)
-        self._bucket_interpolation = bucket_interpolation
+        self._cumulative_frequencies = [0, *itertools.accumulate(self._frequencies)]
+        self.bucket_interpolation = bucket_interpolation
 
     @property
     def bounds(self) -> Sequence[T]:
@@ -1707,22 +1718,34 @@ class Histogram[T: _HistElem]:
             )
         self._bucket_interpolation = strategy
 
-    def frequency_below(self, value: T) -> int:
+    def frequency_below(self, value: T) -> float:
         """Estimate the frequency of values that are less than or equal to a given value.
 
         If the value does not align exactly with the bucket bounds, the behavior depends on the selected
-        `bucket_interpolation` strategy. See the class documentation for details.
+        `bucket_interpolation` strategy. See the class documentation for details. Interpolated estimates are not
+        rounded and can therefore be fractional.
+
+        Raises
+        ------
+        ValueError
+            If the "approx-uni" strategy has to interpolate within a bucket, but the value is not numeric or temporal.
         """
-        upper_idx = bisect.bisect_right(self._bounds, value)
-        if upper_idx == 0:
+        if value < self._lower:
             return 0
-        elif upper_idx == len(self._bounds):
-            return self._n_rows
 
         if self._bucket_interpolation == "bound":
-            return upper_idx * self._freq_per_bucket
+            # value lies in bucket containing_idx (or on its upper bound), i.e. all later buckets are entirely > value
+            containing_idx = bisect.bisect_left(self._bounds, value)
+            if containing_idx == len(self._bounds):
+                return self._n_rows
+            return self._cumulative_frequencies[containing_idx + 1]
 
-        assert self._bucket_interpolation == "approx-uni"
+        # value lies in bucket upper_idx, i.e. all buckets before upper_idx are entirely <= value
+        upper_idx = bisect.bisect_right(self._bounds, value)
+        if upper_idx == len(self._bounds):
+            return self._n_rows
+
+        complete_buckets = self._cumulative_frequencies[upper_idx]
 
         if not isinstance(value, (int, float, date, datetime)):
             raise ValueError(
@@ -1731,44 +1754,32 @@ class Histogram[T: _HistElem]:
                 f"for histograms of type {type(value).__name__}."
             )
 
-        lower_idx = upper_idx - 1
+        lower_bound = self._bounds[upper_idx - 1] if upper_idx > 0 else self._lower
         upper_bound = self._bounds[upper_idx]
-        lower_bound = self._bounds[lower_idx]
         in_bucket_frac = (value - lower_bound) / (upper_bound - lower_bound)
-        return (lower_idx + in_bucket_frac) * self._freq_per_bucket
+        return complete_buckets + in_bucket_frac * self._frequencies[upper_idx]
 
-    def frequency_above(self, value: T) -> int:
+    def frequency_above(self, value: T) -> float:
         """Estimate the frequency of values that are greater than a given value.
 
         Due to the way we model histograms, we cannot directly estimate the frequency of values greater or equal to a given
         value, but only the frequency of values that are strictly greater than it.
 
         If the value does not align exactly with the bucket bounds, the behavior depends on the selected
-        `bucket_interpolation` strategy. See the class documentation for details.
+        `bucket_interpolation` strategy. See the class documentation for details. Interpolated estimates are not
+        rounded and can therefore be fractional.
+
+        Raises
+        ------
+        ValueError
+            If the "approx-uni" strategy has to interpolate within a bucket, but the value is not numeric or temporal.
         """
-        lower_idx = bisect.bisect_left(self._bounds, value)
-        if lower_idx == 0:
-            return self._n_rows
-        elif lower_idx == len(self._bounds):
-            return 0
+        if self._bucket_interpolation == "approx-uni":
+            return self._n_rows - self.frequency_below(value)
 
-        if self._bucket_interpolation == "bound":
-            return lower_idx * self._freq_per_bucket
-
-        assert self._bucket_interpolation == "approx-uni"
-
-        if not isinstance(value, (int, float, date, datetime)):
-            raise ValueError(
-                "Cannot estimate frequency within bucket. "
-                f"Strategy '{self._bucket_interpolation}' is unknown or unsupported "
-                f"for histograms of type {type(value).__name__}."
-            )
-
-        upper_idx = lower_idx + 1
-        upper_bound = self._bounds[upper_idx]
-        lower_bound = self._bounds[lower_idx]
-        in_bucket_frac = (value - lower_bound) / (upper_bound - lower_bound)
-        return (upper_idx + in_bucket_frac) * self._freq_per_bucket
+        # all buckets before upper_idx are entirely <= value, but the bucket containing value might hold larger values
+        upper_idx = bisect.bisect_right(self._bounds, value)
+        return self._n_rows - self._cumulative_frequencies[upper_idx]
 
     def __len__(self) -> int:
         return len(self._bounds)

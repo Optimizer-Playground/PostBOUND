@@ -31,12 +31,16 @@ from ._db import Database, Histogram, HistogramApproximation, MostCommonValues, 
 
 
 def _infer_histogram_bounds[T](
-    frequencies: Sequence[tuple[T, int]], *, n_bins: int, n_rows: int
+    frequencies: Sequence[tuple[T, int]], *, n_bins: int
 ) -> tuple[T, Sequence[T], Sequence[int]]:
-    """Infer the bucket bounds and frequencies for a histogram from a list of (value, frequency) pairs."""
+    """Infer the bucket bounds and frequencies for a histogram from a list of (value, frequency) pairs.
+
+    The pairs must be sorted by value and must not contain NULL values.
+    """
     if not frequencies:
         raise ValueError("Cannot infer histogram bounds from empty frequency list")
 
+    n_rows = sum(freq for _, freq in frequencies)
     bucket_size = n_rows // n_bins
 
     bounds: list[T] = []
@@ -49,6 +53,11 @@ def _infer_histogram_bounds[T](
         bounds.append(value)
         buckets.append(cumulative_freq)
         cumulative_freq = 0
+
+    if cumulative_freq:
+        # the remaining values did not fill an entire bucket, but they still need to be part of the histogram
+        bounds.append(frequencies[-1][0])
+        buckets.append(cumulative_freq)
 
     return frequencies[0][0], bounds, buckets
 
@@ -188,7 +197,7 @@ class PreciseStatistics(StatisticsCatalog):
         limit_clause = Limit(limit=k) if k is not None and k > 0 else None
         sql = as_query(select_clause, from_clause, group_clause, order_clause, limit_clause)
 
-        result_set = self._db.execute_query(sql)
+        result_set = self._db.execute_query(sql, raw=True)
         return MostCommonValues(result_set)
 
     def histogram(
@@ -198,10 +207,18 @@ class PreciseStatistics(StatisticsCatalog):
 
         In addition to `StatisticsCatalog.histogram`, this implementation allows to customize the number of buckets via
         `n_bins`. Since the histogram has to be constructed from scratch, `n_bins` is required and passing *None*
-        raises a `ValueError`.
+        raises a `ValueError`. NULL values are not part of the histogram (use `null_frac` for them).
+
+        Since a value is never split across buckets, the histogram is only approximately equi-depth: a very frequent
+        value fills its bucket beyond the target size, and fewer than `n_bins` buckets might be created.
+
+        Raises
+        ------
+        ValueError
+            If `n_bins` is *None* or not positive, or if the column does not contain any non-NULL values.
         """
-        if n_bins is None:
-            raise ValueError("n_bins must be set for emulated histogram")
+        if n_bins is None or n_bins < 1:
+            raise ValueError(f"n_bins must be a positive number for emulated histogram, not {n_bins}")
 
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
@@ -210,13 +227,13 @@ class PreciseStatistics(StatisticsCatalog):
 
         select_clause = Select([Projection.column(column), Projection.create_count(column, target_name="n")])
         from_clause = From.create_for(column.table)
+        where_clause = Where(as_predicate(column, "IS NOT NULL"))
         group_clause = GroupBy.create_for(column)
         order_clause = OrderBy.create_for(column)
-        sql = as_query(select_clause, from_clause, group_clause, order_clause)
+        sql = as_query(select_clause, from_clause, where_clause, group_clause, order_clause)
 
-        result_set = self._db.execute_query(sql)
-        n_rows = self.total_rows(column.table)
-        lo, bounds, buckets = _infer_histogram_bounds(result_set, n_bins=n_bins, n_rows=int(n_rows))
+        result_set = self._db.execute_query(sql, raw=True)
+        lo, bounds, buckets = _infer_histogram_bounds(result_set, n_bins=n_bins)
 
         return Histogram(
             bounds,

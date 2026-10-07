@@ -5,6 +5,10 @@ the behaviours under test are about whether DuckDB *accepts* the SQL that PostBO
 share the backend's assumptions about DuckDB's dialect and could only confirm a bug, not catch it. The synthetic
 schema is created per test, so nothing is downloaded or written to disk.
 
+`PreciseStatistics.histogram` is run here as well, because its SQL and the shape of the result set (in particular
+how NULLs are grouped and sorted) are decided by the engine. Its decision logic is covered offline in
+`tests/unit/test_db_stats.py`, which scripts the result sets observed here.
+
 The pure formatting part of the EXPLAIN regression (the *duckdb* flavor of `format_quick`) is covered offline in
 `tests/unit/test_qal_formatter.py`; the parsing of EXPLAIN output and the scan-to-table binding in
 `tests/unit/test_duckdb.py`.
@@ -17,7 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from postbound import ScanOperator, TableReference, parser, transform
+from postbound import ColumnReference, ScanOperator, TableReference, parser, transform
+from postbound.db import Histogram, PreciseStatistics
 from postbound.duckdb import DuckDBDatabase
 
 pytestmark = pytest.mark.embedded
@@ -40,6 +45,25 @@ def duckdb_instance() -> Iterator[DuckDBDatabase]:
     instance.execute_query("INSERT INTO r VALUES (1, 10), (2, 20), (3, 30)")
     yield instance
     instance.close()
+
+
+def create_column(instance: DuckDBDatabase, values: list[int | None]) -> ColumnReference:
+    """Fills a fresh table `h(v)` with `values` and returns the reference to its column."""
+    instance.execute_query("CREATE TABLE h (v INTEGER)")
+    rows = ", ".join("(NULL)" if value is None else f"({value})" for value in values)
+    instance.execute_query(f"INSERT INTO h VALUES {rows}")
+    return ColumnReference("v", TableReference("h"))
+
+
+# -- PreciseStatistics.histogram ----------------------------------------------------------------------------
+
+
+def test_precise_histogram_builds_equi_depth_buckets_on_duckdb(duckdb_instance: DuckDBDatabase) -> None:
+    column = create_column(duckdb_instance, [1, 2, 3, 4, 5, 6, 7, 8])
+
+    hist = PreciseStatistics(duckdb_instance).histogram(column, n_bins=4)
+
+    assert hist == Histogram([2, 4, 6, 8], [2, 2, 2, 2], lower=1, bucket_interpolation="approx-uni")
 
 
 # -- regression tests --------------------------------------------------------------------------------------
@@ -105,3 +129,28 @@ def test_query_plan_binds_scan_nodes_to_their_tables(duckdb_instance: DuckDBData
 
     assert plan.base_table == TableReference("r")
     assert plan.tables() == {TableReference("r")}
+
+
+def test_precise_histogram_excludes_nulls_on_duckdb(duckdb_instance: DuckDBDatabase) -> None:
+    """Regression guard for the unreleased histogram fixes: DuckDB returns the NULL group of the histogram's GROUP BY
+    query last as ``(None, 0)``. With fewer rows than bins, `_infer_histogram_bounds` turned it into the upper bound of
+    the histogram, and every estimate at or above the largest value raised a `TypeError` comparing with *None*.
+    """
+    column = create_column(duckdb_instance, [1, 1, 2, 3, None, None])
+
+    hist = PreciseStatistics(duckdb_instance).histogram(column)
+
+    assert list(hist) == [(1, 2), (2, 1), (3, 1)]
+    assert hist.frequency_below(5) == 4
+
+
+def test_precise_histogram_of_a_single_distinct_value_on_duckdb(duckdb_instance: DuckDBDatabase) -> None:
+    """Regression guard for the unreleased histogram fixes: the one-row result set was simplified to a plain tuple
+    before the bounds were inferred, which crashed. See `test_histogram_of_a_column_with_a_single_distinct_value` in
+    `tests/unit/test_db_stats.py`.
+    """
+    column = create_column(duckdb_instance, [7, 7])
+
+    hist = PreciseStatistics(duckdb_instance).histogram(column)
+
+    assert list(hist) == [(7, 2)]
