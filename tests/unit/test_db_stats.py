@@ -62,7 +62,10 @@ def test_histogram_uses_uniform_approximation_by_default() -> None:
 def test_histogram_passes_the_interpolation_strategy_on() -> None:
     db = histogram_db([(1, 5), (2, 5)])
 
-    assert PreciseStatistics(db).histogram(R_A, n_bins=2, interpolation="bound").bucket_interpolation == "bound"
+    assert (
+        PreciseStatistics(db).histogram(R_A, n_bins=2, interpolation="bound-lower").bucket_interpolation
+        == "bound-lower"
+    )
 
 
 def test_histogram_puts_every_value_into_its_own_bucket_if_there_are_fewer_rows_than_bins() -> None:

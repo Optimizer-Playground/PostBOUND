@@ -23,8 +23,7 @@ import textwrap
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import Any, Literal, Protocol, overload, runtime_checkable
+from typing import Any, Literal, Protocol, get_args, overload, runtime_checkable
 
 import networkx as nx
 
@@ -1590,8 +1589,21 @@ class MostCommonValues[T]:
         return str(self.mcvs)
 
 
-type HistogramApproximation = Literal["approx-uni", "bound"]
-"""The strategy to estimate the frequency of values that are not exactly on the bucket bounds of a histogram."""
+HistogramApproximation = Literal["approx-uni", "bound-lower", "bound-upper", "bound"]
+"""The strategy to estimate the frequency of values that are not exactly on the bucket bounds of a histogram.
+
+See `Histogram` for the semantics of the individual strategies.
+
+.. deprecated:: 0.22.3
+    "bound" is a deprecated alias for "bound_upper" and will be removed in version 0.23.0.
+"""
+
+_MirroredStrategies: dict[HistogramApproximation, HistogramApproximation] = {
+    "approx-uni": "approx-uni",
+    "bound-lower": "bound-upper",
+    "bound-upper": "bound-lower",
+}
+"""Maps each strategy to the one that yields its complement, i.e. ``rows > v == n_rows - rows <= v``."""
 
 
 class _HistElem[T](Protocol):
@@ -1613,14 +1625,20 @@ class Histogram[T: _HistElem]:
     The former estimates the number of elements that are less than or equal to a given value, while the latter estimates
     the number of elements that are greater than a given value. Both estimates are based on the cumulative frequencies of
     the buckets, so equi-depth and arbitrary other bucketizations are handled alike. If the queried value lies on a
-    bucket bound, both estimates are exact. Otherwise, the behavior depends on the selected `bucket_interpolation`
-    strategy:
+    bucket bound, both estimates are exact. Otherwise, the behavior depends on the interpolation strategy. Each
+    histogram has a default strategy (`bucket_interpolation`), which can be overridden for a single estimate via the
+    `interpolation` parameter of `frequency_below` and `frequency_above`. The following strategies are supported:
 
-    - "bound" is a conservative strategy. It *bounds* the frequency by counting the entire bucket that contains the
-      queried value, i.e. it always provides an *upper bound* on the true frequency.
+    - "bound-lower" is a conservative strategy. It *bounds* the frequency by leaving out the entire bucket that contains
+      the queried value, i.e. it always provides a *lower bound* on the true frequency.
+    - "bound-upper" is the dual conservative strategy. It *bounds* the frequency by counting the entire bucket that
+      contains the queried value, i.e. it always provides an *upper bound* on the true frequency.
     - "approx-uni" is a more aggressive strategy. It assumes that the values within each bucket are uniformly distributed
       and uses a simple linear interpolation to estimate which share of the bucket that contains the queried value lies
       below the value. With this strategy, ``frequency_below(v) + frequency_above(v) == n_rows`` holds for every value.
+
+    Since the `lower` bound of the histogram is part of the first bucket (it usually is the minimum value of the column),
+    a query for `lower` itself is treated like any other value within the first bucket.
 
     Histograms can be iterated over to access the individual (bucket bound, frequency) pairs. In addition, we provide
     *__getitem__* access to get the i-th bucket bound and its frequency.
@@ -1635,9 +1653,12 @@ class Histogram[T: _HistElem]:
         The frequencies of the buckets. The i-th element in this list corresponds to the i-th bucket.
     lower : T
         The lower bound of the first bucket. This is required to be less than or equal to the first element in `bounds`.
-    bucket_interpolation : Literal["approx-uni", "bound"], optional
-        The strategy to estimate the frequency of values that fall into a bucket, but are not exactly on the bucket bounds.
-        The default is "bound".
+    bucket_interpolation : HistogramApproximation, optional
+        The default strategy to estimate the frequency of values that fall into a bucket, but are not exactly on the
+        bucket bounds. The default is "approx-uni".
+
+        .. deprecated:: 0.22.3
+            "bound" is a deprecated alias for "bound-upper" and will be removed in version 0.23.0.
 
     Raises
     ------
@@ -1652,8 +1673,11 @@ class Histogram[T: _HistElem]:
         frequencies: Iterable[int],
         *,
         lower: T,
-        bucket_interpolation: HistogramApproximation = "bound",
+        bucket_interpolation: HistogramApproximation = "approx-uni",
     ) -> None:
+        if bucket_interpolation not in get_args(HistogramApproximation):
+            raise ValueError(f"Unsupported bucket interpolation strategy: {bucket_interpolation}.")
+
         self._bounds = list(bounds)
         self._frequencies = list(frequencies)
         if not self.bounds:
@@ -1668,7 +1692,8 @@ class Histogram[T: _HistElem]:
         self._lower = lower
         self._freq_per_bucket = self._n_rows // len(self._bounds)
         self._cumulative_frequencies = [0, *itertools.accumulate(self._frequencies)]
-        self.bucket_interpolation = bucket_interpolation
+        bucket_interpolation = "bound-upper" if bucket_interpolation == "bound" else bucket_interpolation
+        self._bucket_interpolation = bucket_interpolation
 
     @property
     def bounds(self) -> Sequence[T]:
@@ -1706,34 +1731,48 @@ class Histogram[T: _HistElem]:
 
     @property
     def bucket_interpolation(self) -> HistogramApproximation:
-        """Get the strategy to estimate the frequency of values that are not exactly on the bucket bounds."""
+        """Get the default strategy to estimate the frequency of values that are not exactly on the bucket bounds.
+
+        The strategy can be overridden for individual estimates, see `frequency_below` and `frequency_above`.
+        """
         return self._bucket_interpolation
 
     @bucket_interpolation.setter
     def bucket_interpolation(self, strategy: HistogramApproximation) -> None:
-        if strategy not in ("approx-uni", "bound"):
-            raise ValueError(
-                f"Unsupported bucket interpolation strategy: {strategy}. "
-                "Supported strategies are 'approx-uni' and 'bound'."
-            )
+        strategy = "bound-upper" if strategy == "bound" else strategy
+        if strategy not in get_args(HistogramApproximation):
+            raise ValueError(f"Unsupported bucket interpolation strategy: {strategy}.")
         self._bucket_interpolation = strategy
 
-    def frequency_below(self, value: T) -> float:
+    def cardinality(self) -> Cardinality:
+        """Get the cardinality of the histogram, i.e. the number of rows that are represented by it."""
+        return Cardinality.of(self._n_rows)
+
+    def frequency_below(self, value: T, *, interpolation: HistogramApproximation | None = None) -> float:
         """Estimate the frequency of values that are less than or equal to a given value.
 
-        If the value does not align exactly with the bucket bounds, the behavior depends on the selected
-        `bucket_interpolation` strategy. See the class documentation for details. Interpolated estimates are not
-        rounded and can therefore be fractional.
+        Parameters
+        ----------
+        value : T
+            The value to estimate the frequency for.
+        interpolation : HistogramApproximation, optional
+            The strategy to use for this estimate only, if the value does not align exactly with the bucket bounds. If
+            omitted, the histogram's default `bucket_interpolation` is used. See the class documentation for details.
 
-        Raises
-        ------
-        ValueError
-            If the "approx-uni" strategy has to interpolate within a bucket, but the value is not numeric or temporal.
+            .. deprecated:: 0.22.3
+                "bound" is a deprecated alias for "bound-upper" and will be removed in version 0.23.0.
+
+        Returns
+        -------
+        float
+            The estimated number of rows. Interpolated estimates are not rounded and can therefore be fractional.
         """
+        interpolation = "bound-upper" if interpolation == "bound" else interpolation
+        strategy = self._bucket_interpolation if interpolation is None else interpolation
         if value < self._lower:
             return 0
 
-        if self._bucket_interpolation == "bound":
+        if strategy == "bound-upper":
             # value lies in bucket containing_idx (or on its upper bound), i.e. all later buckets are entirely > value
             containing_idx = bisect.bisect_left(self._bounds, value)
             if containing_idx == len(self._bounds):
@@ -1746,40 +1785,43 @@ class Histogram[T: _HistElem]:
             return self._n_rows
 
         complete_buckets = self._cumulative_frequencies[upper_idx]
-
-        if not isinstance(value, (int, float, date, datetime)):
-            raise ValueError(
-                "Cannot estimate frequency within bucket. "
-                f"Strategy '{self._bucket_interpolation}' is unknown or unsupported "
-                f"for histograms of type {type(value).__name__}."
-            )
+        if strategy == "bound-lower":
+            return complete_buckets
 
         lower_bound = self._bounds[upper_idx - 1] if upper_idx > 0 else self._lower
         upper_bound = self._bounds[upper_idx]
         in_bucket_frac = (value - lower_bound) / (upper_bound - lower_bound)
         return complete_buckets + in_bucket_frac * self._frequencies[upper_idx]
 
-    def frequency_above(self, value: T) -> float:
+    def frequency_above(self, value: T, *, interpolation: HistogramApproximation | None = None) -> float:
         """Estimate the frequency of values that are greater than a given value.
 
         Due to the way we model histograms, we cannot directly estimate the frequency of values greater or equal to a given
         value, but only the frequency of values that are strictly greater than it.
 
-        If the value does not align exactly with the bucket bounds, the behavior depends on the selected
-        `bucket_interpolation` strategy. See the class documentation for details. Interpolated estimates are not
-        rounded and can therefore be fractional.
+        Parameters
+        ----------
+        value : T
+            The value to estimate the frequency for.
+        interpolation : HistogramApproximation, optional
+            The strategy to use for this estimate only, if the value does not align exactly with the bucket bounds. If
+            omitted, the histogram's default `bucket_interpolation` is used. See the class documentation for details.
 
-        Raises
-        ------
-        ValueError
-            If the "approx-uni" strategy has to interpolate within a bucket, but the value is not numeric or temporal.
+            .. deprecated:: 0.22.3
+                "bound" is a deprecated alias for "bound-upper" and will be removed in version 0.23.0.
+
+        Returns
+        -------
+        float
+            The estimated number of rows. Interpolated estimates are not rounded and can therefore be fractional.
         """
-        if self._bucket_interpolation == "approx-uni":
-            return self._n_rows - self.frequency_below(value)
+        strategy = "bound-upper" if interpolation == "bound" else interpolation
+        strategy = self._bucket_interpolation if strategy is None else strategy
 
-        # all buckets before upper_idx are entirely <= value, but the bucket containing value might hold larger values
-        upper_idx = bisect.bisect_right(self._bounds, value)
-        return self._n_rows - self._cumulative_frequencies[upper_idx]
+        # The rows > value are exactly the rows that are not <= value. To keep the direction of a bound intact, we need
+        # to estimate the rows <= value with the mirrored strategy: an upper bound of the rows > value is given by a
+        # lower bound of the rows <= value, and vice versa.
+        return self._n_rows - self.frequency_below(value, interpolation=_MirroredStrategies[strategy])
 
     def __len__(self) -> int:
         return len(self._bounds)
