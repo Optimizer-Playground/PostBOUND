@@ -2,11 +2,14 @@
 #
 #     uv sync && uv run pre-commit install
 #
+# Re-run `pre-commit install` whenever default_install_hook_types changes, otherwise the new
+# hook types are not wired into .git/hooks.
+#
 # The ruff and ty hooks intentionally shell out to `uv run` instead of using the upstream
 # ruff-pre-commit / ty-pre-commit repositories. Those would pin their own tool versions via
 # `rev:`, which could drift from the pins in pyproject.toml. Going through uv means the hook
 # and your editor use the exact same binary from uv.lock.
-default_install_hook_types: [pre-commit, pre-push]
+default_install_hook_types: [pre-commit, pre-merge-commit, pre-push]
 minimum_pre_commit_version: "4.0.0"
 
 repos:
@@ -58,17 +61,21 @@ repos:
         stages: [pre-commit, pre-push]
 
       - id: tests
-        name: tests (tier 0)
-        # Only the offline tier runs here: pure code plus test doubles, no database and no network.
-        # It has the same contract as the ruff and ty hooks -- fast, deterministic and dependency-free --
+        name: tests
+        # tools/hook-tests.py picks the tier per hook:
+        #   - pushes run tier 0 (offline: pure code plus test doubles, no database and no network),
+        #   - commits and merge commits on main, and pushes that update main, run tier 1 (+ embedded
+        #     engines: DuckDB in-memory, recorded transcripts),
+        #   - commits on other branches run no tests.
+        # Both tiers share the contract of the ruff and ty hooks -- fast, deterministic and dependency-free --
         # because a hook slow enough to tempt `--no-verify` is worse than no hook at all. The higher tiers
         # need a provisioned server and are run deliberately:
-        #     uv run pytest --tier 1    # + embedded engines (DuckDB in-memory, recorded transcripts)
         #     uv run pytest --tier 2    # + a live database server
         #     uv run pytest --tier 3    # + slow workload sweeps
-        entry: uv run pytest --tier 0
+        # Fast-forward merges create no commit and hence trigger no hook; they are covered by the push.
+        entry: uv run python -m tools.hook-tests
         language: system
         pass_filenames: false
         always_run: true
         require_serial: true
-        stages: [pre-push]
+        stages: [pre-commit, pre-merge-commit, pre-push]
