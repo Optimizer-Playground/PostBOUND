@@ -4094,6 +4094,21 @@ class SimpleFilter(AbstractPredicate):
     def operation(self) -> BinaryOperator | UnaryOperator:
         """Get the SQL operation that is used for the filter (e.g. *IN* or ``<>``).
 
+        .. deprecated:: 0.22.2
+            `operation` is deprecated in favor of `operator` which is the name that is consistent with the rest of the
+            API.
+
+        Returns
+        -------
+        BinaryOperator | UnaryOperator
+            the operator. This cannot be *EXISTS*, since subqueries cannot be represented in simplified views.
+        """
+        return self._operation
+
+    @property
+    def operator(self) -> BinaryOperator | UnaryOperator:
+        """Get the SQL operator that is used for the filter (e.g. *IN* or ``<>``).
+
         Returns
         -------
         BinaryOperator | UnaryOperator
@@ -4409,6 +4424,14 @@ class SimpleJoin(AbstractPredicate):
             return self.rhs if self.lhs == other else self.lhs
         else:
             raise TypeError("Unexpected join partner type: " + str(type(other)))
+
+    def column_of(self, table: TableReference) -> ColumnReference | None:
+        """Provides the join column of the given table."""
+        if self.lhs.belongs_to(table):
+            return self.lhs
+        if self.rhs.belongs_to(table):
+            return self.rhs
+        return None
 
     def is_compound(self) -> bool:
         return False
