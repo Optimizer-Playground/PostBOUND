@@ -674,6 +674,22 @@ def test_as_qep_scales_estimated_cardinality_below_a_parallel_gather() -> None:
     assert plan.estimated_cardinality == Cardinality(70789)
 
 
+def test_as_qep_does_not_scale_estimated_cardinality_below_a_sequential_node() -> None:
+    """Regression test: a node without a "Workers Planned" entry has NaN planned workers. The cardinality adjustment
+    for its children used to be derived as (planned workers + 1) without accounting for that, which turned every
+    child estimate into NaN.
+    """
+    node = PostgresExplain(NESTED_LOOP_JOIN[0]["Plan"])
+    assert math.isnan(node.planned_workers)
+
+    plan = node.as_qep()
+
+    outer_child, inner_child = plan.children
+    assert outer_child.estimated_cardinality == Cardinality(1)
+    assert inner_child.estimated_cardinality == Cardinality(5)
+    assert plan.estimated_cardinality == Cardinality(5)
+
+
 def test_as_qep_reads_parallel_workers_from_workers_planned() -> None:
     plan = PostgresExplain(PARALLEL_GATHER[0]["Plan"]).as_qep()
 

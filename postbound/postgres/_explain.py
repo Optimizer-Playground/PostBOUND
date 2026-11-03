@@ -374,7 +374,8 @@ class PostgresExplain:
         # planned workers is 0 for sequential execution, otherwise it contains the number of additional workers
         # if we already have a card adjustment, we are alrady in a parallel subplan so we re-use the existing adjustment
         # otherwise, the total adjustment is planned_workers + 1 to account for the main process
-        child_adjustment = card_adjustment if card_adjustment > 1 else (self.planned_workers + 1)
+        planned_workers = self.planned_workers if not math.isnan(self.planned_workers) else 0
+        child_adjustment = card_adjustment if card_adjustment > 1 else (planned_workers + 1)
 
         for child in self.children:
             parent_rel = child.parent_relationship
