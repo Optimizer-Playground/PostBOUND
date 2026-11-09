@@ -11,7 +11,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 from collections.abc import Iterable, Sequence
-from typing import ClassVar
+from typing import ClassVar, override
 
 import pytest
 
@@ -32,17 +32,20 @@ class MockSchemaLookup(pb.db.DatabaseSchema):
     def __init__(self) -> None:
         super().__init__(None, prep_placeholder="%s", default_schema="public", default_catalog="mock")
 
+    @override
     def tables(
         self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
     ) -> set[TableReference]:
         return set(MockSchemaLookup.LookupData.values())
 
+    @override
     def lookup_column(
         self, column: ColumnReference | str, candidate_tables: Iterable[TableReference], *, expect_match: bool = False
     ) -> TableReference:
         column = column.name if isinstance(column, ColumnReference) else column
         return MockSchemaLookup.LookupData[column]
 
+    @override
     def columns(self, table: TableReference | str) -> Sequence[BoundColumnReference]:
         table = TableReference(table) if isinstance(table, str) else table
         if table == TableReference("r"):
@@ -353,6 +356,7 @@ class ParserTests(regression_suite.QueryTestCase):
 @pytest.mark.live_db
 @pytest.mark.slow
 class JobWorkloadTests(regression_suite.DatabaseTestCase):
+    @override
     def setUp(self):
         self.db = pb.postgres.connect(config_file=f"{pg_connect_dir}/.psycopg_connection_job")
 
@@ -373,6 +377,7 @@ class JobWorkloadTests(regression_suite.DatabaseTestCase):
 @pytest.mark.live_db
 @pytest.mark.slow
 class StatsWorkloadTests(regression_suite.DatabaseTestCase):
+    @override
     def setUp(self):
         self.db = pb.postgres.connect(config_file=f"{pg_connect_dir}/.psycopg_connection_stats")
 

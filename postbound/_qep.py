@@ -6,7 +6,7 @@ import math
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Number
-from typing import Any, Literal
+from typing import Any, Literal, override
 
 from . import util
 from ._core import (
@@ -146,15 +146,19 @@ class SortKey:
     def __contains__(self, item: object) -> bool:
         return self.is_compatible_with(item) if isinstance(item, (ColumnReference, SortKey)) else False
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self._members == other._members and self._ascending == other._ascending
 
+    @override
     def __hash__(self) -> int:
         return hash((self._members, self._ascending))
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         suffix = "" if self.ascending else " DESC"
         if len(self._members) == 1:
@@ -379,6 +383,7 @@ class PlanParams:
         params = object.__getattribute__(self, "_params")
         return key in params
 
+    @override
     def __getattribute__(self, name: str) -> Any:
         params = object.__getattribute__(self, "_params")
         if name == "_params":
@@ -387,6 +392,7 @@ class PlanParams:
             return params[name]
         return object.__getattribute__(self, name)
 
+    @override
     def __setattr__(self, name, value) -> None:
         if name == "_params":
             return object.__setattr__(self, name, value)
@@ -399,9 +405,11 @@ class PlanParams:
     def __setitem__(self, key: str, value: Any) -> None:
         self._params[key] = value
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return str(self._params)
 
@@ -524,6 +532,7 @@ class PlanEstimates:
         params = object.__getattribute__(self, "_params")
         return key in params
 
+    @override
     def __getattribute__(self, name: str) -> Any:
         params = object.__getattribute__(self, "_params")
         if name == "_params":
@@ -532,6 +541,7 @@ class PlanEstimates:
             return params[name]
         return object.__getattribute__(self, name)
 
+    @override
     def __setattr__(self, name, value) -> None:
         if name == "_params":
             return object.__setattr__(self, name, value)
@@ -544,9 +554,11 @@ class PlanEstimates:
     def __setitem__(self, key: str, value: Any) -> None:
         self._params[key] = value
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return str(self._params)
 
@@ -696,6 +708,7 @@ class PlanMeasures:
         params = object.__getattribute__(self, "_params")
         return key in params
 
+    @override
     def __getattribute__(self, name: str) -> Any:
         params = object.__getattribute__(self, "_params")
         if name == "_params":
@@ -704,6 +717,7 @@ class PlanMeasures:
             return params[name]
         return object.__getattribute__(self, name)
 
+    @override
     def __setattr__(self, name, value) -> None:
         if name == "_params":
             return object.__setattr__(self, name, value)
@@ -719,9 +733,11 @@ class PlanMeasures:
     def __bool__(self) -> bool:
         return any(not math.isnan(v) if isinstance(v, Number) else (v is not None) for v in self._params.values())
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return str(self._params)
 
@@ -2007,6 +2023,7 @@ class QueryPlan:
         if self.subplan:
             yield from self.subplan.root
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -2015,12 +2032,15 @@ class QueryPlan:
             and self._children == other._children
         )
 
+    @override
     def __hash__(self) -> int:
         return hash((self.node_type, self.base_table, self._children))
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         normalized_node_type = self.node_type.replace(" ", "")
         if self.base_table:

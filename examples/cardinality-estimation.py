@@ -2,6 +2,7 @@ import argparse
 import random
 from collections.abc import Iterable
 from pathlib import Path
+from typing import override
 
 from tqdm import tqdm
 
@@ -15,6 +16,7 @@ class RandomEstimator(pb.CardinalityEstimator):
         self._optimizer = self._database.optimizer()
         self._dev = deviation
 
+    @override
     def calculate_estimate(
         self, query: pb.SqlQuery, intermediate: pb.TableReference | Iterable[pb.TableReference]
     ) -> pb.Cardinality:

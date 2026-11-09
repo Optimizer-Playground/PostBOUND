@@ -1,6 +1,7 @@
 import argparse
 import random
 from pathlib import Path
+from typing import override
 
 from tqdm import tqdm
 
@@ -8,6 +9,7 @@ import postbound as pb
 
 
 class RandomJoinOrder(pb.JoinOrdering):
+    @override
     def optimize_join_order(self, query: pb.SqlQuery) -> pb.JoinTree:
         if not pb.qal.is_select_query(query):
             raise pb.OptimizationError("Expected a SELECT query")
@@ -23,6 +25,7 @@ class RandomJoinOrder(pb.JoinOrdering):
 
         return join_tree
 
+    @override
     def pre_check(self) -> pb.validation.OptimizationPreCheck:
         return pb.validation.SPJCheck()
 

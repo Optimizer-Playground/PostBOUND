@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, override
 
 import natsort
 import numpy as np
@@ -307,9 +307,11 @@ class QueryPreparation:
             "preparatory_statements": self.preparatory_stmts,
         }
 
+    @override
     def __repr__(self) -> str:
         return f"QueryPreparation(output={self.output}, projection={self.projection}, prewarm={self.prewarm}, preparatory_statements={self.preparatory_stmts})"
 
+    @override
     def __str__(self) -> str:
         return repr(self)
 
@@ -874,6 +876,7 @@ class _ResultSample:
     def __len__(self) -> int:
         return self.num_executions()
 
+    @override
     def __str__(self) -> str:
         reps = self.num_executions()
         return f"{self.label} ({reps} / {self._max_query_reps})"

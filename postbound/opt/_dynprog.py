@@ -6,6 +6,7 @@ import math
 import warnings
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from typing import override
 
 from .. import transform, util
 from .._core import (
@@ -139,6 +140,7 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
         self._scan_ops = supported_scan_ops
         self._join_ops = supported_join_ops
 
+    @override
     def generate_execution_plan(self, query, *, cost_model, cardinality_estimator) -> QueryPlan:
         self.predicates = query.predicates()
         cost_model.initialize(self._target_db, query)
@@ -159,6 +161,7 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
         self.predicates = None
         return final_plan
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return merge_checks(
             CrossProductPreCheck(),
@@ -169,6 +172,7 @@ class DynamicProgrammingEnumerator(PlanEnumerator):
             SetOperationsPreCheck(),
         )
 
+    @override
     def describe(self) -> jsondict:
         return {
             "name": "dynamic_programming",
@@ -461,15 +465,19 @@ class RelOptInfo:
 
         return item < self.intermediate
 
+    @override
     def __hash__(self) -> int:
         return hash(self.intermediate)
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, RelOptInfo) and self.intermediate == other.intermediate
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         tables = ", ".join(sorted(t.identifier() for t in self.intermediate))
         return f"{{{tables}}}"
@@ -624,6 +632,7 @@ class PostgresDynProg(PlanEnumerator):
 
         self._max_workers = int(self.target_db.config["max_parallel_workers_per_gather"])
 
+    @override
     def generate_execution_plan(self, query, *, cost_model, cardinality_estimator) -> QueryPlan:
         self.query = transform.add_ec_predicates(query)
         self.predicates = self.query.predicates()
@@ -665,6 +674,7 @@ class PostgresDynProg(PlanEnumerator):
         self.cardinality_estimator = None
         return cheapest_plan
 
+    @override
     def describe(self) -> jsondict:
         return {
             "name": "dynamic_programming",
@@ -674,6 +684,7 @@ class PostgresDynProg(PlanEnumerator):
             "database_system": self.target_db.describe(),
         }
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return merge_checks(
             CrossProductPreCheck(),

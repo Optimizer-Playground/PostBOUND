@@ -2,6 +2,7 @@ import argparse
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from typing import override
 
 import postbound as pb
 
@@ -11,6 +12,7 @@ class DataDrivenCardinalityEstimator(pb.CardinalityEstimator):
         super().__init__()
         self._rel_sizes: dict[pb.TableReference, pb.Cardinality] = {}
 
+    @override
     def calculate_estimate(
         self, query: pb.SqlQuery, intermediate: pb.TableReference | Iterable[pb.TableReference]
     ) -> pb.Cardinality:
@@ -21,6 +23,7 @@ class DataDrivenCardinalityEstimator(pb.CardinalityEstimator):
         base_table = intermediate[0]
         return self._rel_sizes.get(base_table.drop_alias(), pb.Cardinality.unknown())
 
+    @override
     def generate_plan_parameters(
         self,
         query: pb.SqlQuery,
@@ -37,6 +40,7 @@ class DataDrivenCardinalityEstimator(pb.CardinalityEstimator):
 
         return params
 
+    @override
     def fit_database(self, database: pb.Database) -> pb.train.TrainingMetrics:
         train_start = time.perf_counter_ns()
 
@@ -49,6 +53,7 @@ class DataDrivenCardinalityEstimator(pb.CardinalityEstimator):
         train_duration_ms = (train_end - train_start) / 1e6
         return {"training_duration_ms": train_duration_ms}
 
+    @override
     def database_fit_completed(self) -> bool:
         return len(self._rel_sizes) > 0
 
@@ -58,6 +63,7 @@ class QueryDrivenCardinalityEstimator(pb.CardinalityEstimator):
         super().__init__()
         self._samples: dict[pb.SqlQuery, pb.Cardinality] = {}
 
+    @override
     def calculate_estimate(
         self, query: pb.SqlQuery, intermediate: pb.TableReference | Iterable[pb.TableReference]
     ) -> pb.Cardinality:
@@ -78,6 +84,7 @@ class QueryDrivenCardinalityEstimator(pb.CardinalityEstimator):
 
         return closest_estimate
 
+    @override
     def fit_workload(self, queries: pb.Workload, database: pb.Database) -> pb.train.TrainingMetrics:
         train_start = time.perf_counter_ns()
 
@@ -88,6 +95,7 @@ class QueryDrivenCardinalityEstimator(pb.CardinalityEstimator):
         train_duration_ms = (train_end - train_start) / 1e6
         return {"training_duration_ms": train_duration_ms, "n_samples": len(self._samples)}
 
+    @override
     def workload_fit_completed(self) -> bool:
         return len(self._samples) > 0
 
@@ -98,6 +106,7 @@ class ReinforcementOperatorSelection(pb.OperatorSelection):
         self._database = database
         self._operator_runtimes: dict[pb.PhysicalOperator, float] = {}
 
+    @override
     def select_physical_operators(
         self, query: pb.SqlQuery, join_order: pb.JoinTree | None
     ) -> pb.PhysicalOperatorAssignment:
@@ -111,6 +120,7 @@ class ReinforcementOperatorSelection(pb.OperatorSelection):
 
         return assignment
 
+    @override
     def learn_from_feedback(
         self, query: pb.SqlQuery, result_set: pb.db.ResultSet, *, exec_time: pb.TimeMs
     ) -> pb.train.TrainingMetrics:

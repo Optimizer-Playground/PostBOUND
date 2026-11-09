@@ -2,6 +2,7 @@ import random
 import tempfile
 import unittest
 from collections.abc import Iterable
+from typing import override
 
 import pandas as pd
 import pytest
@@ -13,6 +14,7 @@ pg_connect_dir = "."
 
 
 class DummyJoinOrdering(pb.JoinOrdering):
+    @override
     def optimize_join_order(self, query: pb.SqlQuery) -> pb.JoinTree:
         join_tree = pb.JoinTree()
         for table in query.tables():
@@ -21,6 +23,7 @@ class DummyJoinOrdering(pb.JoinOrdering):
 
 
 class DummyOperatorSelection(pb.OperatorSelection):
+    @override
     def select_physical_operators(
         self, query: pb.SqlQuery, join_order: pb.JoinTree | None
     ) -> pb.PhysicalOperatorAssignment:
@@ -31,6 +34,7 @@ class DummyOperatorSelection(pb.OperatorSelection):
 
 
 class DummyPlanParameterization(pb.ParameterGeneration):
+    @override
     def generate_plan_parameters(
         self,
         query: pb.SqlQuery,
@@ -44,6 +48,7 @@ class DummyPlanParameterization(pb.ParameterGeneration):
 
 
 class DummyCardinalityEstimator(pb.CardinalityEstimator):
+    @override
     def calculate_estimate(
         self,
         query: pb.SqlQuery,
@@ -55,6 +60,7 @@ class DummyCardinalityEstimator(pb.CardinalityEstimator):
 
 
 class FailingCardinalityEstimator(pb.CardinalityEstimator):
+    @override
     def calculate_estimate(
         self,
         query: pb.SqlQuery,
@@ -68,13 +74,16 @@ class DataDrivenOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_data_training = False
 
+    @override
     def optimize_query(self, query: pb.SqlQuery, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
+    @override
     def fit_database(self, database) -> pb.train.TrainingMetrics:
         self.received_data_training = True
         return {}
 
+    @override
     def database_fit_completed(self) -> bool:
         return self.received_data_training
 
@@ -84,13 +93,16 @@ class WorkloadDrivenOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_workload_training = False
 
+    @override
     def optimize_query(self, query: pb.SqlQuery, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
+    @override
     def fit_workload(self, queries: pb.Workload, database: pb.Database) -> pb.train.TrainingMetrics:
         self.received_workload_training = True
         return {}
 
+    @override
     def workload_fit_completed(self) -> bool:
         return self.received_workload_training
 
@@ -100,16 +112,20 @@ class OfflineLearnedOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_offline_training = False
 
+    @override
     def optimize_query(self, query: pb.SqlQuery, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
+    @override
     def fit_samples(self, samples: pb.train.TrainingData) -> pb.train.TrainingMetrics:
         self.received_offline_training = True
         return {}
 
+    @override
     def sample_spec(self) -> pb.train.TrainingSpec:
         return pb.train.TrainingSpec("query")
 
+    @override
     def sample_fit_completed(self) -> bool:
         return self.received_offline_training
 
@@ -119,9 +135,11 @@ class OnlineLearnedOptimizer(pb.IncrementalOptimizationStep):
         super().__init__()
         self.received_online_training = False
 
+    @override
     def optimize_query(self, query: pb.SqlQuery, current_plan: pb.QueryPlan) -> pb.QueryPlan:
         return current_plan
 
+    @override
     def learn_from_feedback(
         self, query: pb.SqlQuery, result_set: pb.db.ResultSet, *, exec_time: pb.TimeMs
     ) -> pb.train.TrainingMetrics:
@@ -132,6 +150,7 @@ class OnlineLearnedOptimizer(pb.IncrementalOptimizationStep):
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
 @pytest.mark.live_db
 class StatsBenchmarkTests(unittest.TestCase):
+    @override
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(config_file=f"{pg_connect_dir}/.psycopg_connection_stats")
         self.stats = pb.workloads.stats()

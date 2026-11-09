@@ -1,6 +1,7 @@
 import argparse
 from collections.abc import Iterable
 from pathlib import Path
+from typing import override
 
 import postbound as pb
 
@@ -10,6 +11,7 @@ class VerySmartCardinalityEstimator(pb.CardinalityEstimator):
         super().__init__()
         self._target_db = target_db or pb.db.current_database()
 
+    @override
     def calculate_estimate(
         self, query: pb.SqlQuery, intermediate: pb.TableReference | Iterable[pb.TableReference]
     ) -> pb.Cardinality:
@@ -21,6 +23,7 @@ class PrettyStupidCardinalityEstimator(pb.CardinalityEstimator):
     def __init__(self) -> None:
         super().__init__()
 
+    @override
     def calculate_estimate(
         self, query: pb.SqlQuery, intermediate: pb.TableReference | Iterable[pb.TableReference]
     ) -> pb.Cardinality:

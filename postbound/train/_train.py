@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Self, override
 
 import pandas as pd
 
@@ -150,15 +150,19 @@ class TrainingSpec:
     def __iter__(self):
         return iter(self.features)
 
+    @override
     def __hash__(self) -> int:
         return hash(self._feature_set)
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, TrainingSpec) and self._feature_set == other._feature_set
 
+    @override
     def __repr__(self) -> str:
         return f"TrainingSpec({self.features})"
 
+    @override
     def __str__(self) -> str:
         features = ", ".join(self.features)
         return f"TrainingSpec({features})"
@@ -197,9 +201,11 @@ class SpecViolations:
     def __bool__(self) -> bool:
         return not bool(self.missing_features)
 
+    @override
     def __repr__(self) -> str:
         return f"SpecViolations(missing_features={self.missing_features})"
 
+    @override
     def __str__(self) -> str:
         if not self.missing_features:
             return "SpecViolations(no violations)"
@@ -433,9 +439,11 @@ class TrainingData:
         remapped = sample[self._feature_map.values()]
         return list(remapped)
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         features = ", ".join(self._feature_map.keys())
         source = self._source if self._source else "intermediate"

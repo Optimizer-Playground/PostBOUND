@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 import math
 from collections.abc import Generator, Iterable
-from typing import Self
+from typing import Self, override
 
 from . import HintType, util
 from ._core import Cardinality, Cost, TableReference, TimeMs
@@ -362,9 +362,11 @@ class OptimizationStage:
     def __json__(self) -> jsondict:
         return self.describe()
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return self.name
 
@@ -402,6 +404,7 @@ class CompleteOptimizationAlgorithm(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return SupportedHintCheck([HintType.JoinOrder, HintType.Operator])
 
@@ -438,6 +441,7 @@ class JoinOrdering(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return SupportedHintCheck([HintType.JoinOrder])
 
@@ -491,6 +495,7 @@ class OperatorSelection(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return SupportedHintCheck([HintType.Operator])
 
@@ -704,6 +709,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
             parameterization.add_cardinality(join, estimate)
         return parameterization
 
+    @override
     def generate_plan_parameters(
         self,
         query: SqlQuery,
@@ -721,6 +727,7 @@ class CardinalityEstimator(ParameterGeneration, abc.ABC):
 
         return parameterization
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return SupportedHintCheck([HintType.Cardinality])
 
@@ -800,6 +807,7 @@ class CostModel(OptimizationStage, abc.ABC):
         """
         pass
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         """Provides requirements that input query or database system have to satisfy for the optimizer to work properly.
 
@@ -867,6 +875,7 @@ class PlanEnumerator(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return SupportedHintCheck([HintType.JoinOrder, HintType.Operator])
 
@@ -911,6 +920,7 @@ class IncrementalOptimizationStep(OptimizationStage, abc.ABC):
         """
         raise NotImplementedError
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return SupportedHintCheck([HintType.JoinOrder, HintType.Operator])
 
@@ -983,6 +993,7 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
         assert self._plan_parameterization is not None
         return self._plan_parameterization
 
+    @override
     def optimize_query(self, query: SqlQuery) -> QueryPlan:
         join_order = (
             self._join_order_optimizer.optimize_join_order(query) if self._join_order_optimizer is not None else None
@@ -1005,9 +1016,11 @@ class _CompleteAlgorithmEmulator(CompleteOptimizationAlgorithm):
         )
         return self.database.optimizer().query_plan(hinted_query)
 
+    @override
     def describe(self) -> jsondict:
         return self.stage().describe()
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return self.stage().pre_check()
 

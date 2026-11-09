@@ -4,7 +4,7 @@ import math
 import warnings
 from collections.abc import Collection, Container, Iterable, Sequence
 from enum import Enum
-from typing import Any, Literal, Self, assert_never
+from typing import Any, Literal, Self, assert_never, override
 
 from . import util
 from ._base import T
@@ -543,6 +543,7 @@ class PhysicalOperatorAssignment:
         else:
             return None
 
+    @override
     def __hash__(self) -> int:
         return hash(
             (
@@ -552,6 +553,7 @@ class PhysicalOperatorAssignment:
             )
         )
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -560,9 +562,11 @@ class PhysicalOperatorAssignment:
             and self.join_operators == other.join_operators
         )
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         global_str = ", ".join(f"{op.value}: {enabled}" for op, enabled in self.global_settings.items())
 
@@ -824,9 +828,11 @@ class PlanParameterization:
             ],
         }
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return (
             f"PlanParams(cards={self.cardinalities}, "
@@ -914,9 +920,11 @@ class ScanOperatorAssignment:
             "parallel_workers": self.parallel_workers,
         }
 
+    @override
     def __hash__(self) -> int:
         return self._hash_val
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -925,9 +933,11 @@ class ScanOperatorAssignment:
             and self.parallel_workers == other.parallel_workers
         )
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return f"{self.operator.value}({self.table})"
 
@@ -1052,9 +1062,11 @@ class JoinOperatorAssignment:
             "parallel_workers": self.parallel_workers,
         }
 
+    @override
     def __hash__(self) -> int:
         return self._hash_val
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -1063,9 +1075,11 @@ class JoinOperatorAssignment:
             and self._parallel_workers == other._parallel_workers
         )
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         join_str = ", ".join(str(tab) for tab in self.join)
         return f"{self.operator.value}({join_str})"
@@ -1141,9 +1155,11 @@ class DirectionalJoinOperatorAssignment(JoinOperatorAssignment):
         """
         return self._outer
 
+    @override
     def is_directional(self) -> bool:
         return True
 
+    @override
     def __json__(self) -> jsondict:
         return {
             "directional": True,
@@ -1155,6 +1171,7 @@ class DirectionalJoinOperatorAssignment(JoinOperatorAssignment):
 
     __hash__ = JoinOperatorAssignment.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -1586,15 +1603,18 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
     def __bool__(self) -> bool:
         return not self.is_empty()
 
+    @override
     def __contains__(self, item: TableReference) -> bool:
         return self.lookup(item) is not None
 
     def __len__(self) -> int:
         return len(self.tables())
 
+    @override
     def __hash__(self) -> int:
         return self._hash_val
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -1603,9 +1623,11 @@ class JoinTree[JoinTreeAnnotation](Container[TableReference]):
             and self._inner == other._inner
         )
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self):
         if self.is_scan():
             assert self._table is not None

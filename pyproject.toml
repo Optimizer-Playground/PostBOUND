@@ -116,6 +116,9 @@ extend-immutable-calls = [
 [tool.ty.src]
 exclude = ["vol-postbound/**", "**/*.ipynb"]
 
+[tool.ty.rules]
+missing-override-decorator = "error"
+
 # The overrides below silence rule families in specific files rather than excluding the files.
 # `unresolved-import` and `unresolved-attribute` are deliberately left enforced everywhere,
 # because those are the diagnostics that catch modules going stale after a refactoring.

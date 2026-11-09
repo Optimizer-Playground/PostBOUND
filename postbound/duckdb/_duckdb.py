@@ -12,7 +12,7 @@ from collections import UserString
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, overload
+from typing import Any, overload, override
 
 import quacklab
 
@@ -95,18 +95,23 @@ class DuckDBDatabase(Database):
 
         self._timeout_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
+    @override
     def schema(self) -> DuckDBSchema:
         return self._schema
 
+    @override
     def statistics(self) -> StatisticsCatalog:
         return self._stats
 
+    @override
     def hinting(self) -> HintService:
         return self._hinting
 
+    @override
     def optimizer(self) -> OptimizerInterface:
         return self._optimizer
 
+    @override
     def execute_query(
         self,
         query: SqlQuery | str,
@@ -162,6 +167,7 @@ class DuckDBDatabase(Database):
         self.execute_query(query, raw=True, timeout=timeout)
         return self.last_query_runtime()
 
+    @override
     def database_name(self) -> str:
         self._cur.execute("SELECT CURRENT_DATABASE();")
         result_set = self._cur.fetchone()
@@ -169,6 +175,7 @@ class DuckDBDatabase(Database):
         db_name = result_set[0]
         return db_name
 
+    @override
     def dbms_version(self) -> Version:
         self._cur.execute("SELECT version();")
         result_set = self._cur.fetchone()
@@ -178,23 +185,27 @@ class DuckDBDatabase(Database):
         raw_ver = raw_ver.split("-")[0]  # remove the build information
         return Version(raw_ver)
 
+    @override
     def cursor(self) -> quacklab.DuckDBPyConnection:  # type: ignore - see below
         # The official DuckDB Python client is not DB API 2.0 compatible because the official API requires execute()
         # to accept an "operation" argument for the query. However, DuckDB folks named theirs a "query"
         return self._cur.cursor()
 
+    @override
     def close(self) -> None:
         self._cur.close()
 
     def reconnect(self) -> None:
         self._cur = quacklab.connect(self._dbfile, read_only=self._read_only)
 
+    @override
     def reset_connection(self) -> None:
         with contextlib.suppress(Exception):
             self.close()
 
         self._cur = quacklab.connect(self._dbfile, read_only=self._read_only)
 
+    @override
     def describe(self) -> jsondict:
         base_info: dict[str, object] = {
             "system_name": self.dbms_name(),
@@ -225,9 +236,11 @@ class DuckDBDatabase(Database):
         end_time = time.perf_counter_ns()
         self._last_query_runtime = (end_time - start_time) / 10**9  # convert to seconds
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self._dbfile == other._dbfile
 
+    @override
     def __hash__(self) -> int:
         return hash(self._dbfile)
 
@@ -245,6 +258,7 @@ class DuckDBSchema(DatabaseSchema):
         super().__init__(db, prep_placeholder="?", default_schema="main", default_catalog=db.database_name())
         self._tables: set[TableReference] = set()
 
+    @override
     def tables(
         self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
     ) -> set[TableReference]:
@@ -275,6 +289,7 @@ class DuckDBSchema(DatabaseSchema):
         self._tables = tables
         return self._tables
 
+    @override
     def all_foreign_keys_on(self, table: TableReference | str) -> set[ForeignKeyRef]:
         table = table.drop_alias() if isinstance(table, TableReference) else TableReference(table)
 
@@ -318,6 +333,7 @@ class DuckDBSchema(DatabaseSchema):
 
         return {ForeignKeyRef(fk_cols, fk_targets[constraint]) for constraint, fk_cols in fk_constraints.items()}
 
+    @override
     def all_indexes_on(self, table: TableReference | str) -> Mapping[str, set[BoundColumnReference]]:
         table = table.drop_alias() if isinstance(table, TableReference) else TableReference(table)
 
@@ -380,6 +396,7 @@ class DuckDBStatistics(StatisticsCatalog):
         super().__init__()
         self._db = db
 
+    @override
     def total_rows(self, table: TableReference) -> Cardinality | None:
         catalog_placeholder = "?" if table.catalog else "current_database()"
         schema_placeholder = "?" if table.schema else "current_schema()"
@@ -407,6 +424,7 @@ class DuckDBStatistics(StatisticsCatalog):
 
         return Cardinality.of(result_set[0]) if result_set[0] is not None else None
 
+    @override
     def num_distinct(self, column: ColumnReference) -> int:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
@@ -414,6 +432,7 @@ class DuckDBStatistics(StatisticsCatalog):
             )
         return PreciseStatistics(self._db).num_distinct(column)
 
+    @override
     def null_frac(self, column: ColumnReference) -> float:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
@@ -421,6 +440,7 @@ class DuckDBStatistics(StatisticsCatalog):
             )
         return PreciseStatistics(self._db).null_frac(column)
 
+    @override
     def min_max(self, column: ColumnReference) -> tuple[Any, Any]:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
@@ -428,6 +448,7 @@ class DuckDBStatistics(StatisticsCatalog):
             )
         return PreciseStatistics(self._db).min_max(column)
 
+    @override
     def most_common_values(self, column: ColumnReference) -> MostCommonValues:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
@@ -435,6 +456,7 @@ class DuckDBStatistics(StatisticsCatalog):
             )
         return PreciseStatistics(self._db).most_common_values(column, k=100)
 
+    @override
     def histogram(self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni") -> Histogram:
         if not db.enable_emulation_fallback:
             raise UnsupportedDatabaseFeatureError(
@@ -595,6 +617,7 @@ class DuckDBOptimizer(OptimizerInterface):
     def __init__(self, db: DuckDBDatabase) -> None:
         self._db = db
 
+    @override
     def query_plan(self, query: SqlQuery | str) -> QueryPlan:
         if isinstance(query, SqlQuery):
             explain_query = transform.as_explain(query)
@@ -619,6 +642,7 @@ class DuckDBOptimizer(OptimizerInterface):
     @overload
     def analyze_plan(self, query: SqlQuery, *, timeout: float) -> QueryPlan | None: ...
 
+    @override
     def analyze_plan(self, query: SqlQuery, *, timeout: float | None = None) -> QueryPlan | None:
         query = transform.as_explain_analyze(query)
 
@@ -632,6 +656,7 @@ class DuckDBOptimizer(OptimizerInterface):
         parsed = json.loads(raw_explain)
         return parse_duckdb_plan(parsed, query=query)
 
+    @override
     def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
         # Similar to the Postgres implementation of parse_plan(), we try to be graceful
         # and accept both simplified and raw versions of the execute_query() output.
@@ -646,6 +671,7 @@ class DuckDBOptimizer(OptimizerInterface):
             return None
         return parse_duckdb_plan(plan, query=query)
 
+    @override
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:
         plan = self.query_plan(query)
         if "AGGREGATE" in plan.node_type:
@@ -655,6 +681,7 @@ class DuckDBOptimizer(OptimizerInterface):
             )
         return plan.estimated_cardinality
 
+    @override
     def cost_estimate(self, query: SqlQuery | str) -> Cost:
         raise UnsupportedDatabaseFeatureError(self._db, "cost estimates")
 
@@ -747,6 +774,7 @@ class DuckDBHintService(HintService):
     def __init__(self, db: DuckDBDatabase) -> None:
         self._db = db
 
+    @override
     def generate_hints(
         self,
         query: SqlQuery,
@@ -787,10 +815,12 @@ class DuckDBHintService(HintService):
 
         return adapted_query
 
+    @override
     def format_query(self, query: SqlQuery) -> str:
         # DuckDB uses the Postgres SQL dialect, so this part is easy..
         return qal.format_quick(query, flavor="duckdb")
 
+    @override
     def supports_hint(self, hint: PhysicalOperator | HintType) -> bool:
         return hint in {
             ScanOperator.SequentialScan,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Literal, overload
+from typing import Literal, overload, override
 
 from .._core import quote
 from ._qal import (
@@ -118,6 +118,7 @@ class FormattingSubqueryExpression(SubqueryExpression):
         self._inline_hint_block = inline_hint_block
         self._indentation = indentation
 
+    @override
     def __str__(self) -> str:
         formatted = (
             "("
@@ -143,6 +144,7 @@ class FormattingCaseExpression(CaseExpression):
         super().__init__(cases, simple_expr=simple_expr, else_expr=else_expr)
         self._indentation = indentation
 
+    @override
     def __str__(self) -> str:
         case_indentation = " " * (self._indentation + 2)
         preamble = f"CASE {self.simple_expression}" if self.simple_expression else "CASE"
@@ -1060,6 +1062,7 @@ class _PostgresCastExpression(CastExpression):
             array_type=array_type,
         )
 
+    @override
     def __str__(self) -> str:
         if self.type_params:
             type_args = ", ".join(str(arg) for arg in self.type_params)

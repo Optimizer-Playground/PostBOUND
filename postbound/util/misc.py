@@ -6,7 +6,7 @@ import collections
 import re
 from collections.abc import Generator, Iterable
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, override
 
 from .jsonize import jsondict
 
@@ -93,6 +93,7 @@ class Version:
     def __json__(self) -> jsondict:
         return str(self)
 
+    @override
     def __eq__(self, __o: object) -> bool:
         try:
             other = _wrap_version(__o)
@@ -143,9 +144,11 @@ class Version:
     def __len__(self) -> int:
         return len(self._version)
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return "v" + ".".join(str(v) for v in self._version)
 
@@ -206,9 +209,11 @@ class DependencyGraph(Generic[T]):
                 dependency_stack.extend(self._dependencies[dep_id])
         provided_nodes = set()
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         nodes_str = ", ".join(str(node) for node in self._nodes.values())
         return f"DependencyGraph({nodes_str})"

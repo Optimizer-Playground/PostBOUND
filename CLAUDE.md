@@ -152,6 +152,13 @@ explicit imports in `qal/__init__.py`.
 and compute `self._hash_val` in `__init__`, returning it from `__hash__`. Preserve this pattern — the optimizer hot
 loops depend on it. Never mutate a qal object; construct a new one (see `transform`).
 
+**`@override` on every override.** Any method that overrides or implements a base-class method — abstract stage
+methods, visitor callbacks, and also dunders inherited from `object` (`__hash__`, `__eq__`, `__repr__`, `__str__`) —
+is decorated with `typing.override`, placed directly above the `def` (below `@property`/`@classmethod`/
+`@abc.abstractmethod`). ty enforces this in both directions (`missing-override-decorator` is an error, and a decorated
+method that overrides nothing fails with `invalid-explicit-override`), so a misspelled hook name cannot silently
+become a new, never-called method. `__init__` and `__new__` are exempt.
+
 **Visitors.** Traversal goes through `accept_visitor` and the `SqlExpressionVisitor` / `PredicateVisitor` /
 `ClauseVisitor` / `RelNodeVisitor` hierarchies rather than isinstance chains.
 

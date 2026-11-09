@@ -13,6 +13,7 @@ from typing import (
     TypeGuard,
     TypeVar,
     overload,
+    override,
 )
 
 from .util._errors import StateError
@@ -396,6 +397,7 @@ class Cardinality(Number):
             return complex(math.inf)
         return complex(float(self.value))
 
+    @override
     def __eq__(self, other: object) -> bool:
         match other:
             case Cardinality():
@@ -419,13 +421,16 @@ class Cardinality(Number):
 
         return NotImplemented
 
+    @override
     def __hash__(self) -> int:
         # There is no need to hash _valid, since it is directly derived from _nan and _inf
         return hash(self.raw_value)
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         if self._nan:
             return "NaN"
@@ -1059,9 +1064,11 @@ class TableReference:
             return NotImplemented
         return self._normalized_identifier < other._normalized_identifier
 
+    @override
     def __hash__(self) -> int:
         return self._hash_val
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -1071,12 +1078,14 @@ class TableReference:
             and self._normalized_catalog == other._normalized_catalog
         )
 
+    @override
     def __repr__(self) -> str:
         return (
             f"TableReference(full_name='{self.full_name}', alias='{self.alias}', "
             f"virtual={self.virtual}, schema='{self.schema}', catalog='{self.catalog}')"
         )
 
+    @override
     def __str__(self) -> str:
         return self._sql_repr
 
@@ -1347,9 +1356,11 @@ class ColumnReference:
             return False
         return self.table < other.table
 
+    @override
     def __hash__(self) -> int:
         return self._hash_val
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, (ColumnReference, BoundColumnReference))
@@ -1364,12 +1375,15 @@ class ColumnReference:
         tab = copy.deepcopy(self.table, memo)
         return ColumnReference(str(self.name), tab)
 
+    @override
     def __reduce__(self) -> tuple:
         return (self.__class__, (self._name, self._table))
 
+    @override
     def __repr__(self) -> str:
         return f"ColumnReference(name='{self.name}', table={self.table!r})"
 
+    @override
     def __str__(self) -> str:
         return self._sql_repr
 
@@ -1388,13 +1402,16 @@ class BoundColumnReference(ColumnReference):
     __match_args__ = ("name", "table")
 
     @property
+    @override
     def table(self) -> TableReference:
         """Get the table to which this column belongs. This is guaranteed to be set and will never be *None*."""
         return self._table  # type: ignore
 
+    @override
     def is_bound(self) -> bool:
         return True
 
+    @override
     def drop_table_alias(self) -> BoundColumnReference:
         return super().drop_table_alias()  # type: ignore
 

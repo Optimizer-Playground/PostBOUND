@@ -14,7 +14,7 @@ from collections.abc import (
     Sequence,
     Sized,
 )
-from typing import Any, overload
+from typing import Any, overload, override
 
 from .._base import T
 from .dicts import HashableDict
@@ -352,18 +352,23 @@ class Queue(Iterable[T], Sized, Container[T]):
             self.data.pop(0)
         return item
 
+    @override
     def __len__(self) -> int:
         return len(self.data)
 
+    @override
     def __contains__(self, __x: object) -> bool:
         return __x in self.data
 
+    @override
     def __iter__(self) -> Iterator[T]:
         return self.data.__iter__()
 
+    @override
     def __repr__(self) -> str:
         return f"Queue({self.data})"
 
+    @override
     def __str__(self) -> str:
         return str(self.data)
 
@@ -437,17 +442,22 @@ class SizedQueue(Collection[T]):
         """
         return self.data.pop(0) if self.data else None
 
+    @override
     def __contains__(self, other: object) -> bool:
         return other in self.data
 
+    @override
     def __iter__(self) -> Iterator[T]:
         return self.data.__iter__()
 
+    @override
     def __len__(self) -> int:
         return len(self.data)
 
+    @override
     def __repr__(self) -> str:
         return f"SizedQueue(capacity={self.capacity}, data={self.data})"
 
+    @override
     def __str__(self) -> str:
         return str(self.data)

@@ -16,7 +16,7 @@ import enum
 import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import IO, Any, Protocol, runtime_checkable
+from typing import IO, Any, Protocol, override, runtime_checkable
 
 type jsondict = object
 """Type alias for a JSON-izeable dictionary."""
@@ -38,6 +38,7 @@ class JsonizeEncoder(json.JSONEncoder):
     (required) parameters and returns a JSON-izeable representation of the current instance, e.g. a `dict` or a `list`.
     """
 
+    @override
     def default(self, o: Any) -> Any:
         if isinstance(o, enum.Enum):
             return o.value

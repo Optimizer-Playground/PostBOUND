@@ -29,7 +29,7 @@ import warnings
 import zipfile
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, TypeVar, cast, overload
+from typing import Literal, TypeVar, cast, overload, override
 
 import natsort
 import pandas as pd
@@ -505,18 +505,23 @@ class Workload(Mapping[L, Q]):
         merged.update(self._entries)
         return Workload(merged, name=self._name, root=self._root)  # retain own labels in case of conflict
 
+    @override
     def __getitem__(self, key: L) -> Q:
         return self._entries[key]
 
+    @override
     def __iter__(self) -> Iterator[L]:
         return iter(self._entries)
 
+    @override
     def __len__(self) -> int:
         return len(self._entries)
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         if self._name:
             return f"Workload: {self._name} ({len(self)} queries)"

@@ -1,4 +1,5 @@
 import unittest
+from typing import override
 
 import pytest
 
@@ -27,6 +28,7 @@ PGHintPlanRestrictions = PostgresConfiguration(
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
 @pytest.mark.live_db
 class QueryExecutionTests(unittest.TestCase):
+    @override
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
             config_file=f"{pg_connect_dir}/.psycopg_connection_stats",
@@ -67,6 +69,7 @@ class QueryExecutionTests(unittest.TestCase):
 
 @pytest.mark.live_db
 class StatsSchemaTests(unittest.TestCase):
+    @override
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
             config_file=f"{pg_connect_dir}/.psycopg_connection_stats",
@@ -80,6 +83,7 @@ class StatsSchemaTests(unittest.TestCase):
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_job")
 @pytest.mark.live_db
 class JobHintingTests(regression_suite.PlanTestCase):
+    @override
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
             config_file=f"{pg_connect_dir}/.psycopg_connection_job",
@@ -118,6 +122,7 @@ class JobHintingTests(regression_suite.PlanTestCase):
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
 @pytest.mark.live_db
 class StatsHintingTests(regression_suite.PlanTestCase):
+    @override
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
             config_file=f"{pg_connect_dir}/.psycopg_connection_stats",
@@ -187,6 +192,7 @@ class StatsHintingTests(regression_suite.PlanTestCase):
 @regression_suite.skip_if_no_db(f"{pg_connect_dir}/.psycopg_connection_stats")
 @pytest.mark.live_db
 class RegressionTests(unittest.TestCase):
+    @override
     def setUp(self) -> None:
         self.pg_instance = pb.postgres.connect(
             config_file=f"{pg_connect_dir}/.psycopg_connection_stats",

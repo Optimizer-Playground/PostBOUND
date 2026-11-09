@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import warnings
 from collections.abc import Sequence
-from typing import Any, Literal, get_args
+from typing import Any, Literal, get_args, override
 
 from .._core import Cardinality, IntermediateOperator, JoinOperator, ScanOperator, TableReference
 from .._qep import QueryPlan, SortKey
@@ -481,9 +481,11 @@ class PostgresExplain:
         # TODO implementation
         return []
 
+    @override
     def __hash__(self) -> int:
         return self._hash_val
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -493,9 +495,11 @@ class PostgresExplain:
             and self.children == other.children
         )
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         analyze_content = (
             f" (actual time={self.execution_time}s rows={self.true_cardinality} loops={self.loops})"
@@ -605,6 +609,7 @@ class PostgresPlan:
     def __json__(self) -> Any:
         return self.explain_data
 
+    @override
     def __getattribute__(self, name: str) -> Any:
         # All methods that are not defined on the Postgres plan delegate to the default DB plan
         try:
@@ -617,15 +622,19 @@ class PostgresPlan:
                 normalized_plan = object.__getattribute__(self, "_normalized_plan")
                 return normalized_plan.__getattribute__(name)
 
+    @override
     def __hash__(self) -> int:
         return hash(self.query_plan)
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self.query_plan == other.query_plan
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         if self.is_analyze():
             prefix = f"EXPLAIN ANALYZE (plan time={self.planning_time}, exec time={self.execution_time})"

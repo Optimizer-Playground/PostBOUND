@@ -25,7 +25,7 @@ import collections
 import itertools
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from typing import Literal, cast, overload
+from typing import Literal, cast, overload, override
 
 from . import util
 from ._core import ColumnReference, TableReference
@@ -146,26 +146,31 @@ def flatten_and_predicate(predicate: AbstractPredicate) -> AbstractPredicate:
 
 
 class _ImplicitFromClauseRewriter(TableSourceVisitor[tuple[Collection[TableSource], AbstractPredicate | None]]):
+    @override
     def visit_direct_source(
         self, src: DirectTableSource, *args, **kwargs
     ) -> tuple[Collection[TableSource], AbstractPredicate | None]:
         return [src], None
 
+    @override
     def visit_subquery_source(
         self, src: SubqueryTableSource, *args, **kwargs
     ) -> tuple[Collection[TableSource], AbstractPredicate | None]:
         return [src], None
 
+    @override
     def visit_values_source(
         self, src: ValuesTableSource, *args, **kwargs
     ) -> tuple[Collection[TableSource], AbstractPredicate | None]:
         return [src], None
 
+    @override
     def visit_function_source(
         self, src: FunctionTableSource, *args, **kwargs
     ) -> tuple[Collection[TableSource], AbstractPredicate | None]:
         return [src], None
 
+    @override
     def visit_join_source(
         self, src: JoinTableSource, *args, **kwargs
     ) -> tuple[Collection[TableSource], AbstractPredicate | None]:
@@ -719,22 +724,28 @@ def add_ec_predicates(query: SelectStatement) -> SelectStatement:
 
 
 class _BetweenPredCreator(PredicateVisitor[AbstractPredicate]):
+    @override
     def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> BinaryPredicate:
         return predicate
 
+    @override
     def visit_between_predicate(self, predicate: BetweenPredicate, *args, **kwargs) -> BetweenPredicate:
         return predicate
 
+    @override
     def visit_in_predicate(self, predicate: InPredicate, *args, **kwargs) -> InPredicate:
         return predicate
 
+    @override
     def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> UnaryPredicate:
         return predicate
 
+    @override
     def visit_not_predicate(self, predicate: NotPredicate, *args, **kwargs) -> NotPredicate:
         rewritten_child = predicate.child.accept_visitor(self)
         return CompoundPredicate.create_not(rewritten_child)
 
+    @override
     def visit_and_predicate(self, predicate: AndPredicate, *args, **kwargs) -> AndPredicate:
         rewritten_filters: list[AbstractPredicate] = []
 
@@ -822,6 +833,7 @@ class _BetweenPredCreator(PredicateVisitor[AbstractPredicate]):
 
         return CompoundPredicate.create_and(rewritten_filters)  # type: ignore
 
+    @override
     def visit_or_predicate(self, predicate: OrPredicate, *args, **kwargs) -> CompoundPredicate:
         rewritten_children = [child.accept_visitor(self) for child in predicate.children]
         return CompoundPredicate.create_or(rewritten_children)  # type: ignore
@@ -2144,12 +2156,15 @@ class _TableReferenceRenamer(
         self._renamings = renamings
         self._renaming_targets = set(tab.identifier() for tab in self._renamings.values())
 
+    @override
     def visit_hint_clause(self, clause: Hint, *args, **kwargs) -> Hint:
         return clause
 
+    @override
     def visit_explain_clause(self, clause: Explain, *args, **kwargs) -> Explain:
         return clause
 
+    @override
     def visit_cte_clause(self, clause: CommonTableExpression, *args, **kwargs) -> CommonTableExpression:
         ctes: list[WithQuery] = []
 
@@ -2162,6 +2177,7 @@ class _TableReferenceRenamer(
 
         return CommonTableExpression(ctes, recursive=clause.recursive)
 
+    @override
     def visit_select_clause(self, clause, *args, **kwargs) -> Select:
         projections: list[Projection] = []
 
@@ -2171,6 +2187,7 @@ class _TableReferenceRenamer(
 
         return Select(projections, distinct=clause.distinct_specifier())
 
+    @override
     def visit_from_clause(self, clause: From, *args, **kwargs) -> From:
         used_identifiers = set(tab.identifier() for tab in clause.bound_tables())
         intersect = used_identifiers & self._renaming_targets
@@ -2194,18 +2211,22 @@ class _TableReferenceRenamer(
 
         return From(no_duplicates)
 
+    @override
     def visit_where_clause(self, clause: Where, *args, **kwargs) -> Where:
         renamed_predicate = clause.root.accept_visitor(self)
         return Where(renamed_predicate)
 
+    @override
     def visit_groupby_clause(self, clause: GroupBy, *args, **kwargs) -> GroupBy:
         renamed_groupings = [grouping.accept_visitor(self) for grouping in clause.group_columns]
         return GroupBy(renamed_groupings, clause.distinct)
 
+    @override
     def visit_having_clause(self, clause: Having, *args, **kwargs) -> Having:
         renamed_predicate = clause.condition.accept_visitor(self)
         return Having(renamed_predicate)
 
+    @override
     def visit_orderby_clause(self, clause: OrderBy, *args, **kwargs) -> OrderBy:
         renamed_orderings: list[Ordering] = []
 
@@ -2215,9 +2236,11 @@ class _TableReferenceRenamer(
 
         return OrderBy(renamed_orderings)
 
+    @override
     def visit_limit_clause(self, clause: Limit, *args, **kwargs) -> Limit:
         return clause
 
+    @override
     def visit_union_clause(self, clause: UnionClause, *args, **kwargs) -> UnionClause:
         renamed_lhs = clause.lhs.accept_visitor(self)
         renamed_rhs = clause.rhs.accept_visitor(self)
@@ -2225,36 +2248,43 @@ class _TableReferenceRenamer(
             build_query(renamed_lhs.values()), build_query(renamed_rhs.values()), union_all=clause.union_all
         )
 
+    @override
     def visit_except_clause(self, clause: ExceptClause, *args, **kwargs) -> ExceptClause:
         renamed_lhs = clause.lhs.accept_visitor(self)
         renamed_rhs = clause.rhs.accept_visitor(self)
         return ExceptClause(build_query(renamed_lhs.values()), build_query(renamed_rhs.values()))
 
+    @override
     def visit_intersect_clause(self, clause: IntersectClause, *args, **kwargs) -> IntersectClause:
         renamed_lhs = clause.lhs.accept_visitor(self)
         renamed_rhs = clause.rhs.accept_visitor(self)
         return IntersectClause(build_query(renamed_lhs.values()), build_query(renamed_rhs.values()))
 
+    @override
     def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> BinaryPredicate:
         renamed_lhs = predicate.lhs.accept_visitor(self)
         renamed_rhs = predicate.rhs.accept_visitor(self)
         return BinaryPredicate(predicate.operator, renamed_lhs, renamed_rhs)
 
+    @override
     def visit_between_predicate(self, predicate: BetweenPredicate, *args, **kwargs) -> BetweenPredicate:
         renamed_col = predicate.column.accept_visitor(self)
         renamed_start = predicate.lower.accept_visitor(self)
         renamed_end = predicate.upper.accept_visitor(self)
         return BetweenPredicate(renamed_col, (renamed_start, renamed_end))
 
+    @override
     def visit_in_predicate(self, predicate: InPredicate, *args, **kwargs) -> InPredicate:
         renamed_col = predicate.column.accept_visitor(self)
         renamed_vals = [val.accept_visitor(self) for val in predicate.values]
         return InPredicate(renamed_col, renamed_vals)
 
+    @override
     def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> UnaryPredicate:
         renamed_col = predicate.expression.accept_visitor(self)
         return UnaryPredicate(renamed_col, predicate.operator)
 
+    @override
     def visit_not_predicate(
         self,
         predicate: NotPredicate,
@@ -2264,6 +2294,7 @@ class _TableReferenceRenamer(
         renamed_child = predicate.child.accept_visitor(self)
         return NotPredicate(renamed_child)
 
+    @override
     def visit_or_predicate(
         self,
         predicate: OrPredicate,
@@ -2273,6 +2304,7 @@ class _TableReferenceRenamer(
         renamed_children = [child.accept_visitor(self) for child in predicate.children]
         return OrPredicate(renamed_children)
 
+    @override
     def visit_and_predicate(
         self,
         predicate: AndPredicate,
@@ -2282,9 +2314,11 @@ class _TableReferenceRenamer(
         renamed_children = [child.accept_visitor(self) for child in predicate.children]
         return AndPredicate(renamed_children)
 
+    @override
     def visit_static_value_expr(self, expr: StaticValueExpression, *args, **kwargs) -> StaticValueExpression:
         return expr
 
+    @override
     def visit_cast_expr(self, expr: CastExpression, *args, **kwargs) -> CastExpression:
         renamed_child = expr.casted_expression.accept_visitor(self)
         renamed_params = [param.accept_visitor(self) for param in expr.type_params] if expr.type_params else None
@@ -2295,15 +2329,18 @@ class _TableReferenceRenamer(
             array_type=expr.array_type,
         )
 
+    @override
     def visit_math_expr(self, expr: MathExpression, *args, **kwargs) -> MathExpression:
         renamed_lhs = expr.lhs.accept_visitor(self)
         renamed_rhs = expr.rhs.accept_visitor(self) if expr.rhs else None
         return MathExpression(expr.operator, renamed_lhs, renamed_rhs)
 
+    @override
     def visit_column_expr(self, expr: ColumnExpression, *args, **kwargs) -> ColumnExpression:
         col = self._rename_column(expr.column)
         return ColumnExpression(col)
 
+    @override
     def visit_function_expr(self, expr: FunctionExpression, *args, **kwargs) -> FunctionExpression:
         renamed_args = [arg.accept_visitor(self) for arg in expr.arguments]
         renamed_kwargs = {kw: arg.accept_visitor(self) for kw, arg in expr.keyword_args.items()}
@@ -2316,15 +2353,18 @@ class _TableReferenceRenamer(
             filter_where=renamed_filter,
         )
 
+    @override
     def visit_subquery_expr(self, expr: SubqueryExpression, *args, **kwargs) -> SubqueryExpression:
         subquery_comps = expr.query.accept_visitor(self)
         renamed_subquery = build_query(subquery_comps.values())
         return SubqueryExpression(renamed_subquery)
 
+    @override
     def visit_star_expr(self, expr: StarExpression, *args, **kwargs) -> StarExpression:
         renamed_table = self._rename_table(expr.from_table) if expr.from_table else None
         return StarExpression(from_table=renamed_table)
 
+    @override
     def visit_window_expr(self, expr: WindowExpression, *args, **kwargs) -> WindowExpression:
         renamed_window_func = expr.window_function.accept_visitor(self)
         renamed_partition = [part.accept_visitor(self) for part in expr.partitioning]
@@ -2337,6 +2377,7 @@ class _TableReferenceRenamer(
             filter_condition=renamed_filter,
         )
 
+    @override
     def visit_case_expr(self, expr: CaseExpression, *args, **kwargs) -> CaseExpression:
         renamed_cases: list[tuple[AbstractPredicate, SqlExpression]] = []
 
@@ -2350,14 +2391,17 @@ class _TableReferenceRenamer(
         renamed_default = expr.else_expression.accept_visitor(self) if expr.else_expression else None
         return CaseExpression(renamed_cases, simple_expr=renamed_simple, else_expr=renamed_default)
 
+    @override
     def visit_quantifier_expr(self, expr: QuantifierExpression, *args, **kwargs) -> QuantifierExpression:
         renamed_child = expr.expression.accept_visitor(self)
         return QuantifierExpression(renamed_child, quantifier=expr.quantifier)
 
+    @override
     def visit_array_expr(self, expr: ArrayExpression, *args, **kwargs) -> ArrayExpression:
         renamed_elems = [elem.accept_visitor(self) for elem in expr.elements]
         return ArrayExpression(renamed_elems)
 
+    @override
     def visit_array_access_expr(self, expr: ArrayAccessExpression, *args, **kwargs) -> ArrayAccessExpression:
         renamed_array = expr.array.accept_visitor(self)
         renamed_idx = expr.index.accept_visitor(self) if expr.index else None
@@ -2370,6 +2414,7 @@ class _TableReferenceRenamer(
             upper_idx=renamed_upper,
         )
 
+    @override
     def visit_predicate_expr(self, expr: AbstractPredicate, *args, **kwargs) -> AbstractPredicate:
         return expr.accept_visitor(self)
 
@@ -2660,6 +2705,7 @@ class _ResultSetShape(TableSourceVisitor[Mapping[TableReference, Sequence[Projec
         self._cte_shapes = cte_shapes
         self._schema = schema
 
+    @override
     def visit_direct_source(
         self, src: DirectTableSource, *args, **kwargs
     ) -> Mapping[TableReference, Sequence[Projection]]:
@@ -2669,6 +2715,7 @@ class _ResultSetShape(TableSourceVisitor[Mapping[TableReference, Sequence[Projec
 
         return {src.table: [Projection.column(col) for col in self._schema.columns(src.table)]}
 
+    @override
     def visit_subquery_source(
         self, src: SubqueryTableSource, *args, **kwargs
     ) -> Mapping[TableReference, Sequence[Projection]]:
@@ -2680,6 +2727,7 @@ class _ResultSetShape(TableSourceVisitor[Mapping[TableReference, Sequence[Projec
         )
         return {src.target_table: subquery_shape}
 
+    @override
     def visit_values_source(
         self, src: ValuesTableSource, *args, **kwargs
     ) -> Mapping[TableReference, Sequence[Projection]]:
@@ -2690,11 +2738,13 @@ class _ResultSetShape(TableSourceVisitor[Mapping[TableReference, Sequence[Projec
 
         return {src.table: [Projection.column(col) for col in src.cols]}
 
+    @override
     def visit_function_source(
         self, src: FunctionTableSource, *args, **kwargs
     ) -> Mapping[TableReference, Sequence[Projection]]:
         raise ValueError(f"Cannot determine output shape of function table source: {src}")
 
+    @override
     def visit_join_source(self, src: JoinTableSource, *args, **kwargs) -> Mapping[TableReference, Sequence[Projection]]:
         left_shape = src.lhs.accept_visitor(self, *args, **kwargs)
         right_shape = src.rhs.accept_visitor(self, *args, **kwargs)
@@ -2766,18 +2816,23 @@ class _JoinRewriter(TableSourceVisitor[TableSource]):
         self._cte_shapes = cte_shapes
         self._schema = schema
 
+    @override
     def visit_direct_source(self, src: DirectTableSource, *args, **kwargs) -> DirectTableSource:
         return src
 
+    @override
     def visit_subquery_source(self, src: SubqueryTableSource, *args, **kwargs) -> SubqueryTableSource:
         return src
 
+    @override
     def visit_values_source(self, src: ValuesTableSource, *args, **kwargs) -> ValuesTableSource:
         return src
 
+    @override
     def visit_function_source(self, src: FunctionTableSource, *args, **kwargs) -> FunctionTableSource:
         return src
 
+    @override
     def visit_join_source(self, src: JoinTableSource, *args, **kwargs) -> JoinTableSource:
         rewritten_lhs = src.lhs.accept_visitor(self, *args, **kwargs)
         rewritten_rhs = src.rhs.accept_visitor(self, *args, **kwargs)

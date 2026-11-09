@@ -6,6 +6,7 @@ import copy
 import math
 import pickle
 import unittest
+from typing import override
 
 import postbound as pb
 from postbound._core import VirtualTableError, normalize, quote
@@ -155,6 +156,7 @@ class TableReferenceTests(unittest.TestCase):
 
 
 class ColumnReferenceTests(unittest.TestCase):
+    @override
     def setUp(self) -> None:
         self.table = pb.TableReference("posts", alias="p")
 

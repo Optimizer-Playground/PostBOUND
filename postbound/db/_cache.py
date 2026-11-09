@@ -4,7 +4,7 @@ import atexit
 import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from ..qal import SqlQuery
 from ..util import Version, jsondict
@@ -24,6 +24,7 @@ from ._db import (
 
 
 class _DBCacheJsonEncoder(json.JSONEncoder):
+    @override
     def default(self, o: Any) -> Any:
         if isinstance(o, datetime):
             return {"$datetime": o.isoformat()}
@@ -41,6 +42,7 @@ class _DBCacheJsonDecoder(json.JSONDecoder):
         self._second_hook = kwargs.get("object_hook")
         super().__init__(*args, object_hook=self.object_hook, **kwargs)
 
+    @override
     def object_hook(self, obj: Any) -> Any:
         if self._second_hook:
             return self._second_hook(obj)
@@ -127,18 +129,23 @@ class ResultCache(Database):
 
         self._init_offline()
 
+    @override
     def schema(self) -> DatabaseSchema:
         return self._db.schema()
 
+    @override
     def statistics(self) -> StatisticsCatalog:
         return self._db.statistics()
 
+    @override
     def hinting(self) -> HintService:
         return self._db.hinting()
 
+    @override
     def optimizer(self) -> OptimizerInterface:
         return self._db.optimizer()
 
+    @override
     def execute_query(self, query: SqlQuery | str, *, raw: bool = False) -> Any:
         stringified_query = str(query) if isinstance(query, SqlQuery) else query
 
@@ -150,27 +157,35 @@ class ResultCache(Database):
         self._cache[stringified_query] = result_set
         return result_set if raw else simplify_result_set(result_set)
 
+    @override
     def database_name(self) -> str:
         return self._db.database_name()
 
+    @override
     def dbms_version(self) -> Version:
         return self._db.dbms_version()
 
+    @override
     def describe(self) -> jsondict:
         return {"interface-type": "result-cache", "database": self._db.describe()}
 
+    @override
     def reset_connection(self) -> Any:
         return self._db.reset_connection()
 
+    @override
     def cursor(self) -> Cursor:
         return self._db.cursor()
 
+    @override
     def close(self) -> None:
         self._db.close()
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self._db == other._db and self.offline_file == other.offline_file
 
+    @override
     def __hash__(self) -> int:
         return hash((self._db, self.offline_file))
 

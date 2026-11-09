@@ -21,7 +21,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from multiprocessing import connection as mp_conn
 from pathlib import Path
-from typing import Any, Literal, TextIO, overload
+from typing import Any, Literal, TextIO, overload, override
 
 import psycopg
 import psycopg.rows
@@ -115,6 +115,7 @@ References
 
 
 class _PsycopgDateDumper(psycopg_datetime.DateDumper):
+    @override
     def dump(self, obj):
         if obj == datetime.date.max:
             return b"infinity"
@@ -125,6 +126,7 @@ class _PsycopgDateDumper(psycopg_datetime.DateDumper):
 
 
 class _PsycopgDateLoader(psycopg_datetime.DateLoader):
+    @override
     def load(self, data):
         if data == b"infinity":
             return datetime.date.max
@@ -143,6 +145,7 @@ class _PsycopgDateLoader(psycopg_datetime.DateLoader):
 
 
 class _PsycopgTimestampDumper(psycopg_datetime.DatetimeNoTzDumper):
+    @override
     def dump(self, obj):
         if obj == datetime.datetime.max:
             return b"infinity"
@@ -153,6 +156,7 @@ class _PsycopgTimestampDumper(psycopg_datetime.DatetimeNoTzDumper):
 
 
 class _PsycopgTimestampLoader(psycopg_datetime.TimestampLoader):
+    @override
     def load(self, data):
         if data == b"infinity":
             return datetime.datetime.max
@@ -171,6 +175,7 @@ class _PsycopgTimestampLoader(psycopg_datetime.TimestampLoader):
 
 
 class _PsycopgTimestampTzDumper(psycopg_datetime.DatetimeDumper):
+    @override
     def dump(self, obj):
         if obj == datetime.datetime.max:
             return b"infinity"
@@ -181,6 +186,7 @@ class _PsycopgTimestampTzDumper(psycopg_datetime.DatetimeDumper):
 
 
 class _PsycopgTimestampTzLoader(psycopg_datetime.TimestamptzLoader):
+    @override
     def load(self, data):
         if data == b"infinity":
             return datetime.datetime.max.replace(tzinfo=datetime.UTC)
@@ -199,6 +205,7 @@ class _PsycopgTimestampTzLoader(psycopg_datetime.TimestamptzLoader):
 
 
 class _PsycopgIntervalLoader(psycopg_datetime.IntervalLoader):
+    @override
     def load(self, data):
         if data == b"infinity":
             return datetime.timedelta.max
@@ -254,15 +261,19 @@ class PostgresDatabase(Database):
 
         super().__init__(system_name)
 
+    @override
     def schema(self) -> PostgresSchema:
         return self._db_schema
 
+    @override
     def statistics(self) -> PostgresStatistics:
         return self._db_stats
 
+    @override
     def hinting(self) -> PostgresHinting:
         return self._hinting_backend
 
+    @override
     def execute_query(
         self,
         query: SqlQuery | str,
@@ -389,14 +400,17 @@ class PostgresDatabase(Database):
         self.execute_query(query, raw=True, timeout=timeout)
         return self.last_query_runtime()
 
+    @override
     def optimizer(self) -> PostgresOptimizer:
         return PostgresOptimizer(self)
 
+    @override
     def database_name(self) -> str:
         self._cursor.execute("SELECT CURRENT_DATABASE();")
         db_name = self._cursor.fetchone()[0]  # type: ignore
         return db_name
 
+    @override
     def dbms_version(self) -> Version:
         self._cursor.execute("SELECT VERSION();")
         version_string = self._cursor.fetchone()[0]  # type: ignore
@@ -435,6 +449,7 @@ class PostgresDatabase(Database):
             return None
         return proc_path.resolve()
 
+    @override
     def describe(self) -> jsondict:
         base_info: dict[str, Any] = {
             "system_name": self.dbms_name(),
@@ -468,6 +483,7 @@ class PostgresDatabase(Database):
         base_info["schema_info"] = schema_info
         return base_info
 
+    @override
     def reset_connection(self) -> int:
         try:
             self._timeout_executor.close()
@@ -478,6 +494,7 @@ class PostgresDatabase(Database):
             pass
         return self._init_connection()
 
+    @override
     def cursor(self) -> psycopg.Cursor:  # type: ignore - see comment below
         # The psycopg client is not entirely DB API 2.0 compatible because it violates (for the most part) unimportant
         # details of the execute() method
@@ -513,6 +530,7 @@ class PostgresDatabase(Database):
         """
         return psycopg.connect(self.connect_string)
 
+    @override
     def close(self) -> None:
         self._cursor.close()
         self._connection.close()
@@ -883,9 +901,11 @@ class PostgresDatabase(Database):
         if not extension_is_active:
             raise StateError(f"Extension '{extension_name}' is not active in database '{self.database_name()}'")
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self.connect_string == other.connect_string
 
+    @override
     def __hash__(self) -> int:
         return hash(self.connect_string)
 
@@ -907,6 +927,7 @@ class PostgresSchema(DatabaseSchema):
         self._user_tables: set[TableReference] = set()
         self._system_tables: set[TableReference] = set()
 
+    @override
     def tables(
         self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
     ) -> set[TableReference]:
@@ -921,6 +942,7 @@ class PostgresSchema(DatabaseSchema):
 
         return self._user_tables | self._system_tables if include_system_tables else self._user_tables
 
+    @override
     def all_foreign_keys_on(self, table: TableReference | str) -> set[ForeignKeyRef]:
         table = table.drop_alias() if isinstance(table, TableReference) else TableReference(table)
 
@@ -964,6 +986,7 @@ class PostgresSchema(DatabaseSchema):
 
         return {ForeignKeyRef(fk_cols, fk_targets[constraint]) for constraint, fk_cols in fk_constraints.items()}
 
+    @override
     def all_indexes_on(self, table: TableReference | str) -> Mapping[str, set[BoundColumnReference]]:
         table = table.drop_alias() if isinstance(table, TableReference) else TableReference(table)
         schema_placeholder = self._prep_placeholder if table.schema else "current_schema()"
@@ -1036,9 +1059,11 @@ class PostgresSchema(DatabaseSchema):
             indexed_cols.append(ColumnReference(col, table_ref))
         return indexed_cols
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self._db == other._db
 
+    @override
     def __hash__(self):
         return hash(self._db)
 
@@ -1350,6 +1375,7 @@ class PostgresStatistics(StatisticsCatalog):
                                                     """)
             self._db.cursor().execute(distinct_update_query)  # type: ignore - weird psycopg stuff
 
+    @override
     def total_rows(self, table: TableReference) -> Cardinality | None:
         schema = table.schema or "public"
         count_query = "SELECT reltuples FROM pg_class WHERE oid = %s::regclass AND relnamespace = %s::regnamespace"
@@ -1360,6 +1386,7 @@ class PostgresStatistics(StatisticsCatalog):
         count = result_set[0]
         return Cardinality.of(count)
 
+    @override
     def num_distinct(self, column: ColumnReference) -> int | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
@@ -1395,6 +1422,7 @@ class PostgresStatistics(StatisticsCatalog):
 
         return round(-1 * dist_values * int(n_rows))
 
+    @override
     def null_frac(self, column: ColumnReference) -> float | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
@@ -1415,6 +1443,7 @@ class PostgresStatistics(StatisticsCatalog):
             return None
         return float(result_set[0])
 
+    @override
     def min_max(self, column: ColumnReference) -> tuple[Any, Any]:
         # Postgres does not keep track of min/max values, so we need to determine them manually
         # XXX: maybe it would be possible to infer min/max values from the histogram. Do we want to do this instead?
@@ -1424,6 +1453,7 @@ class PostgresStatistics(StatisticsCatalog):
             )
         return PreciseStatistics(self._db).min_max(column)
 
+    @override
     def most_common_values(self, column: ColumnReference) -> MostCommonValues | None:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
@@ -1473,6 +1503,7 @@ class PostgresStatistics(StatisticsCatalog):
         result_set = [(val, round(freq * int(n_rows))) for val, freq in result_set]
         return MostCommonValues(result_set)
 
+    @override
     def histogram(
         self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni"
     ) -> Histogram | None:
@@ -2053,6 +2084,7 @@ class PostgresHinting(HintService):
 
     backend = property(_get_backend, _set_backend, doc="The hinting backend in use.")
 
+    @override
     def generate_hints(
         self,
         query: SqlQuery,
@@ -2100,9 +2132,11 @@ class PostgresHinting(HintService):
 
         return transform.add_clause(query, hints)
 
+    @override
     def format_query(self, query: SqlQuery) -> str:
         return qal.format_quick(query, flavor="postgres")
 
+    @override
     def supports_hint(self, hint: PhysicalOperator | HintType) -> bool:
         self._assert_active_backend()
         return hint in PostgresJoinHints | PostgresScanHints | PostgresPlanHints
@@ -2260,9 +2294,11 @@ class PostgresHinting(HintService):
             connection_pid = self._postgres_db._connection.info.backend_pid
             raise ValueError(f"No supported hinting backend found for backend with PID {connection_pid}")
 
+    @override
     def __repr__(self) -> str:
         return f"PostgresHinting(db={self._postgres_db} backend={self._backend})"
 
+    @override
     def __str__(self) -> str:
         return repr(self)
 
@@ -2279,6 +2315,7 @@ class PostgresOptimizer(OptimizerInterface):
     def __init__(self, postgres_instance: PostgresDatabase) -> None:
         self._pg_instance = postgres_instance
 
+    @override
     def query_plan(self, query: SqlQuery | str) -> QueryPlan:
         if isinstance(query, SqlQuery):
             query = transform.as_explain(query)
@@ -2298,6 +2335,7 @@ class PostgresOptimizer(OptimizerInterface):
     @overload
     def analyze_plan(self, query: SqlQuery, *, timeout: Literal[None]) -> QueryPlan: ...
 
+    @override
     def analyze_plan(self, query: SqlQuery, *, timeout: float | None = None) -> QueryPlan | None:
         query = transform.as_explain_analyze(query)
 
@@ -2309,6 +2347,7 @@ class PostgresOptimizer(OptimizerInterface):
         query_plan = PostgresPlan(raw_query_plan)
         return query_plan.as_qep()
 
+    @override
     def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
         # We should be graceful and handle both simplified and unsimplified
         # versions of the execute_query() output. This only works because PostgresPlan
@@ -2330,6 +2369,7 @@ class PostgresOptimizer(OptimizerInterface):
         pg_plan = PostgresPlan(plan)
         return pg_plan.as_qep()
 
+    @override
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:
         if isinstance(query, SqlQuery):
             query = transform.as_explain(query)
@@ -2340,6 +2380,7 @@ class PostgresOptimizer(OptimizerInterface):
         estimate: int = query_plan[0]["Plan"]["Plan Rows"]
         return Cardinality(estimate)
 
+    @override
     def cost_estimate(self, query: SqlQuery | str) -> float:
         if isinstance(query, SqlQuery):
             query = transform.as_explain(query)

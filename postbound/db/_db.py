@@ -22,7 +22,7 @@ import itertools
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, get_args, overload, runtime_checkable
+from typing import Any, Literal, Protocol, get_args, overload, override, runtime_checkable
 
 import networkx as nx
 
@@ -497,16 +497,20 @@ class Database(ABC):
         return self.describe()
 
     @abstractmethod
+    @override
     def __hash__(self) -> int:
         raise NotImplementedError
 
     @abstractmethod
+    @override
     def __eq__(self, other: object) -> bool:
         raise NotImplementedError
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return f"{self.database_name()} @ {self.dbms_name()} ({self.dbms_version()})"
 
@@ -564,30 +568,37 @@ class PrimaryKeyRef(Sequence[BoundColumnReference]):
     def __json__(self) -> jsondict:
         return {"columns": self._columns}
 
+    @override
     def __len__(self) -> int:
         return len(self._columns)
 
+    @override
     def __contains__(self, item: object) -> bool:
         if not isinstance(item, ColumnReference):
             return False
         return item in self._columns
 
+    @override
     def __getitem__(self, index):
         # let's not worry about type annotations for slices
         return self._columns[index]
 
+    @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, PrimaryKeyRef):
             return NotImplemented
         return self._table == other._table and set(self._columns) == set(other._columns)
 
+    @override
     def __hash__(self) -> int:
         return hash((frozenset(self._columns), self._table))
 
+    @override
     def __repr__(self) -> str:
         cols_str = ", ".join(repr(col) for col in self._columns)
         return f"PrimaryKeyRef(columns=[{cols_str}])"
 
+    @override
     def __str__(self) -> str:
         cols = ", ".join(col.name for col in self._columns)
         return f"PRIMARY KEY {self._table}({cols})"
@@ -700,6 +711,7 @@ class ForeignKeyRef:
     def __json__(self) -> jsondict:
         return {"foreign_key_columns": self._fk_cols, "referenced_columns": self._referenced_cols}
 
+    @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ForeignKeyRef):
             return NotImplemented
@@ -708,14 +720,17 @@ class ForeignKeyRef:
         other_mapping = frozenset(zip(other._fk_cols, other._referenced_cols, strict=True))
         return own_mapping == other_mapping
 
+    @override
     def __hash__(self) -> int:
         return hash(frozenset(zip(self._fk_cols, self._referenced_cols, strict=True)))
 
+    @override
     def __repr__(self) -> str:
         fk_cols_str = ", ".join(repr(col) for col in self._fk_cols)
         referenced_cols_str = ", ".join(repr(col) for col in self._referenced_cols)
         return f"ForeignKeyRef(fk_cols=[{fk_cols_str}], referenced_cols=[{referenced_cols_str}])"
 
+    @override
     def __str__(self) -> str:
         fk_cols = ", ".join(col.name for col in self._fk_cols)
         referenced_cols = ", ".join(col.name for col in self._referenced_cols)
@@ -784,6 +799,7 @@ class TableInfo(Mapping[ColumnReference, ColumnInfo]):
     indexes: Mapping[str, set[BoundColumnReference]]
     """The indexes of the table, keyed by index name."""
 
+    @override
     def __getitem__(self, key: ColumnReference | str) -> ColumnInfo:
         if isinstance(key, str):
             key = ColumnReference(key, self.table)
@@ -792,9 +808,11 @@ class TableInfo(Mapping[ColumnReference, ColumnInfo]):
                 return column_info
         raise KeyError(f"Column '{key}' not found in table '{self.table}'")
 
+    @override
     def __len__(self) -> int:
         return len(self.columns)
 
+    @override
     def __iter__(self) -> Iterator[BoundColumnReference]:
         return iter(column_info.column for column_info in self.columns)
 
@@ -1734,6 +1752,7 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
     @overload
     def __getitem__(self, key: ColumnReference) -> ColumnInfo: ...
 
+    @override
     def __getitem__(self, key):
         match key:
             case ColumnReference():
@@ -1787,6 +1806,7 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
                     "Only TableReference, ColumnReference, or str are supported."
                 )
 
+    @override
     def __contains__(self, item: object) -> bool:
         match item:
             case TableReference():
@@ -1816,21 +1836,27 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
             case _:
                 return False
 
+    @override
     def __iter__(self) -> Iterator[TableReference]:
         return iter(self.tables())
 
+    @override
     def __len__(self) -> int:
         return len(self.tables())
 
+    @override
     def __hash__(self) -> int:
         return hash(self._db)
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self._db == other._db
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return f"Database schema of {self._db}"
 
@@ -1959,9 +1985,11 @@ class MostCommonValues[T]:
     def __getitem__(self, idx: int) -> tuple[T, int]:
         return self.mcvs[idx]
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return str(self.mcvs)
 
@@ -2210,6 +2238,7 @@ class Histogram[T: _HistElem]:
             "bucket_interpolation": self._bucket_interpolation,
         }
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -2220,9 +2249,11 @@ class Histogram[T: _HistElem]:
             and self._bucket_interpolation == other._bucket_interpolation
         )
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         buckets = ", ".join(f"{bound} ({freq})" for bound, freq in zip(self._bounds, self._frequencies, strict=False))
         return f"Histogram(buckets=[{buckets}], lower={self._lower})"
@@ -2796,9 +2827,11 @@ class DatabasePool:
     def __contains__(self, key: str) -> bool:
         return key in self._pool
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return f"DatabasePool {self._pool}"
 

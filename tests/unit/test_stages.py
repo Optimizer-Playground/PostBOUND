@@ -10,6 +10,7 @@ Currently this module only holds regression tests. The pipelines that drive the 
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import override
 
 from postbound import parser
 from postbound._core import Cardinality, TableReference
@@ -31,6 +32,7 @@ class _CannedEstimator(CardinalityEstimator):
         super().__init__()
         self._estimates = estimates
 
+    @override
     def calculate_estimate(
         self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:

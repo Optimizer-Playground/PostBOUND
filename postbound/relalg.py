@@ -40,6 +40,7 @@ import functools
 import operator
 import typing
 from collections.abc import Generator, Iterable, Mapping, Sequence
+from typing import override
 
 from . import transform, util
 from ._core import ColumnReference, TableReference
@@ -425,18 +426,22 @@ class RelNode(abc.ABC):
         """
         raise NotImplementedError
 
+    @override
     def __hash__(self) -> int:
         return self._hash_val
 
     @abc.abstractmethod
+    @override
     def __eq__(self, other: object) -> bool:
         raise NotImplementedError
 
+    @override
     def __repr__(self) -> str:
         child_reprs = ", ".join(repr(child) for child in self.children())
         return f"{self.node_type}({child_reprs})"
 
     @abc.abstractmethod
+    @override
     def __str__(self) -> str:
         raise NotImplementedError
 
@@ -494,12 +499,15 @@ class Selection(RelNode):
         """
         return self._predicate
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_selection(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -531,11 +539,13 @@ class Selection(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._predicate))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -543,6 +553,7 @@ class Selection(RelNode):
             and self._predicate == other._predicate
         )
 
+    @override
     def __str__(self) -> str:
         return f"σ ({self._predicate})"
 
@@ -600,12 +611,15 @@ class CrossProduct(RelNode):
         """
         return self._right_input
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._left_input, self._right_input]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_cross_product(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -637,11 +651,13 @@ class CrossProduct(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._left_input, self._right_input))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -649,6 +665,7 @@ class CrossProduct(RelNode):
             and self._right_input == other._right_input
         )
 
+    @override
     def __str__(self) -> str:
         return "⨯"
 
@@ -708,12 +725,15 @@ class Union(RelNode):
         """
         return self._right_input
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._left_input, self._right_input]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_union(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -744,11 +764,13 @@ class Union(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._left_input, self._right_input))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -756,6 +778,7 @@ class Union(RelNode):
             and self._right_input == other._right_input
         )
 
+    @override
     def __str__(self) -> str:
         return "∪"
 
@@ -815,12 +838,15 @@ class Intersection(RelNode):
         """
         return self._right_input
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._left_input, self._right_input]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_intersection(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -852,11 +878,13 @@ class Intersection(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._left_input, self._right_input))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -864,6 +892,7 @@ class Intersection(RelNode):
             and self._right_input == other._right_input
         )
 
+    @override
     def __str__(self) -> str:
         return "∩"
 
@@ -923,12 +952,15 @@ class Difference(RelNode):
         """
         return self._right_input
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._left_input, self._right_input]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_difference(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -960,11 +992,13 @@ class Difference(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._left_input, self._right_input))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -972,6 +1006,7 @@ class Difference(RelNode):
             and self._right_input == other._right_input
         )
 
+    @override
     def __str__(self) -> str:
         return "\\"
 
@@ -1039,20 +1074,25 @@ class Relation(RelNode):
         """
         return self._subquery_input
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._subquery_input] if self._subquery_input else []
 
+    @override
     def tables(self, *, ignore_subqueries: bool = False) -> frozenset[TableReference]:
         if ignore_subqueries:
             return frozenset((self._table,))
         return super().tables() | {self._table}
 
+    @override
     def provided_expressions(self) -> frozenset[SqlExpression]:
         return super().provided_expressions() | self._provided_cols
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_base_relation(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -1086,22 +1126,27 @@ class Relation(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _update_child_nodes(self, children: Sequence[RelNode]) -> None:
         self._assert_correct_update_child_count(children)
         if self._subquery_input:
             self._subquery_input = children[0]
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._table, self._subquery_input))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self._table == other._table
 
+    @override
     def __repr__(self) -> str:
         return self._table.identifier()
 
+    @override
     def __str__(self) -> str:
         return self._table.identifier()
 
@@ -1174,12 +1219,15 @@ class ThetaJoin(RelNode):
         """
         return self._predicate
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._left_input, self._right_input]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_theta_join(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -1214,11 +1262,13 @@ class ThetaJoin(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._left_input, self._right_input, self._predicate))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -1227,6 +1277,7 @@ class ThetaJoin(RelNode):
             and self._predicate == other._predicate
         )
 
+    @override
     def __str__(self) -> str:
         return f"⋈ ϴ=({self._predicate})"
 
@@ -1281,12 +1332,15 @@ class Projection(RelNode):
         """
         return self._targets
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_projection(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -1318,16 +1372,19 @@ class Projection(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._targets))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self)) and self._input_node == other._input_node and self._targets == other._targets
         )
 
+    @override
     def __str__(self) -> str:
         col_str = ", ".join(str(col) for col in self._targets)
         return f"π ({col_str})"
@@ -1403,16 +1460,20 @@ class Grouping(RelNode):
         """
         return self._aggregates
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def provided_expressions(self) -> frozenset[SqlExpression]:
         aggregate_expressions = util.set_union(self._aggregates.values())
         return frozenset(set(self._group_columns) | aggregate_expressions)
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_grouping(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -1447,11 +1508,13 @@ class Grouping(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._group_columns, self._aggregates))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -1460,6 +1523,7 @@ class Grouping(RelNode):
             and self._aggregates == other._aggregates
         )
 
+    @override
     def __str__(self) -> str:
         pretty_aggregations: dict[str, str] = {}
         for cols, agg_funcs in self._aggregates.items():
@@ -1532,18 +1596,22 @@ class Rename(RelNode):
         """
         return self._mapping
 
+    @override
     def provided_expressions(self) -> frozenset[SqlExpression]:
         return frozenset(
             transform.rename_columns_in_expression(child_expr, self._mapping)
             for child_expr in self._input_node.provided_expressions()
         )
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_rename(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -1574,16 +1642,19 @@ class Rename(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._mapping))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self)) and self._input_node == other._input_node and self._mapping == other._mapping
         )
 
+    @override
     def __str__(self) -> str:
         map_str = ", ".join(f"{col}: {target}" for col, target in self._mapping.items())
         return f"ϱ ({map_str})"
@@ -1655,12 +1726,15 @@ class Sort(RelNode):
         """
         return self._sorting
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_sort(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -1691,16 +1765,19 @@ class Sort(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._sorting))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self)) and self._input_node == other._input_node and self._sorting == other._sorting
         )
 
+    @override
     def __str__(self) -> str:
         sorting_str = ", ".join(
             f"{sort_col}{'↓' if sort_dir == 'asc' else '↑'}" for sort_col, sort_dir in self._sorting
@@ -1769,15 +1846,19 @@ class Map(RelNode):
         """
         return self._mapping
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def provided_expressions(self) -> frozenset[SqlExpression]:
         return super().provided_expressions() | util.set_union(map_target for map_target in self._mapping.values())
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_map(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -1808,16 +1889,19 @@ class Map(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._mapping))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self)) and self._input_node == other._input_node and self._mapping == other._mapping
         )
 
+    @override
     def __str__(self) -> str:
         pretty_mapping: dict[str, str] = {}
         for target_col, expression in self._mapping.items():
@@ -1863,12 +1947,15 @@ class DuplicateElimination(RelNode):
     def input_node(self) -> RelNode:
         return self._input_node
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_duplicate_elim(self)
 
+    @override
     def mutate(self, *, input_node: RelNode | None = None, as_root: bool = False) -> DuplicateElimination:
         """Creates a new duplicate elimination with modified attributes.
 
@@ -1892,14 +1979,17 @@ class DuplicateElimination(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash(self._input_node)
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self._input_node == other._input_node
 
+    @override
     def __str__(self) -> str:
         return "δ"
 
@@ -1994,12 +2084,15 @@ class SemiJoin(RelNode):
         """
         return self._predicate is None
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node, self._subquery_node]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_semijoin(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -2033,17 +2126,20 @@ class SemiJoin(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _update_child_nodes(self, children: Sequence[RelNode]) -> None:
         assert isinstance(children[1], SubqueryScan)
         self._assert_correct_update_child_count(children)
         self._input_node = children[0]
         self._subquery_node = children[1]
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._subquery_node, self._predicate))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -2052,6 +2148,7 @@ class SemiJoin(RelNode):
             and self._predicate == other._predicate
         )
 
+    @override
     def __str__(self) -> str:
         return "⋉" if self._predicate is None else f"⋉ ({self._predicate})"
 
@@ -2147,12 +2244,15 @@ class AntiJoin(RelNode):
         """
         return self._predicate is None
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node, self._subquery_node]
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_antijoin(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -2186,17 +2286,20 @@ class AntiJoin(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _update_child_nodes(self, children: Sequence[RelNode]) -> None:
         assert isinstance(children[1], SubqueryScan)
         self._assert_correct_update_child_count(children)
         self._input_node = children[0]
         self._subquery_node = children[1]
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._subquery_node, self._predicate))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -2205,6 +2308,7 @@ class AntiJoin(RelNode):
             and self._predicate == other._predicate
         )
 
+    @override
     def __str__(self) -> str:
         return "▷" if self._predicate is None else f"▷ ({self._predicate})"
 
@@ -2262,18 +2366,23 @@ class SubqueryScan(RelNode):
         """
         return self._subquery
 
+    @override
     def tables(self, *, ignore_subqueries: bool = False) -> frozenset[TableReference]:
         return frozenset() if ignore_subqueries else super().tables(ignore_subqueries=ignore_subqueries)
 
+    @override
     def children(self) -> Sequence[RelNode]:
         return [self._input_node]
 
+    @override
     def provided_expressions(self) -> frozenset[SqlExpression]:
         return frozenset({SubqueryExpression(self._subquery)} | super().provided_expressions())
 
+    @override
     def accept_visitor(self, visitor: RelNodeVisitor[VisitorResult]) -> VisitorResult:
         return visitor.visit_subquery(self)
 
+    @override
     def mutate(
         self,
         *,
@@ -2305,11 +2414,13 @@ class SubqueryScan(RelNode):
         params = {param: val for param, val in locals().items() if param != "self" and not param.startswith("__")}
         return super().mutate(**params)
 
+    @override
     def _recalc_hash_val(self) -> int:
         return hash((self._input_node, self._subquery))
 
     __hash__ = RelNode.__hash__
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -2317,6 +2428,7 @@ class SubqueryScan(RelNode):
             and self._subquery == other._subquery
         )
 
+    @override
     def __str__(self) -> str:
         return "<<Scalar Subquery Scan>>" if self._subquery.is_scalar() else "<<Subquery Scan>>"
 
@@ -2731,60 +2843,79 @@ class _SubquerySet:
 class _SubqueryDetector(SqlExpressionVisitor[_SubquerySet], PredicateVisitor[_SubquerySet]):
     """Collects all subqueries from SQL expressions or predicates."""
 
+    @override
     def visit_and_predicate(self, predicate: AndPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_predicate_expressions(predicate)
 
+    @override
     def visit_or_predicate(self, predicate: OrPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_predicate_expressions(predicate)
 
+    @override
     def visit_not_predicate(self, predicate: NotPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_predicate_expressions(predicate)
 
+    @override
     def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_predicate_expressions(predicate)
 
+    @override
     def visit_between_predicate(self, predicate: BetweenPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_predicate_expressions(predicate)
 
+    @override
     def visit_in_predicate(self, predicate: InPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_predicate_expressions(predicate)
 
+    @override
     def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_predicate_expressions(predicate)
 
+    @override
     def visit_static_value_expr(self, expression: StaticValueExpression, *args, **kwargs) -> _SubquerySet:
         return _SubquerySet.empty()
 
+    @override
     def visit_column_expr(self, expression: ColumnExpression, *args, **kwargs) -> _SubquerySet:
         return _SubquerySet.empty()
 
+    @override
     def visit_cast_expr(self, expression: CastExpression, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
+    @override
     def visit_function_expr(self, expression: FunctionExpression, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
+    @override
     def visit_math_expr(self, expression: MathExpression, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
+    @override
     def visit_star_expr(self, expression: StarExpression, *args, **kwargs) -> _SubquerySet:
         return _SubquerySet.empty()
 
+    @override
     def visit_subquery_expr(self, expression: SubqueryExpression, *args, **kwargs) -> _SubquerySet:
         return _SubquerySet.of(expression.query)
 
+    @override
     def visit_window_expr(self, expression: WindowExpression, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
+    @override
     def visit_case_expr(self, expression: CaseExpression, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
+    @override
     def visit_quantifier_expr(self, expression: QuantifierExpression, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
+    @override
     def visit_array_expr(self, expression: ArrayExpression, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
+    @override
     def visit_predicate_expr(self, expression: AbstractPredicate, *args, **kwargs) -> _SubquerySet:
         return self._traverse_nested_expressions(expression)
 
@@ -2819,17 +2950,21 @@ class _BaseTableLookup(SqlExpressionVisitor[TableReference | None], PredicateVis
     optional is returned for expressions.
     """
 
+    @override
     def visit_and_predicate(self, predicate: AndPredicate, *args, **kwargs) -> TableReference:
         base_tables = {child_pred.accept_visitor(self) for child_pred in predicate.children}
         return self._fetch_valid_base_tables(base_tables)
 
+    @override
     def visit_or_predicate(self, predicate: OrPredicate, *args, **kwargs) -> TableReference:
         base_tables = {child_pred.accept_visitor(self) for child_pred in predicate.children}
         return self._fetch_valid_base_tables(base_tables)
 
+    @override
     def visit_not_predicate(self, predicate: NotPredicate, *args, **kwargs) -> TableReference:
         return predicate.child.accept_visitor(self)
 
+    @override
     def visit_binary_predicate(self, predicate: BinaryPredicate, *args, **kwargs) -> TableReference:
         base_tables = (
             predicate.lhs.accept_visitor(self),
@@ -2837,6 +2972,7 @@ class _BaseTableLookup(SqlExpressionVisitor[TableReference | None], PredicateVis
         )
         return self._fetch_valid_base_tables(set(base_tables))
 
+    @override
     def visit_between_predicate(self, predicate: BetweenPredicate, *args, **kwargs) -> TableReference:
         base_tables = (
             predicate.column.accept_visitor(self),
@@ -2845,34 +2981,43 @@ class _BaseTableLookup(SqlExpressionVisitor[TableReference | None], PredicateVis
         )
         return self._fetch_valid_base_tables(set(base_tables))
 
+    @override
     def visit_in_predicate(self, predicate: InPredicate, *args, **kwargs) -> TableReference:
         base_tables = {predicate.column.accept_visitor(self)}
         base_tables |= {val.accept_visitor(self) for val in predicate.values}
         return self._fetch_valid_base_tables(base_tables)
 
+    @override
     def visit_unary_predicate(self, predicate: UnaryPredicate, *args, **kwargs) -> TableReference:
         return predicate.expression.accept_visitor(self)
 
+    @override
     def visit_static_value_expr(self, expression: StaticValueExpression, *args, **kwargs) -> TableReference | None:
         return None
 
+    @override
     def visit_column_expr(self, expression: ColumnExpression, *args, **kwargs) -> TableReference | None:
         return expression.column.table
 
+    @override
     def visit_cast_expr(self, expression: CastExpression, *args, **kwargs) -> TableReference | None:
         return expression.casted_expression.accept_visitor(self)
 
+    @override
     def visit_function_expr(self, expression: FunctionExpression, *args, **kwargs) -> TableReference | None:
         referenced_tables = {argument.accept_visitor(self) for argument in expression.arguments}
         return self._fetch_valid_base_tables(referenced_tables, accept_empty=True)
 
+    @override
     def visit_math_expr(self, expression: MathExpression, *args, **kwargs) -> TableReference | None:
         base_tables = {child.accept_visitor(self) for child in expression.iterchildren()}
         return self._fetch_valid_base_tables(base_tables)
 
+    @override
     def visit_star_expr(self, expression: StarExpression, *args, **kwargs) -> TableReference | None:
         return expression.from_table
 
+    @override
     def visit_subquery_expr(self, expression: SubqueryExpression, *args, **kwargs) -> TableReference | None:
         subquery = expression.query
         if not subquery.is_dependent():
@@ -2880,21 +3025,26 @@ class _BaseTableLookup(SqlExpressionVisitor[TableReference | None], PredicateVis
         dependent_tables = subquery.unbound_tables()
         return self._fetch_valid_base_tables(dependent_tables, accept_empty=True)
 
+    @override
     def visit_window_expr(self, expression: WindowExpression, *args, **kwargs) -> TableReference | None:
         # base tables can only appear in predicates and window functions are limited to SELECT statements
         return None
 
+    @override
     def visit_case_expr(self, expression: CaseExpression, *args, **kwargs) -> TableReference | None:
         referenced_tables = {child.accept_visitor(self) for child in expression.iterchildren()}
         return self._fetch_valid_base_tables(referenced_tables, accept_empty=True)
 
+    @override
     def visit_quantifier_expr(self, expr: QuantifierExpression, *args, **kwargs) -> TableReference | None:
         return expr.expression.accept_visitor(self)
 
+    @override
     def visit_array_expr(self, expression: ArrayExpression, *args, **kwargs) -> TableReference | None:
         referenced_tables = {element.accept_visitor(self) for element in expression.elements}
         return self._fetch_valid_base_tables(referenced_tables, accept_empty=True)
 
+    @override
     def visit_predicate_expr(self, expression: AbstractPredicate, *args, **kwargs) -> TableReference:
         return expression.accept_visitor(self)
 

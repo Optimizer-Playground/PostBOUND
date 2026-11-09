@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, override
 
 from postbound import Cardinality, Cost, QueryPlan, util
 from postbound._core import (
@@ -122,6 +122,7 @@ class ScriptedCursor(Cursor):
         self._responses[_normalize(fragment)] = rows
         return self
 
+    @override
     def execute(self, operation: str, parameters: dict | Sequence | None = None) -> Cursor:
         bound: tuple
         if parameters is None:
@@ -146,14 +147,17 @@ class ScriptedCursor(Cursor):
         self._pending = []
         return self
 
+    @override
     def fetchall(self) -> ResultSet | None:
         return self._pending
 
+    @override
     def fetchone(self):
         if not self._pending:
             return None
         return self._pending[0]
 
+    @override
     def close(self) -> None:
         self.closed = True
 
@@ -373,32 +377,39 @@ class StaticSchema(DatabaseSchema):
 
     # -- leaf lookups --------------------------------------------------------------------------------
 
+    @override
     def tables(
         self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
     ) -> set[TableReference]:
         return {TableReference(name) for name in self._spec}
 
+    @override
     def columns(self, table: TableReference | str) -> Sequence[BoundColumnReference]:
         reference = table.drop_alias() if isinstance(table, TableReference) else TableReference(table)
         return [ColumnReference(spec.name, reference) for spec in self._spec.get(reference.full_name, [])]
 
+    @override
     def is_view(self, table: TableReference | str) -> bool:
         return False
 
+    @override
     def is_primary_key(self, column: ColumnReference | Iterable[ColumnReference]) -> bool:
         table, names = self._column_set(column)
         return set(self._pks.get(table, ())) == names
 
+    @override
     def primary_key_of(self, table: TableReference | str) -> PrimaryKeyRef | None:
         name, reference = self._known_table(table)
         if name not in self._pks:
             return None
         return PrimaryKeyRef(ColumnReference(col, reference) for col in self._pks[name])
 
+    @override
     def is_unique(self, column: ColumnReference | Iterable[ColumnReference]) -> bool:
         table, names = self._column_set(column)
         return any(set(cols) == names for cols in self._uniques[table])
 
+    @override
     def all_foreign_keys_on(self, table: TableReference | str) -> set[ForeignKeyRef]:
         name, reference = self._known_table(table)
         return {
@@ -409,6 +420,7 @@ class StaticSchema(DatabaseSchema):
             for fk in self._fks[name]
         }
 
+    @override
     def all_indexes_on(self, table: TableReference | str) -> Mapping[str, set[BoundColumnReference]]:
         name, reference = self._known_table(table)
         indexes: dict[str, tuple[str, ...]] = dict(self._indexes[name])
@@ -418,9 +430,11 @@ class StaticSchema(DatabaseSchema):
             indexes[f"{name}_{'_'.join(cols)}_key"] = cols
         return {index_name: {ColumnReference(col, reference) for col in cols} for index_name, cols in indexes.items()}
 
+    @override
     def datatype(self, column: ColumnReference, *, raw: bool = False) -> str:
         return self._lookup(column).datatype
 
+    @override
     def is_nullable(self, column: ColumnReference) -> bool:
         return self._lookup(column).nullable
 
@@ -436,6 +450,7 @@ class _SchemaOnlyDatabase(Database):
         super().__init__("static")
         self._schema = schema
 
+    @override
     def schema(self) -> DatabaseSchema:
         return self._schema
 
@@ -445,39 +460,51 @@ class _SchemaOnlyDatabase(Database):
             "Use FakeDatabase if the code under test needs a real Database handle."
         )
 
+    @override
     def statistics(self) -> StatisticsCatalog:
         return self._unsupported("statistics()")
 
+    @override
     def hinting(self) -> HintService:
         return self._unsupported("hinting()")
 
+    @override
     def optimizer(self) -> OptimizerInterface:
         return self._unsupported("optimizer()")
 
+    @override
     def execute_query(self, query: SqlQuery | str, *, raw: bool = False) -> Any:
         return self._unsupported(f"execute_query({query!s:.60})")
 
+    @override
     def cursor(self) -> Cursor:
         return self._unsupported("cursor()")
 
+    @override
     def database_name(self) -> str:
         return "static"
 
+    @override
     def dbms_version(self) -> util.Version:
         return util.Version("0.0.0")
 
+    @override
     def describe(self) -> jsondict:
         return {"interface-type": "static-schema"}
 
+    @override
     def reset_connection(self) -> Any:
         return None
 
+    @override
     def close(self) -> None:
         return None
 
+    @override
     def __hash__(self) -> int:
         return hash(id(self))
 
+    @override
     def __eq__(self, other: object) -> bool:
         return self is other
 
@@ -513,27 +540,34 @@ class FakeStatistics(StatisticsCatalog):
         table = column.table.full_name if column.table is not None else "?"
         return f"{table}.{column.name}"
 
+    @override
     def total_rows(self, table: TableReference) -> Cardinality | None:
         rows = self._total_rows.get(table.full_name)
         return None if rows is None else Cardinality(rows)
 
+    @override
     def num_distinct(self, column: ColumnReference) -> int | None:
         return self._num_distinct.get(self._key(column))
 
+    @override
     def null_frac(self, column: ColumnReference) -> float | None:
         return self._null_frac.get(self._key(column))
 
+    @override
     def min_max(self, column: ColumnReference) -> tuple[Any, Any] | None:
         return self._min_max.get(self._key(column))
 
+    @override
     def most_common_values(self, column: ColumnReference) -> MostCommonValues | None:
         return self._mcv.get(self._key(column))
 
+    @override
     def histogram(
         self, column: ColumnReference, *, interpolation: HistogramApproximation = "approx-uni"
     ) -> Histogram | None:
         return self._histograms.get(self._key(column))
 
+    @override
     def describe(self) -> jsondict:
         return {"kind": "fake"}
 
@@ -555,6 +589,7 @@ class FakeHintService(HintService):
         self._supported = supported
         self.requests: list[tuple[SqlQuery, QueryPlan | None, JoinTree | None, PhysicalOperatorAssignment | None]] = []
 
+    @override
     def generate_hints(
         self,
         query: SqlQuery,
@@ -567,9 +602,11 @@ class FakeHintService(HintService):
         self.requests.append((query, plan, join_order, physical_operators))
         return query
 
+    @override
     def format_query(self, query: SqlQuery) -> str:
         return str(query)
 
+    @override
     def supports_hint(self, hint: PhysicalOperator | HintType) -> bool:
         return True if self._supported is None else hint in self._supported
 
@@ -604,23 +641,28 @@ class FakeOptimizer(OptimizerInterface):
             raise UnexpectedQueryError("FakeOptimizer was asked for a plan but none was configured.")
         return self._plan
 
+    @override
     def query_plan(self, query: SqlQuery | str) -> QueryPlan:
         self.requests.append(query)
         return self._require_plan()
 
+    @override
     def analyze_plan(self, query: SqlQuery) -> QueryPlan:
         self.requests.append(query)
         return self._require_plan()
 
+    @override
     def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
         if isinstance(plan, QueryPlan):
             return plan
         return self._require_plan()
 
+    @override
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:
         self.requests.append(query)
         return self._cardinality
 
+    @override
     def cost_estimate(self, query: SqlQuery | str) -> Cost:
         self.requests.append(query)
         return self._cost
@@ -682,15 +724,19 @@ class FakeDatabase(Database):
         self._cursor = self.cursor_double or ScriptedCursor(strict=self.strict)
         self._results = {_normalize(k): v for k, v in (self.results or {}).items()}
 
+    @override
     def schema(self) -> DatabaseSchema:
         return self._schema
 
+    @override
     def statistics(self) -> StatisticsCatalog:
         return self._statistics
 
+    @override
     def hinting(self) -> HintService:
         return self._hinting
 
+    @override
     def optimizer(self) -> OptimizerInterface:
         return self._optimizer
 
@@ -707,6 +753,7 @@ class FakeDatabase(Database):
         self._schema = StaticSchema(tables)
         return self
 
+    @override
     def execute_query(self, query: SqlQuery | str, *, raw: bool = False) -> Any:
         from postbound.db import simplify_result_set
 
@@ -725,27 +772,35 @@ class FakeDatabase(Database):
             )
         return []
 
+    @override
     def cursor(self) -> Cursor:
         return self._cursor
 
+    @override
     def database_name(self) -> str:
         return self.name
 
+    @override
     def dbms_version(self) -> util.Version:
         return util.Version(self.version)
 
+    @override
     def describe(self) -> jsondict:
         return {"interface-type": "fake", "database": self.name}
 
+    @override
     def reset_connection(self) -> Any:
         self.reset_count += 1
         return None
 
+    @override
     def close(self) -> None:
         self.closed = True
 
+    @override
     def __hash__(self) -> int:
         return hash(id(self))
 
+    @override
     def __eq__(self, other: object) -> bool:
         return self is other

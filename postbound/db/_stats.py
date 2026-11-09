@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import override
 
 from .._core import Cardinality, ColumnReference, TableReference, UnboundColumnError, VirtualTableError
 from ..qal import (
@@ -115,6 +116,7 @@ class PreciseStatistics(StatisticsCatalog):
     def __init__(self, db: Database) -> None:
         self._db = db
 
+    @override
     def total_rows(self, table: TableReference) -> Cardinality:
         if table.virtual:
             raise VirtualTableError(table)
@@ -126,6 +128,7 @@ class PreciseStatistics(StatisticsCatalog):
         n_rows = self._db.execute_query(sql)
         return Cardinality.of(n_rows)
 
+    @override
     def num_distinct(self, column: ColumnReference) -> int:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
@@ -137,6 +140,7 @@ class PreciseStatistics(StatisticsCatalog):
         sql = as_query(select_clause, from_clause)
         return self._db.execute_query(sql, raw=False)
 
+    @override
     def null_frac(self, column: ColumnReference) -> float:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
@@ -156,6 +160,7 @@ class PreciseStatistics(StatisticsCatalog):
 
         return n_nulls / int(n_rows)
 
+    @override
     def min_max(self, column: ColumnReference) -> tuple[object, object]:
         if not ColumnReference.assert_bound(column):
             raise UnboundColumnError(column)
@@ -168,6 +173,7 @@ class PreciseStatistics(StatisticsCatalog):
 
         return self._db.execute_query(sql)
 
+    @override
     def most_common_values(self, column: ColumnReference, *, k: int | None = 100) -> MostCommonValues:
         """Provides the `k` most frequent values of a column, computed on live data.
 
@@ -192,6 +198,7 @@ class PreciseStatistics(StatisticsCatalog):
         result_set = self._db.execute_query(sql, raw=True)
         return MostCommonValues(result_set)
 
+    @override
     def histogram(
         self, column: ColumnReference, *, n_bins: int | None = 100, interpolation: HistogramApproximation = "approx-uni"
     ) -> Histogram:
@@ -234,5 +241,6 @@ class PreciseStatistics(StatisticsCatalog):
             bucket_interpolation=interpolation,
         )
 
+    @override
     def describe(self) -> jsondict:
         return {"kind": "precise"}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 from collections.abc import Iterable, Sequence
+from typing import override
 
 SignificantPostgresSettings = {
     # Resource consumption settings (see https://www.postgresql.org/docs/current/runtime-config-resource.html)
@@ -225,6 +226,7 @@ class PostgresSetting(str):
         """
         return PostgresSetting(self.parameter, value)
 
+    @override
     def __getnewargs__(self):
         return (self.parameter, self.value)
 
@@ -400,6 +402,7 @@ class PostgresConfiguration(collections.UserString):
         """
         return "\n".join([str(setting) for setting in self.settings])
 
+    @override
     def __getitem__(self, index):
         if isinstance(index, str):
             return self._settings[index]

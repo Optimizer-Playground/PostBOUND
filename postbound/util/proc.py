@@ -6,7 +6,7 @@ import os
 import pathlib
 import subprocess
 from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import Any, override
 
 
 class ProcResult(str):
@@ -51,9 +51,11 @@ class ProcResult(str):
     def __bool__(self) -> bool:
         return self.exit_code == 0
 
+    @override
     def __repr__(self) -> str:
         return f"ProcResult(exit_code={self.exit_code}, stdout={self.out_data!r}, stderr={self.err_data!r})"
 
+    @override
     def __str__(self) -> str:
         return self.out_data
 

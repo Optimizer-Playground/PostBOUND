@@ -20,6 +20,7 @@ from collections.abc import (
     Iterator,
     Sequence,
 )
+from typing import override
 
 import networkx as nx
 
@@ -261,15 +262,19 @@ class GraphWalk(typing.Generic[NodeType]):
     def __contains__(self, other: object) -> bool:
         return other in self.nodes()
 
+    @override
     def __hash__(self) -> int:
         return hash((self.start_node, tuple(self.path)))
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self.start_node == other.start_node and self.path == other.path
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return " -> ".join(str(node) for node in self.nodes())
 

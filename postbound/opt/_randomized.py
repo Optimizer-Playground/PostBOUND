@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Generator, Iterable
-from typing import Literal
+from typing import Literal, override
 
 import networkx as nx
 
@@ -292,9 +292,11 @@ class RandomJoinOrderOptimizer(JoinOrdering):
         generator_args = generator_args if generator_args is not None else {}
         self._generator = RandomJoinOrderGenerator(**generator_args)
 
+    @override
     def optimize_join_order(self, query: SqlQuery) -> JoinTree:
         return next(self._generator.random_join_orders_for(query))
 
+    @override
     def describe(self) -> dict:
         return {
             "name": "random",
@@ -302,6 +304,7 @@ class RandomJoinOrderOptimizer(JoinOrdering):
             "eliminates_duplicates": self._generator._eliminate_duplicates,
         }
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return CrossProductPreCheck()
 
@@ -448,11 +451,13 @@ class RandomOperatorOptimizer(OperatorSelection):
         generator_args = generator_args if generator_args is not None else {}
         self._generator = RandomOperatorGenerator(**generator_args)
 
+    @override
     def select_physical_operators(self, query: SqlQuery, join_order: JoinTree | None) -> PhysicalOperatorAssignment:
         if join_order is None:
             raise ValueError("Join order is required for operator selection.")
         return next(self._generator.random_operator_assignments_for(query, join_order))
 
+    @override
     def describe(self) -> dict:
         allowed_scans = self._generator.allowed_scan_ops if self._generator._include_scans else []
         allowed_joins = self._generator.allowed_join_ops if self._generator._include_joins else []
@@ -462,6 +467,7 @@ class RandomOperatorOptimizer(OperatorSelection):
             "eliminates_duplicates": self._generator._eliminate_duplicates,
         }
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return SupportedHintCheck(self._generator.necessary_hints())
 
@@ -588,9 +594,11 @@ class RandomPlanOptimizer(CompleteOptimizationAlgorithm):
             database=database,
         )
 
+    @override
     def optimize_query(self, query: SqlQuery) -> QueryPlan:
         return next(self._generator.random_plans_for(query))
 
+    @override
     def describe(self) -> dict:
         scan_ops = (
             self._generator._operator_generator.allowed_scan_ops
@@ -608,6 +616,7 @@ class RandomPlanOptimizer(CompleteOptimizationAlgorithm):
             "physical_operators": {"scans": scan_ops, "joins": join_ops},
         }
 
+    @override
     def pre_check(self) -> OptimizationPreCheck:
         return CompoundCheck(
             [CrossProductPreCheck(), SupportedHintCheck(self._generator._operator_generator.necessary_hints())]

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Collection, Mapping
-from typing import Protocol, Self
+from typing import Protocol, Self, override
 
 from ._core import TimeMs
 from ._hints import PhysicalOperatorAssignment, PlanParameterization
@@ -414,6 +414,7 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
         self._build = True
         return self
 
+    @override
     def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         if not self._build:
             raise StateError(
@@ -428,14 +429,17 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
         physical_qep = self.optimization_algorithm.optimize_query(query)
         return physical_qep
 
+    @override
     def stages(self) -> list[OptimizationStage]:
         if self.optimization_algorithm is None:
             return []
         return [self.optimization_algorithm]
 
+    @override
     def target_database(self) -> Database:
         return self._target_db
 
+    @override
     def describe(self) -> jsondict:
         algorithm_description = (
             self._optimization_algorithm.describe() if self._optimization_algorithm is not None else "no_algorithm"
@@ -446,9 +450,11 @@ class IntegratedOptimizationPipeline(OptimizationPipeline):
             "optimization_algorithm": algorithm_description,
         }
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         return f"IntegratedOptimization [{self._optimization_algorithm}]"
 
@@ -489,6 +495,7 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         self._support_check = EmptyPreCheck()
         self._build = False
 
+    @override
     def target_database(self) -> Database:
         return self._target_db
 
@@ -596,6 +603,7 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         self._build = True
         return self
 
+    @override
     def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         if not self._build:
             raise StateError("Pipeline has not been build")
@@ -605,6 +613,7 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
             query, cardinality_estimator=self._card_est, cost_model=self._cost_model
         )
 
+    @override
     def stages(self) -> list[OptimizationStage]:
         s: list[OptimizationStage] = []
         if self._plan_enumerator is not None:
@@ -615,6 +624,7 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
             s.append(self._card_est)
         return s
 
+    @override
     def describe(self) -> jsondict:
         enumerator = self._plan_enumerator.describe() if self._plan_enumerator is not None else None
         cost_model = self._cost_model.describe() if self._cost_model is not None else None
@@ -628,9 +638,11 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
             "cardinality_estimator": cardinality_estimator,
         }
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         components = [self._plan_enumerator, self._cost_model, self._card_est]
         opt_chain = " + ".join(str(comp) for comp in components)
@@ -935,13 +947,16 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         self._build = True
         return self
 
+    @override
     def target_database(self) -> Database:
         return self.target_db
 
+    @override
     def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         optimized_query = self.optimize_query(query)
         return self.target_db.optimizer().query_plan(optimized_query)
 
+    @override
     def optimize_query(self, query: SqlQuery) -> SqlQuery:
         self._assert_is_build()
         assert self._pre_check is not None
@@ -979,6 +994,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
             plan_parameters=plan_parameters,
         )
 
+    @override
     def stages(self) -> list[OptimizationStage]:
         s: list[OptimizationStage] = []
         if self._join_order_enumerator:
@@ -989,6 +1005,7 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
             s.append(self._plan_parameterization)
         return s
 
+    @override
     def describe(self) -> jsondict:
         return {
             "name": "multi_stage_pipeline",
@@ -1006,9 +1023,11 @@ class MultiStageOptimizationPipeline(OptimizationPipeline):
         if not self._build:
             raise StateError("Pipeline has not been build")
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         components = [
             self._join_order_enumerator,
@@ -1117,9 +1136,11 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
             case _:
                 raise TypeError(f"Unsupported component type: {type(step)}")
 
+    @override
     def target_database(self) -> Database:
         return self.target_db
 
+    @override
     def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         self._ensure_supported_query(query)
         current_plan = (
@@ -1131,6 +1152,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
             current_plan = optimization_step.optimize_query(query, current_plan)
         return current_plan
 
+    @override
     def stages(self) -> list[OptimizationStage]:
         s: list[OptimizationStage] = []
         if self._initial_plan_generator:
@@ -1138,6 +1160,7 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
         s.extend(self._optimization_steps)
         return s
 
+    @override
     def describe(self) -> jsondict:
         return {
             "name": "incremental_pipeline",
@@ -1214,9 +1237,11 @@ class IncrementalOptimizationPipeline(OptimizationPipeline):
                 continue
             incremental_step.pre_check().check_supported_query(query).ensure_all_passed(query)
 
+    @override
     def __repr__(self) -> str:
         return str(self)
 
+    @override
     def __str__(self) -> str:
         opt_chain = " -> ".join(str(comp) for comp in self._optimization_steps)
         return f"MultiStageOptimization [{opt_chain}]"

@@ -9,6 +9,7 @@ The `OptimizationPreCheck` defines the abstract interface that all checks should
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from typing import override
 
 import networkx as nx
 
@@ -299,15 +300,19 @@ class OptimizationPreCheck:
     def __contains__(self, item: object) -> bool:
         return item == self
 
+    @override
     def __hash__(self) -> int:
         return hash(self.name)
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self.name == other.name
 
+    @override
     def __repr__(self) -> str:
         return f"OptimizationPreCheck [{self.name}]"
 
+    @override
     def __str__(self) -> str:
         return self.name
 
@@ -318,9 +323,11 @@ class EmptyPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("empty")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         return PreCheckResult.with_all_passed()
 
+    @override
     def describe(self) -> dict:
         return {"name": "no_check"}
 
@@ -347,6 +354,7 @@ class CompoundCheck(OptimizationPreCheck):
         )
         self.checks = [check for check in checks if not isinstance(check, EmptyPreCheck)]
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         check_results = [check.check_supported_query(query) for check in self.checks]
         aggregated_passed = all(check_result.passed for check_result in check_results)
@@ -355,18 +363,23 @@ class CompoundCheck(OptimizationPreCheck):
         )
         return PreCheckResult(aggregated_passed, aggregated_failures)
 
+    @override
     def describe(self) -> dict:
         return {"multiple_checks": [check.describe() for check in self.checks]}
 
+    @override
     def __contains__(self, item: object) -> bool:
         return super().__contains__(item) or any(item in child_check for child_check in self.checks)
 
+    @override
     def __hash__(self) -> int:
         return hash(tuple(self.checks))
 
+    @override
     def __eq__(self, other: object) -> bool:
         return isinstance(other, type(self)) and self.checks == other.checks
 
+    @override
     def __str__(self) -> str:
         child_checks_str = "|".join(str(child_check) for child_check in self.checks)
         return f"CompoundCheck [{child_checks_str}]"
@@ -412,11 +425,13 @@ class ImplicitQueryPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("implicit-query")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if query.has_simple_from():
             return PreCheckResult.with_all_passed()
         return PreCheckResult.with_failure("Query does not have a simple FROM clause")
 
+    @override
     def describe(self) -> dict:
         return {"name": "implicit_query"}
 
@@ -427,11 +442,13 @@ class CrossProductPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-cross-products")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if nx.is_connected(query.join_graph()):
             return PreCheckResult.with_all_passed()
         return PreCheckResult.with_failure("Query contains cross products")
 
+    @override
     def describe(self) -> dict:
         return {"name": "no_cross_products"}
 
@@ -442,11 +459,13 @@ class VirtualTablesPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-virtual-tables")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if any(table.virtual for table in query.tables()):
             return PreCheckResult.with_failure("Query contains virtual tables")
         return PreCheckResult.with_all_passed()
 
+    @override
     def describe(self) -> dict:
         return {"name": "no_virtual_tables"}
 
@@ -462,12 +481,14 @@ class EquiJoinPreCheck(OptimizationPreCheck):
         self._allow_conjunctions = allow_conjunctions
         self._allow_nesting = allow_nesting
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         join_predicates = query.joins()
         all_passed = all(self._perform_predicate_check(join_pred) for join_pred in join_predicates)
         failure_reason = "" if all_passed else "Query contains non-equi-joins"
         return PreCheckResult(all_passed, failure_reason)
 
+    @override
     def describe(self) -> dict:
         return {
             "name": "equi_joins_only",
@@ -536,6 +557,7 @@ class EquiJoinPreCheck(OptimizationPreCheck):
             return False
         return all(self._perform_predicate_check(child_pred) for child_pred in predicate.iterchildren())
 
+    @override
     def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, type(self))
@@ -543,6 +565,7 @@ class EquiJoinPreCheck(OptimizationPreCheck):
             and self._allow_nesting == other._allow_nesting
         )
 
+    @override
     def __hash__(self) -> int:
         return hash((self.name, self._allow_conjunctions, self._allow_nesting))
 
@@ -553,6 +576,7 @@ class InnerJoinPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("inner-joins-only")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if not query.from_clause:
             return PreCheckResult.with_all_passed()
@@ -560,6 +584,7 @@ class InnerJoinPreCheck(OptimizationPreCheck):
         checks = [self._check_table_source(entry) for entry in query.from_clause.items]
         return PreCheckResult.merge(checks)
 
+    @override
     def describe(self) -> dict:
         return {"name": "inner_joins_only"}
 
@@ -588,6 +613,7 @@ class SubqueryPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-subqueries")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         return (
             PreCheckResult.with_all_passed()
@@ -595,6 +621,7 @@ class SubqueryPreCheck(OptimizationPreCheck):
             else PreCheckResult.with_failure("Query contains subqueries")
         )
 
+    @override
     def describe(self) -> dict:
         return {"name": "no_subqueries"}
 
@@ -605,11 +632,13 @@ class DependentSubqueryPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-dependent-subquery")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         passed = not any(subquery.is_dependent() for subquery in query.subqueries())
         failure_reason = "" if passed else "Query contains dependent subqueries"
         return PreCheckResult(passed, failure_reason)
 
+    @override
     def describe(self) -> dict:
         return {"name": "no_dependent_subquery"}
 
@@ -620,11 +649,13 @@ class SetOperationsPreCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("no-set-operations")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         passed = not query.is_set_query()
         failure_reason = "" if passed else "SET_OPERATION"
         return PreCheckResult(passed, failure_reason)
 
+    @override
     def describe(self) -> dict:
         return {"name": "no_set_operations"}
 
@@ -647,11 +678,13 @@ class SupportedHintCheck(OptimizationPreCheck):
         super().__init__("database-check")
         self._features = {hints} if isinstance(hints, (HintType, PhysicalOperator)) else set(hints)
 
+    @override
     def check_supported_database_system(self, database_instance: Database) -> PreCheckResult:
         failures = [hint for hint in self._features if not database_instance.hinting().supports_hint(hint)]
         passed = not failures
         return PreCheckResult(passed, [f"Database does not support hint: {hint}" for hint in failures])
 
+    @override
     def describe(self) -> dict:
         return {"name": "database_operator_support", "features": self._features}
 
@@ -684,11 +717,13 @@ class CustomCheck(OptimizationPreCheck):
         self._query_check = query_check
         self._db_check = db_check
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if self._query_check is None:
             return PreCheckResult.with_all_passed()
         return self._query_check(query)
 
+    @override
     def check_supported_database_system(self, database_instance: Database) -> PreCheckResult:
         if self._db_check is None:
             return PreCheckResult.with_all_passed()
@@ -696,18 +731,23 @@ class CustomCheck(OptimizationPreCheck):
 
 
 class _TableSourceCheck(TableSourceVisitor[bool]):
+    @override
     def visit_direct_source(self, src: DirectTableSource, *args, **kwargs) -> bool:
         return True
 
+    @override
     def visit_subquery_source(self, src: SubqueryTableSource, *args, **kwargs) -> bool:
         return False
 
+    @override
     def visit_values_source(self, src: ValuesTableSource, *args, **kwargs) -> bool:
         return False
 
+    @override
     def visit_function_source(self, src: FunctionTableSource, *args, **kwargs) -> bool:
         return False
 
+    @override
     def visit_join_source(self, src: JoinTableSource, *args, **kwargs) -> bool:
         if src.join_type not in (JoinType.InnerJoin, JoinType.CrossJoin):
             return False
@@ -735,6 +775,7 @@ class SPJCheck(OptimizationPreCheck):
     def __init__(self) -> None:
         super().__init__("spj-check")
 
+    @override
     def check_supported_query(self, query: SqlQuery) -> PreCheckResult:
         if not is_select_query(query):
             return PreCheckResult.with_failure("Query is not a SELECT query")

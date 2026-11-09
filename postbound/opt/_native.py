@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 import warnings
 from collections.abc import Iterable
+from typing import override
 
 from .. import transform, util
 from .._core import (
@@ -73,6 +74,7 @@ class NativeCostModel(CostModel):
         self._raise_on_error = raise_on_error
         self._verbose = verbose
 
+    @override
     def estimate_cost(self, query: SqlQuery, plan: QueryPlan) -> Cost:
         assert self.target_db is not None
 
@@ -109,12 +111,14 @@ class NativeCostModel(CostModel):
                 cost = math.inf
         return cost
 
+    @override
     def describe(self) -> jsondict:
         return {
             "name": "native",
             "database_system": self.target_db.describe() if self.target_db is not None else None,
         }
 
+    @override
     def initialize(self, target_db: Database, query: SqlQuery) -> None:
         self.target_db = target_db
 
@@ -407,6 +411,7 @@ class NativeCardinalityEstimator(CardinalityEstimator):
         super().__init__(allow_cross_products=True)
         self._target_db: Database | None = target_db
 
+    @override
     def calculate_estimate(
         self, query: SqlQuery, intermediate: TableReference | Iterable[TableReference]
     ) -> Cardinality:
@@ -417,12 +422,14 @@ class NativeCardinalityEstimator(CardinalityEstimator):
         subquery = transform.as_star_query(subquery)
         return self._target_db.optimizer().cardinality_estimate(subquery)
 
+    @override
     def describe(self) -> jsondict:
         return {
             "name": "native",
             "database_system": self._target_db.describe() if self._target_db is not None else None,
         }
 
+    @override
     def initialize(self, target_db: Database, query: SqlQuery) -> None:
         self._target_db = target_db
 
@@ -440,10 +447,12 @@ class NativeJoinOrderOptimizer(JoinOrdering):
         super().__init__()
         self.db_instance = db_instance
 
+    @override
     def optimize_join_order(self, query: SqlQuery) -> JoinTree:
         query_plan = self.db_instance.optimizer().query_plan(query)
         return jointree_from_plan(query_plan)
 
+    @override
     def describe(self) -> jsondict:
         return {"name": "native", "database_system": self.db_instance.describe()}
 
@@ -464,12 +473,14 @@ class NativePhysicalOperatorSelection(OperatorSelection):
         super().__init__()
         self.db_instance = db_instance
 
+    @override
     def select_physical_operators(self, query: SqlQuery, join_order: JoinTree | None) -> PhysicalOperatorAssignment:
         if join_order:
             query = self.db_instance.hinting().generate_hints(query, join_order=join_order)
         query_plan = self.db_instance.optimizer().query_plan(query)
         return operators_from_plan(query_plan)
 
+    @override
     def describe(self) -> jsondict:
         return {"name": "native", "database_system": self.db_instance.describe()}
 
@@ -490,6 +501,7 @@ class NativePlanParameterization(ParameterGeneration):
         super().__init__()
         self.db_instance = db_instance
 
+    @override
     def generate_plan_parameters(
         self,
         query: SqlQuery,
@@ -503,6 +515,7 @@ class NativePlanParameterization(ParameterGeneration):
         query_plan = self.db_instance.optimizer().query_plan(query)
         return parameters_from_plan(query_plan)
 
+    @override
     def describe(self) -> jsondict:
         return {"name": "native", "database_system": self.db_instance.describe()}
 
@@ -520,9 +533,11 @@ class NativeOptimizer(CompleteOptimizationAlgorithm):
         super().__init__()
         self.db_instance = db_instance
 
+    @override
     def optimize_query(self, query: SqlQuery) -> QueryPlan:
         return self.db_instance.optimizer().query_plan(query)
 
+    @override
     def describe(self) -> jsondict:
         return {"name": "native", "database_system": self.db_instance.describe()}
 

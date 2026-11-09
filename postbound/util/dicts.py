@@ -7,7 +7,7 @@ import itertools
 import typing
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Protocol
+from typing import Protocol, override
 
 import numpy as np
 
@@ -272,6 +272,7 @@ class HashableDict(collections.UserDict[K, V]):
     This type should be used with extreme caution in order to not violate any invariants due to unintended data modification.
     """
 
+    @override
     def __hash__(self) -> int:
         return hash_dict(self.data)
 
@@ -301,6 +302,7 @@ class CustomHashDict[K, V](Mapping[K, V]):
         self._map: dict[int, V] = {}
         self._keys: set[K] = set()
 
+    @override
     def __getitem__(self, key: K) -> V:
         idx = self.hash_function(key, **self._hash_args)
         return self._map[idx]
@@ -315,13 +317,16 @@ class CustomHashDict[K, V](Mapping[K, V]):
         del self._map[idx]
         self._keys.remove(key)
 
+    @override
     def __contains__(self, key: object) -> bool:
         idx = self.hash_function(key, **self._hash_args)
         return idx in self._map
 
+    @override
     def __len__(self) -> int:
         return len(self._map)
 
+    @override
     def __iter__(self) -> Iterator[K]:
         return iter(self._keys)
 
@@ -342,6 +347,7 @@ class DynamicDefaultDict(collections.UserDict[K, V]):
         super().__init__()
         self.factory = factory
 
+    @override
     def __getitem__(self, key: K) -> V:
         if key not in self.data:
             self.data[key] = self.factory(key)
@@ -369,15 +375,18 @@ class frozendict(collections.UserDict[K, V]):
         self.popitem = None
         self._frozen = True
 
+    @override
     def __setitem__(self, key: K, item: V) -> None:
         if self._frozen:
             raise TypeError("Cannot set frozendict entries after creation")
         return super().__setitem__(key, item)
 
+    @override
     def __delitem__(self, key: K) -> None:
         if self._frozen:
             raise TypeError("Cannot remove frozendict entries after creation")
         return super().__delitem__(key)
 
+    @override
     def __hash__(self) -> int:
         return hash_dict(self)
