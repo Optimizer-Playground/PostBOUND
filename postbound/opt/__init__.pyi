@@ -1,10 +1,6 @@
 # Type stubs for postbound.optimizer package
 
-from ._cardinalities import (
-    CardinalityCache,
-    OfflineCardinalities,
-    PerfectCardinalities,
-)
+from ._cardinalities import CardinalityCache, OfflineCardinalities, PerfectCardinalities, WorkloadSpecificCardinalities
 from ._dynprog import (
     AddPathHook,
     DPTable,
@@ -74,6 +70,7 @@ __all__ = [
     "RandomPlanOptimizer",
     "RelOptInfo",
     "Sorting",
+    "WorkloadSpecificCardinalities",
     "explode_query_plan",
     "native_card_est",
     "native_join_order",
