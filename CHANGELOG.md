@@ -12,65 +12,37 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-## Version 0.23.0
+## Version 0.23.1
 
-This release focuses on improvements of the database interface, especially the schema.
-In addition, minor quality-of-life improvements throughout the framework should
-make it more convenient overall.
+### 🐣 New features
 
-## 🐣 New features
+- Added a new `WorkloadSpecificCardinalities` class. Together with
+  `OfflineCardinalities`, this should provide basically the same functionality
+  (and improve upon) the old `PreComputedCardinalities`.
+- Using a `TextBookOptimizationPipeline` with only a cardinality estimator now
+  effectively de-generates to a `MultiStageOptimizationPipeline` and eliminates
+  the downsides of the textbook pipeline (mostly the emulated enumerator and the
+  high overhead of cost modelling) in these cases.
 
-- The `DatabaseSchema` now supports composite keys and indexes. Sadly, this change
-  introduces some breaking changes (see below).
-- Introduced proper `PrimaryKeyRef` and `ForeignKeyRef` classes to easily work
-  with primary keys/foreign keys, including those that consist of multiple columns.
-- `ColumnInfo` now has a new `unique` field
-- `Histogram` now provides explicit `bound-upper` and `bound-lower` interpolation
-  modes.
-- `SimpleJoin` now has a `key_of()` function to easily retrieve the join key of
-  a given table.
-
-## 💀 Breaking changes
-
-- Removed the legacy MySQL backend.
-- `DatabaseSchema.primary_key_column()` has been removed in favor of `primary_key_of()`.
-  This also affects `TableInfo`
-- `DatabaseSchema.foreign_keys_on()` now provides explicit `ForeignKeyRef` objects.
-  This also affects the schema graph.
-- Removed the default values for the `DatabaseSchema` constructor. We should be
-  explicit about this stuff to prevent subtle bugs.
-- Removed the `bound` interpolation mode of `Histogram`. Use the more explicit
-  `bound-upper` or `bound-lower` instead.
-
-## 📰 Updates
-
-- NULLs are now treated consistenly across all statistics backends. Most importantly,
-  all methods of the `StatisticsCatalog` (except for `null_frac`) exclude NULLs
-  their calculations. This is in line with the behavior of PostgreSQL and the strategy
-  that makes most sense with respect to the NULL semantics in SQL.
-- `JoinGraph` is now an explicit type alias for [`nx.Graph`](https://networkx.org/documentation/stable/reference/classes/graph.html#networkx.Graph).
-  This allows to ship documentation about the graph's structure to the clients via
-  the docstring.
-- Interpolation in `Histogram` now rounds the frequency to the nearest integer.
-
-## 🏥 Fixes
-
-- All key/index-specific methods of the database schema now compare candidate keys/indexes
-  for an exact match with the given columns. Previously, composite keys/indexes
-  would match as soon as they contained the given column.
-- Fixed frequency values in most common values and histograms of the `PostgresStatistics`
-  catalog.
-- Fixed the number of parallel workers of a `QueryPlan` sometimes being wrong if
-  the plan originated from PostgreSQL. This is a corner case that was only triggered
-  if the optimizer wanted to launch parallel workers but the execution engine was
-  unable to do so.
-- Restored pretty-printing support for SQL queries in IPython sessions.
-
-## ⚠️ Deprecations
+### 💀 Breaking changes
 
 None
 
-## 🪲 Known bugs
+### 📰 Updates
+
+- Bumped DuckDB/`quacklab` to v2. This follows the 2.0 release of DuckDB and provides
+  pre-built wheels on Windows.
+
+### 🏥 Fixes
+
+- Fixed the Postgres plan to query plan conversion sometimes producing NaN estimated
+  cardinalities.
+
+### ⚠️ Deprecations
+
+None
+
+### 🪲 Known bugs
 
 - The automatic optimization of the Postgres server configuration as part of the
   Docker installation does not work on MacOS. Currently, this should be considered
@@ -79,7 +51,7 @@ None
   data server crashed and we are currently exploring alternative, more reliable
   solutions.
 
-## 🛣 Roadmap
+### 🛣 Roadmap
 
 The next months are going to be pretty exciting due to the imminent release of
 PostgreSQL 19. As it looks like, this will be the first Postgres version that
