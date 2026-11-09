@@ -18,42 +18,16 @@ Throughout the examples, we use the following setup:
 Cardinality estimation
 ----------------------
 
-**TLDR: use the :class:`~postbound.MultiStageOptimizationPipeline` to implement a new cardinality estimator.**
+If you only want to implement a new cardinality estimator, you need to implement the
+:class:`~postbound.CardinalityEstimator` interface. It can be plugged into a
+:class:`~postbound.MultiStageOptimizationPipeline`, or a :class:`~postbound.TextBookOptimizationPipeline` and provides
+the same functionality in both pipelines.
 
-PostBOUND provides two main :doc:`optimization pipelines <core/optimization>` to implement new cardinality estimators,
-the :class:`~postbound.TextBookOptimizationPipeline` and the :class:`~postbound.MultiStageOptimizationPipeline`.
-The textbook pipeline models the traditional interplay between plan enumerator, cost model, and cardinality estimator.
-In contrast, the multi-stage pipeline follows a sequential approach that consists of join ordering, operator selection,
-and plan parameterization. This third stage includes optional cardinality estimates.
-
-At first glance, the :class:`~postbound.TextBookOptimizationPipeline` might seem to be the better suited one.
-However, if the sole concern is cardinality estimation, there are some caveats when using this pipeline.
-Specifically, in the textbook architecture, it is the plan enumerator's responsibility to request cost estimates for
-its candidate plans, and it is the cost model's responsibility to request cardinality estimates for its plans.
-Therefore, the cardinalities to estimate ultimately depend on which plans the enumerator generates.
-If a textbook pipeline does not have an enumerator specified, PostBOUND must "fill the gaps" and come up with a way
-to generate plans and invoke cost model and cardinality estimator.
-
-Currently, PostBOUND cannot interactively cooperate with the optimizer of the target database system to ask questions
-such as "What plan would you inspect next, given these cardinalities/costs?". This leaves simulation as the only viable
-option: if no enumerator is specified, PostBOUND uses a very simple, dynamic-programming based enumerator to generate
-candidate plans. But this is only a simulation and the generated plans will differ from the plans that the actual
-optimizer would produce. See the documentation of the :ref:`default plan enumerator selection <default-enumerator>` for
-more details.
-
-In contrast, when a :class:`~postbound.MultiStageOptimizationPipeline` contains just a cardinality estimator as plan
-parameterization (and no join ordering nor operator selection), PostBOUND simply ships all estimated cardinalities to
-the target database system. This allows the native optimizer to be invoked, with the just the given cardinalities being
-overwritten. For all missing cardinalities, the join order, and the selected operators, the optimizer must use its
-own strategies.
-In fact, the default implementation when using a cardinality estimator in this context generates estimates for all
-sensible intermediates. While this can be quiet a lot of candidates for more complex queries (e.g., the more complex
-JOB queries contain several thousand intermediates) we have not observed a significant performance impact.
-
-**Therefore, the recommended way to implement a new cardinality estimator is to use the**
-:class:`~postbound.CardinalityEstimator` **within a** :class:`~postbound.MultiStageOptimizationPipeline`. If you should
-need to switch to a textbook pipeline later, you can do so without changing your estimator implementation. This is
-because the estimator class already provides default implementations to satisfy both interfaces.
+However, if you plan to implement additional components, the choice of pipeline matters: The
+:class:`~postbound.TextBookOptimizationPipeline` models the traditional interplay of plan enumerator, cost model, and
+cardinality estimator as a tightly integrated process. The :class:`~postbound.MultiStageOptimizationPipeline` separates
+join ordering and physical operator selection into different phases and treats cardinality estimation as an optional
+parameterization step.
 
 
 .. _cookbook-partial-hinting:

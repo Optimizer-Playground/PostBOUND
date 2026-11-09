@@ -106,23 +106,8 @@ Essentially, you can provide any combination of join ordering, operator selectio
 .. tip::
 
     If your research area is cardinality estimation, both the textbook pipeline as well as the multi-stage pipeline can
-    be used to implement prototypes. However, if you are not interested in plan enumeration or cost model, it might be
-    a better idea to test your cardinality estimator using the
-    :class:`~postbound.MultiStageOptimizationPipeline`.
-
-    The reasoning behind this recommendation is that the textbook pipeline requires a plan enumerator which currently
-    cannot be re-used from the target database system (because it is the enumerator's job to request cost and cardinality
-    estimates, see :ref:`the textbook pipeline <default-enumerator>` for details).
-    While the default enumerator can mimic the actual enumerator pretty well for PostgreSQL, it is still a
-    simplification.
-
-    On the other hand, the multi-stage pipeline just passes the cardinality estimates from the plan parameterization
-    to the native optimizer. Therefore, the key idea is to use a multi-stage pipeline that does not perform any join
-    ordering or operator selection. During the plan parameterization stage, estimates for all potential intermediates
-    are generated.
-
-    See the :ref:`Cookbook <cookbook-cardinality-estimation>` for a practical example. In short, by implementing your own
-    cardinality estimator, you can use it both in a textbook pipeline as well as in a multi-stage pipeline.
+    be used to implement prototypes. They provide the same behavior when the cardinality estimator is the only component
+    that is set-up.
 
 Integrated optimization pipeline
 --------------------------------

@@ -466,7 +466,20 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
     quantifies how expensive specific access paths for the intermediates are, and an enumerator that generates the
     intermediates in the first place.
 
-    To configure the pipeline, specific strategies for each of the three components have to be assigned.
+    To configure the pipeline, specific strategies for each of the three components have to be assigned. If individual
+    components have not been configured, defaults based on the optimizer of the target database system are used.
+    Note that these defaults are probably not what you want: the default cost model requests cost estimates from the
+    target database. While this is a fine default, it introduces a significant overhead to the estimation process,
+    since the enumerator typically explores a large number of candidate plans. The default plan enumerator is a simple
+    dynamic programming-style algorithm. This algorithm cannot capture the specifics of the target database system and
+    can produce very different plans than the native optimizer. To ease this situation somewhat, we use a special
+    enumerator if the target database is Postgres. While this enumerator was implemented to closely mirror the
+    optimization process of Postgres, it is not a 1:1 replacement and the fundamental limitation is still there.
+    Lastly, the default cardinality estimator requests cardinality estimates from the target database, which is a fine
+    default.
+
+    If only a cardinality estimator is set up and both cost model and plan enumerator are left at their defaults,
+    the optimization process effectively degenerates to the same logic that the `MultiStageOptimizationPipeline` uses.
 
     Parameters
     ----------
@@ -492,6 +505,10 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         else:
             self._plan_enumerator = DynamicProgrammingEnumerator(target_db=target_db)
 
+        self._default_card_est = True
+        self._default_cost_model = True
+        self._default_plan_enum = True
+
         self._support_check = EmptyPreCheck()
         self._build = False
 
@@ -514,8 +531,9 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         self
             The current pipeline to allow for easy method-chaining.
         """
-        self._build = False
         self._card_est = estimator
+        self._build = False
+        self._default_card_est = False
         return self
 
     def setup_cost_model(self, cost_model: CostModel) -> Self:
@@ -533,8 +551,9 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         self
             The current pipeline to allow for easy method-chaining.
         """
-        self._build = False
         self._cost_model = cost_model
+        self._build = False
+        self._default_cost_model = False
         return self
 
     def setup_plan_enumerator(self, plan_enumerator: PlanEnumerator) -> Self:
@@ -552,8 +571,9 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         self
             The current pipeline to allow for easy method-chaining.
         """
-        self._build = False
         self._plan_enumerator = plan_enumerator
+        self._build = False
+        self._default_plan_enum = False
         return self
 
     def use(self, component: PlanEnumerator | CostModel | CardinalityEstimator) -> Self:
@@ -571,8 +591,8 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
     def build(self) -> Self:
         """Constructs the optimization pipeline.
 
-        This includes checking all strategies for compatibility with the `target_db`. Afterwards, the pipeline is ready to
-        optimize queries.
+        This includes checking all strategies for compatibility with the `target_db`. Afterwards, the pipeline is ready
+        to optimize queries.
 
         Returns
         -------
@@ -584,13 +604,6 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
         UnsupportedSystemError
             If any of the selected optimization stages is not compatible with the `target_db`.
         """
-        if self._card_est is None:
-            raise StateError("Missing cardinality estimator")
-        if self._cost_model is None:
-            raise StateError("Missing cost model")
-        if self._plan_enumerator is None:
-            raise StateError("Missing plan enumerator")
-
         self._support_check = merge_checks(
             [
                 self._card_est.pre_check(),
@@ -607,11 +620,39 @@ class TextBookOptimizationPipeline(OptimizationPipeline):
     def query_execution_plan(self, query: SqlQuery) -> QueryPlan:
         if not self._build:
             raise StateError("Pipeline has not been build")
+
+        if self._default_card_est and self._default_cost_model and self._default_plan_enum:
+            return self._target_db.optimizer().query_plan(query)
+
         self._support_check.check_supported_query(query).ensure_all_passed(query)
+        if not self._default_card_est and self._default_cost_model and self._default_plan_enum:
+            cardinalities = self._card_est.estimate_cardinalities(query)
+            hinted = self._target_db.hinting().generate_hints(query, plan_parameters=cardinalities)
+            return self._target_db.optimizer().query_plan(hinted)
 
         return self._plan_enumerator.generate_execution_plan(
             query, cardinality_estimator=self._card_est, cost_model=self._cost_model
         )
+
+    @override
+    def optimize_query(self, query: SqlQuery) -> SqlQuery:
+        if not self._build:
+            raise StateError("Pipeline has not been build")
+
+        if self._default_card_est and self._default_cost_model and self._default_plan_enum:
+            return query
+
+        self._support_check.check_supported_query(query).ensure_all_passed(query)
+        if not self._default_card_est and self._default_cost_model and self._default_plan_enum:
+            cardinalities = self._card_est.estimate_cardinalities(query)
+            hinted = self._target_db.hinting().generate_hints(query, plan_parameters=cardinalities)
+            return hinted
+
+        plan = self._plan_enumerator.generate_execution_plan(
+            query, cardinality_estimator=self._card_est, cost_model=self._cost_model
+        )
+        hinted = self._target_db.hinting().generate_hints(query, plan)
+        return hinted
 
     @override
     def stages(self) -> list[OptimizationStage]:
