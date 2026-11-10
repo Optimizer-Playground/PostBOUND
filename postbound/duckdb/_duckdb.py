@@ -610,22 +610,22 @@ def _parse_plan_node(raw_plan: dict, *, query: SqlQuery | None) -> QueryPlan:
     extras: dict = raw_plan.get("extra_info", {})
     match node_type:
         case "HASH_JOIN":
-            node_type = JoinOperator.HashJoin
+            operator = JoinOperator.HashJoin
         case (
             "SEQ_SCAN" | "SEQ_SCAN "  # DuckDB has a weird typo in the SEQ_SCAN label
         ) if extras.get("Type", "") == "Sequential Scan":
-            node_type = ScanOperator.SequentialScan
+            operator = ScanOperator.SequentialScan
         case (
             "SEQ_SCAN" | "SEQ_SCAN "  # DuckDB has a weird typo in the SEQ_SCAN label
         ) if extras.get("Type", "") == "Index Scan":
-            node_type = ScanOperator.IndexScan
+            operator = ScanOperator.IndexScan
         case "PROJECTION" | "FILTER" | "UNGROUPED_AGGREGATE" | "PERFECT_HASH_GROUP_BY":
-            pass
+            operator = None
         case _:
             warnings.warn(f"Unknown node type: {node_type}, ({extras})", stacklevel=2)
-            pass
+            operator = None
 
-    if node_type in ScanOperator:
+    if operator in ScanOperator:
         base_table = _bind_node_to_table(raw_plan, query=query) if query is not None else None
     else:
         base_table = None
@@ -642,6 +642,7 @@ def _parse_plan_node(raw_plan: dict, *, query: SqlQuery | None) -> QueryPlan:
 
     return QueryPlan(
         node_type,
+        operator=operator,
         children=children,
         base_table=base_table,
         estimated_cardinality=Cardinality(card_est),
