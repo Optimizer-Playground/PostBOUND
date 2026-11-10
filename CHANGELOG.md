@@ -12,17 +12,11 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-## Version 0.23.1
+## Version 0.23.2
 
 ### 🐣 New features
 
-- Added a new `WorkloadSpecificCardinalities` class. Together with
-  `OfflineCardinalities`, this should provide basically the same functionality
-  (and improve upon) the old `PreComputedCardinalities`.
-- Using a `TextBookOptimizationPipeline` with only a cardinality estimator now
-  effectively de-generates to a `MultiStageOptimizationPipeline` and eliminates
-  the downsides of the textbook pipeline (mostly the emulated enumerator and the
-  high overhead of cost modelling) in these cases.
+None
 
 ### 💀 Breaking changes
 
@@ -30,13 +24,23 @@ None
 
 ### 📰 Updates
 
-- Bumped DuckDB/`quacklab` to v2. This follows the 2.0 release of DuckDB and provides
-  pre-built wheels on Windows.
+- `parse_duckdb_plan()` now accepts the result set of an `EXPLAIN` query directly
+  (raw or simplified), in addition to the JSON string, the parsed JSON and the operator
+  tree. It determines on its own which representation it receives.
+- `QueryPlan`s created from DuckDB now retain their original `node_type` in addition
+  to the parsed `operator` variant. This matches the behavior on Postgres.
 
 ### 🏥 Fixes
 
-- Fixed the Postgres plan to query plan conversion sometimes producing NaN estimated
-  cardinalities.
+- Fixed `DuckDBOptimizer.parse_plan()` returning `None` (with a "Could not parse
+  plan" warning) for every result set of an `EXPLAIN` query.
+- Fixed `DuckDBOptimizer.analyze_plan()` and `parse_duckdb_plan()` for the new
+  `EXPLAIN ANALYZE` profiling format of DuckDB/`quacklab` v2. Previously, no query
+  could be analyzed on DuckDB since the upgrade to `quacklab` v2.
+- Fixed schema lookups (e.g. `is_primary_key()`, `is_unique()`, `lookup_column()`,
+  foreign keys and indexes) and the column binding of the parser being case-sensitive.
+  This broke DuckDB databases that use mixed-case identifiers, such as `users.Id` in
+  the Stats database.
 
 ### ⚠️ Deprecations
 
