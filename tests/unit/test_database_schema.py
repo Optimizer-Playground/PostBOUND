@@ -671,3 +671,34 @@ def test_all_foreign_keys_scopes_the_key_lookup_to_the_constraint_table() -> Non
     schema_over(cursor).all_foreign_keys_on(MOVIE_INFO)
 
     assert cursor.calls[0].mentions("and tc.table_name = kcu.table_name")
+
+
+def test_is_primary_key_ignores_the_case_of_the_column_names() -> None:
+    """Regression guard for the DuckDB identifier casing bug: the key columns from the catalog were compared to the
+    requested column names as raw strings. DuckDB keeps the spelling of the DDL (the Stats database declares
+    ``users.Id``) while the parser folds unquoted identifiers to lower case, so ``users.id`` was not recognized as the
+    primary key -- even though `ColumnReference` itself already compares names case-insensitively.
+    """
+    cursor = ScriptedCursor({"table_constraints": [("Id",)]})
+
+    assert schema_over(cursor).is_primary_key(ColumnReference("id", TITLE)) is True
+
+
+def test_is_unique_ignores_the_case_of_the_column_names() -> None:
+    """Regression guard for the DuckDB identifier casing bug: see
+    `test_is_primary_key_ignores_the_case_of_the_column_names`. The columns of the UNIQUE constraints were compared to
+    the requested column names as raw strings.
+    """
+    cursor = ScriptedCursor({UNIQUE_FRAGMENT: [("uq_kind_year", "Kind"), ("uq_kind_year", "Production_Year")]})
+
+    assert schema_over(cursor).is_unique([KIND, YEAR]) is True
+
+
+def test_lookup_column_ignores_the_case_of_the_column_names() -> None:
+    """Regression guard for the DuckDB identifier casing bug: see
+    `test_is_primary_key_ignores_the_case_of_the_column_names`. The column names of the candidate tables were compared
+    to the requested name as raw strings, so a lower-cased column from a parsed query never found its table.
+    """
+    cursor = ScriptedCursor({"information_schema.columns": [("Id",), ("Production_Year",)]})
+
+    assert schema_over(cursor).lookup_column("production_year", [TITLE]) == TITLE

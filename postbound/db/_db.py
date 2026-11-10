@@ -35,6 +35,7 @@ from .._core import (
     TableReference,
     UnboundColumnError,
     VirtualTableError,
+    normalize,
 )
 from .._hints import (
     HintType,
@@ -1039,10 +1040,10 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
         **Hint for implementors:** the default implementation of this method (transitively) relies on the
         *information_schema.columns* view.
         """
-        column = column.name if isinstance(column, ColumnReference) else column
+        column = normalize(column.name if isinstance(column, ColumnReference) else column)
 
         for candidate in candidate_tables:
-            candidate_cols = {col.name for col in self.columns(candidate)}
+            candidate_cols = {normalize(col.name) for col in self.columns(candidate)}
             if column in candidate_cols:
                 return candidate
 
@@ -1104,8 +1105,8 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
         result_set = cur.fetchall()
         assert result_set is not None
 
-        pk_cols = {row[0] for row in result_set}
-        requested_cols = {col.name for col in column}
+        pk_cols = {normalize(row[0]) for row in result_set}
+        requested_cols = {normalize(col.name) for col in column}
         return pk_cols == requested_cols
 
     def primary_key_of(self, table: TableReference | str) -> PrimaryKeyRef | None:
@@ -1636,9 +1637,9 @@ class DatabaseSchema(ABC, Mapping[TableReference, TableInfo]):
 
         unique_constraints: dict[str, set[str]] = collections.defaultdict(set)
         for constraint, col in result_set:
-            unique_constraints[constraint].add(col)
+            unique_constraints[constraint].add(normalize(col))
 
-        target_cols = {col.name for col in column}
+        target_cols = {normalize(col.name) for col in column}
         return any(target_cols == cols for cols in unique_constraints.values())
 
     def as_graph(self) -> nx.DiGraph:

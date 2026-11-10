@@ -38,7 +38,7 @@ from typing import Literal, overload
 import pglast
 
 from . import util
-from ._core import ColumnReference, TableReference
+from ._core import ColumnReference, TableReference, normalize
 from .db import DatabasePool, DatabaseSchema
 from .qal import (
     AbstractPredicate,
@@ -161,7 +161,7 @@ class SchemaCache:
                 continue
 
             _, table_columns = self._inflate_cache(candidate)
-            if colname in table_columns:
+            if normalize(colname) in table_columns:
                 return candidate
 
         return None
@@ -187,7 +187,9 @@ class SchemaCache:
         Returns
         -------
         tuple[list[str], set[str]]
-            The columns of the table in their defined order, as well as the same columns as a set.
+            The columns of the table in their defined order (spelled as in the catalog), as well as the normalized
+            column names as a set. Normalization makes the lookup case-insensitive, just like the database systems
+            resolve unquoted identifiers.
         """
         table = table.full_name if isinstance(table, TableReference) else table
         cached_res = self._lookup_cache.get(table)
@@ -197,7 +199,7 @@ class SchemaCache:
             return [], set()
 
         cols: list[str] = [col.name for col in self._schema.columns(table)]
-        cols_set = set(cols)
+        cols_set = {normalize(col) for col in cols}
         self._lookup_cache[table] = cols, cols_set
         return cols, cols_set
 
@@ -402,7 +404,8 @@ class QueryNamespace:
 
     def provides_column(self, name: str) -> bool:
         """Checks, whether the current namespace has a specific column in its output relation."""
-        return name in self._output_shape
+        name = normalize(name)
+        return any(normalize(col) == name for col in self._output_shape)
 
     def lookup_column(self, key: str) -> TableReference | None:
         """Searches for the table that provies a specific column.

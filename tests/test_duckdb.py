@@ -16,13 +16,13 @@ The pure formatting part of the EXPLAIN regression (the *duckdb* flavor of `form
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
-from postbound import ColumnReference, ScanOperator, TableReference, parser, transform
+from postbound import ColumnReference, ScanOperator, TableReference, db, parser, transform
 from postbound.db import ForeignKeyRef, Histogram, PreciseStatistics, PrimaryKeyRef
 from postbound.duckdb import DuckDBDatabase
 
@@ -221,6 +221,91 @@ def test_precise_histogram_of_a_single_distinct_value_on_duckdb(duckdb_instance:
     assert list(hist) == [(7, 2)]
 
 
+# -- identifier casing ----------------------------------------------------------------------------------------
+
+# DuckDB keeps the spelling of the DDL in its catalog but resolves identifiers case-insensitively. The schema mirrors
+# the Stats database (``users.Id``, ``postHistory``), while the references use the lower-cased spelling that the parser
+# produces for unquoted identifiers.
+MIXED_CASE_DDL = [
+    "CREATE TABLE users (Id INTEGER PRIMARY KEY, DisplayName VARCHAR UNIQUE, Age INTEGER)",
+    "CREATE TABLE postHistory (Id INTEGER PRIMARY KEY, UserId INTEGER, FOREIGN KEY (UserId) REFERENCES users (Id))",
+    "CREATE INDEX postHistory_UserId_idx ON postHistory (UserId)",
+    "INSERT INTO users VALUES (1, 'a', 20), (2, 'b', NULL)",
+    "INSERT INTO postHistory VALUES (1, 1), (2, 1), (3, 2)",
+]
+USERS, POST_HISTORY = TableReference("users"), TableReference("posthistory")
+USERS_ID, USERS_AGE = ColumnReference("id", USERS), ColumnReference("age", USERS)
+PH_USER_ID = ColumnReference("userid", POST_HISTORY)
+
+
+@pytest.fixture
+def mixed_case_instance(duckdb_instance: DuckDBDatabase) -> DuckDBDatabase:
+    for statement in MIXED_CASE_DDL:
+        duckdb_instance.execute_query(statement)
+    return duckdb_instance
+
+
+@pytest.mark.parametrize(
+    ("lookup", "expected"),
+    [
+        (lambda d: d.schema().columns(POST_HISTORY), [ColumnReference("id", POST_HISTORY), PH_USER_ID]),
+        (lambda d: d.schema().lookup_column("age", [POST_HISTORY, USERS]), USERS),
+        (lambda d: d.schema().is_view(POST_HISTORY), False),
+        (lambda d: d.schema().is_primary_key(USERS_ID), True),
+        (lambda d: d.schema().primary_key_of(USERS), PrimaryKeyRef([USERS_ID])),
+        (lambda d: d.schema().is_unique(ColumnReference("displayname", USERS)), True),
+        (lambda d: d.schema().datatype(ColumnReference("displayname", USERS)), "varchar"),
+        (lambda d: d.schema().is_nullable(USERS_ID), False),
+        (lambda d: d.schema().foreign_keys_on(PH_USER_ID), {ForeignKeyRef([PH_USER_ID], [USERS_ID])}),
+        (lambda d: d.schema().indexes_on(PH_USER_ID), {"postHistory_UserId_idx", "postHistory_userid_id_fkey"}),
+        (lambda d: d.schema().has_secondary_index(PH_USER_ID), True),
+        (lambda d: d.schema()[USERS_ID].primary_key, True),
+        (lambda d: d.schema().as_graph().has_edge(POST_HISTORY, USERS), True),
+        (lambda d: d.schema().join_equivalence_keys()[PH_USER_ID], {PH_USER_ID, USERS_ID}),
+        (lambda d: d.statistics().total_rows(POST_HISTORY), 3),
+        (lambda d: d.statistics().num_distinct(PH_USER_ID), 2),
+        (lambda d: d.statistics().null_frac(USERS_AGE), 0.5),
+        (lambda d: d.statistics().min_max(USERS_AGE), (20, 20)),
+        (lambda d: list(d.statistics().most_common_values(PH_USER_ID)), [(1, 2), (2, 1)]),
+    ],
+    ids=[
+        "columns",
+        "lookup_column",
+        "is_view",
+        "is_primary_key",
+        "primary_key_of",
+        "is_unique",
+        "datatype",
+        "is_nullable",
+        "foreign_keys_on",
+        "indexes_on",
+        "has_secondary_index",
+        "column_info",
+        "as_graph",
+        "join_equivalence_keys",
+        "total_rows",
+        "num_distinct",
+        "null_frac",
+        "min_max",
+        "most_common_values",
+    ],
+)
+def test_duckdb_lookups_ignore_the_case_of_identifiers(
+    mixed_case_instance: DuckDBDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+    lookup: Callable[[DuckDBDatabase], object],
+    expected: object,
+) -> None:
+    """Every schema and statistics lookup accepts the lower-cased spelling of a mixed-case DuckDB catalog.
+
+    The cases that used to fail have dedicated regression tests (tier 0 for the comparisons in the generic
+    `DatabaseSchema`, below for the SQL of `DuckDBSchema`); this guard checks the complete surface end to end.
+    """
+    monkeypatch.setattr(db, "enable_emulation_fallback", True)
+
+    assert lookup(mixed_case_instance) == expected
+
+
 # -- regression tests --------------------------------------------------------------------------------------------
 
 
@@ -330,3 +415,27 @@ def test_duckdb_database_describe_lists_keys_and_indexes_of_every_table(schema_i
     assert tables["s"]["primary_key"] is not None
     assert tables["ch"]["foreign_keys"]
     assert tables["s"]["indexes"]
+
+
+def test_duckdb_schema_all_foreign_keys_on_finds_mixed_case_tables(mixed_case_instance: DuckDBDatabase) -> None:
+    """Regression guard for the DuckDB identifier casing bug: ``duckdb_constraints()`` was filtered with
+    ``table_name = ?``, which compares the catalog spelling (``postHistory``) to the lower-cased name of a parsed query
+    as raw strings. The table therefore seemed to have no foreign keys.
+    """
+    fks = mixed_case_instance.schema().all_foreign_keys_on(POST_HISTORY)
+
+    assert fks == {ForeignKeyRef([PH_USER_ID], [USERS_ID])}
+
+
+def test_duckdb_schema_all_indexes_on_finds_mixed_case_tables(mixed_case_instance: DuckDBDatabase) -> None:
+    """Regression guard for the DuckDB identifier casing bug: see
+    `test_duckdb_schema_all_foreign_keys_on_finds_mixed_case_tables`. Both ``duckdb_constraints()`` and
+    ``duckdb_indexes()`` were filtered by the raw table name, so the table seemed to have no indexes.
+    """
+    indexes = mixed_case_instance.schema().all_indexes_on(POST_HISTORY)
+
+    assert {name: cols for name, cols in indexes.items()} == {
+        "postHistory_id_pkey": {ColumnReference("id", POST_HISTORY)},
+        "postHistory_userid_id_fkey": {PH_USER_ID},
+        "postHistory_UserId_idx": {PH_USER_ID},
+    }

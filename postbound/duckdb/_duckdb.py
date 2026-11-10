@@ -256,15 +256,11 @@ class DuckDBSchema(DatabaseSchema):
 
     def __init__(self, db: DuckDBDatabase) -> None:
         super().__init__(db, prep_placeholder="?", default_schema="main", default_catalog=db.database_name())
-        self._tables: set[TableReference] = set()
 
     @override
     def tables(
         self, *, catalog: str = "", schema: str = "", include_system_tables: bool = False
     ) -> set[TableReference]:
-        if self._tables:
-            return self._tables
-
         catalog_placeholder = "?" if catalog else "current_database()"
         schema_placeholder = "?" if schema else "current_schema()"
         query_template = f"""
@@ -302,9 +298,9 @@ class DuckDBSchema(DatabaseSchema):
                 referenced_table,
                 unnest(referenced_column_names) as ref_col
             FROM duckdb_constraints()
-            WHERE table_name = ?
-                AND schema_name = {schema_placeholder}
-                AND database_name = {catalog_placeholder}
+            WHERE lower(table_name) = lower(?)
+                AND lower(schema_name) = lower({schema_placeholder})
+                AND lower(database_name) = lower({catalog_placeholder})
                 AND constraint_type = 'FOREIGN KEY'
             """
 
@@ -343,16 +339,16 @@ class DuckDBSchema(DatabaseSchema):
         query_template = f"""
             SELECT constraint_name, unnest(constraint_column_names)
             FROM duckdb_constraints()
-            WHERE table_name = ?
-                AND schema_name = {schema_placeholder}
-                AND database_name = {catalog_placeholder}
+            WHERE lower(table_name) = lower(?)
+                AND lower(schema_name) = lower({schema_placeholder})
+                AND lower(database_name) = lower({catalog_placeholder})
                 AND constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE')
             UNION
             SELECT index_name, unnest(expressions::varchar[])
             FROM duckdb_indexes()
-            WHERE table_name = ?
-                AND schema_name = {schema_placeholder}
-                AND database_name = {catalog_placeholder}
+            WHERE lower(table_name) = lower(?)
+                AND lower(schema_name) = lower({schema_placeholder})
+                AND lower(database_name) = lower({catalog_placeholder})
             """
 
         params = [table.full_name]

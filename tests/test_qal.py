@@ -18,6 +18,7 @@ import pytest
 import postbound as pb
 from postbound import BoundColumnReference, ColumnReference, TableReference
 from tests import regression_suite
+from tests.doubles import StaticSchema
 
 pg_connect_dir = "."
 
@@ -404,3 +405,27 @@ def test_parser_handles_natural_right_join() -> None:
     [join] = query.from_clause.items
     assert isinstance(join, pb.qal.JoinTableSource)
     assert join.join_type == pb.qal.JoinType.NaturalRightJoin
+
+
+def test_parser_binds_unqualified_columns_regardless_of_the_catalog_spelling() -> None:
+    """Regression guard for the DuckDB identifier casing bug: the parser's schema cache compared the lower-cased
+    column names of the query to the column names of the catalog as raw strings. DuckDB keeps the spelling of the DDL
+    (e.g. ``users.Age`` in the Stats database), so unqualified columns were left unbound.
+    """
+    schema = StaticSchema({"users": ["Id", "Age"]})
+
+    query = pb.parse_query("SELECT age FROM users", db_schema=schema, bind_columns=True)
+
+    assert query.columns() == {ColumnReference("age", TableReference("users"))}
+
+
+def test_parser_binds_columns_of_a_star_subquery_regardless_of_the_catalog_spelling() -> None:
+    """Regression guard for the DuckDB identifier casing bug: the output shape of ``SELECT *`` is taken from the
+    catalog (``Id, Age``), and the lookup of an unqualified outer column compared it to the lower-cased name of the
+    query as a raw string. The column was therefore not attributed to the subquery.
+    """
+    schema = StaticSchema({"users": ["Id", "Age"]})
+
+    query = pb.parse_query("SELECT age FROM (SELECT * FROM users) s", db_schema=schema, bind_columns=True)
+
+    assert ColumnReference("age", TableReference.create_virtual("s")) in query.select_clause.columns()
