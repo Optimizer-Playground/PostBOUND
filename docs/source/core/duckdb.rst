@@ -60,7 +60,8 @@ Supported Backend Features
 +-------------------------------------------+--------------------------------------------------------------------+
 
 To obtain DuckDB query plans, you can either use the :meth:`~postbound.duckdb.DuckDBOptimizer.query_plan` method or parse
-the EXPLAIN output manually using :func:`~postbound.duckdb.parse_duckdb_plan`. Both options yield the same results:
+the EXPLAIN output manually using :func:`~postbound.duckdb.parse_duckdb_plan`. The parser accepts the result set of the
+EXPLAIN query as-is, so both options yield the same results:
 
 .. code-block:: python
 
@@ -70,7 +71,12 @@ the EXPLAIN output manually using :func:`~postbound.duckdb.parse_duckdb_plan`. B
     # this is equivalent to:
     explain_query = pb.transform.as_explain(stats["q-1"])
     raw_plan = duck_instance.execute_query(explain_query)
-    equivalent_plan = pb.duckdb.parse_duckdb_plan(raw_plan)
+    equivalent_plan = pb.duckdb.parse_duckdb_plan(raw_plan, query=stats["q-1"])
+
+The same holds for :meth:`~postbound.duckdb.DuckDBOptimizer.analyze_plan` and the output of ``EXPLAIN ANALYZE`` queries
+(see :func:`~postbound.transform.as_explain_analyze`), whose plans additionally contain the actual cardinalities and
+execution times of all operators. Passing the query is optional, but without it the scans cannot be linked to their
+tables.
 
 
 .. _duckdb-optimizer-architecture:

@@ -47,6 +47,7 @@ from ..db import (
     MostCommonValues,
     OptimizerInterface,
     PreciseStatistics,
+    ResultRow,
     ResultSet,
     StatisticsCatalog,
     UnsupportedDatabaseFeatureError,
@@ -532,10 +533,58 @@ def _bind_node_to_table(scan_node: dict, *, query: SqlQuery) -> TableReference |
     return best_match
 
 
-def parse_duckdb_plan(raw_plan: dict | str, *, query: SqlQuery | None = None) -> QueryPlan:
-    """Parses a DuckDB query plan from its JSON representation.
+_WRAPPER_OPERATORS = frozenset({"EXPLAIN", "EXPLAIN_ANALYZE", "RESULT_COLLECTOR"})
+"""Operators that DuckDB places above the actual plan in the EXPLAIN output."""
 
-    The query can be supplied to help with binding scan nodes to their corresponding tables (see Notes).
+
+def _unwrap_explain_output(raw_plan: object) -> dict:
+    """Reduces the different representations of DuckDB's EXPLAIN output to the root operator of the actual plan.
+
+    The representations are peeled off from the outside in: the raw result set of the EXPLAIN query (a list with a
+    single row), the simplified result set (the row itself, i.e. a pair of the EXPLAIN key and the JSON), the JSON
+    string, the parsed JSON (a list of root operators for EXPLAIN, a profiling summary for EXPLAIN ANALYZE), and finally
+    the `_WRAPPER_OPERATORS` above the actual plan.
+    """
+    while True:
+        match raw_plan:
+            case str():
+                raw_plan = json.loads(raw_plan)
+            case tuple() if len(raw_plan) == 2:  # result set row: (explain key, JSON)
+                raw_plan = raw_plan[1]
+            case list() if len(raw_plan) == 1:  # raw result set (one row), or the root operators of EXPLAIN
+                raw_plan = raw_plan[0]
+            case {"operator": [root]}:  # profiling summary of EXPLAIN ANALYZE
+                raw_plan = root
+            case {"name": name, "children": [child]} if name in _WRAPPER_OPERATORS:
+                raw_plan = child
+            case dict():
+                return raw_plan
+            case _:
+                raise ValueError(f"Not a DuckDB EXPLAIN output: {textwrap.shorten(repr(raw_plan), width=200)}")
+
+
+def parse_duckdb_plan(
+    raw_plan: ResultSet | ResultRow | list | dict | str, *, query: SqlQuery | None = None
+) -> QueryPlan:
+    """Parses a DuckDB query plan from the output of an EXPLAIN query.
+
+    Both the output of ``EXPLAIN (FORMAT JSON)`` and of ``EXPLAIN (ANALYZE, FORMAT JSON)`` are accepted, in the format
+    of DuckDB 2 (quacklab 2). For the latter, the actual cardinalities and execution times of the operators are included
+    in the plan.
+
+    Parameters
+    ----------
+    raw_plan : ResultSet | ResultRow | list | dict | str
+        The EXPLAIN output. Typically, this is just the result set of `DuckDBDatabase.execute_query`, either in its raw
+        or in its simplified form. The JSON column of the result set (as a string or as parsed JSON) is accepted as well,
+        as is the operator tree itself. The parser determines on its own which of these representations it receives.
+    query : SqlQuery | None, optional
+        The query that was explained. It is used to bind scan nodes to their corresponding tables (see Notes).
+
+    Returns
+    -------
+    QueryPlan
+        The parsed plan.
 
     Notes
     -----
@@ -543,18 +592,20 @@ def parse_duckdb_plan(raw_plan: dict | str, *, query: SqlQuery | None = None) ->
     referenced multiple times in a query, we cannot unambiguously bind scan nodes to their corresponding table. We employ
     some heuristics (e.g. trying to match filter predicates) to resolve this ambiguity, but there is no guarantee that this
     always works correctly.
+
+    Examples
+    --------
+    >>> explain_query = pb.transform.as_explain(query)
+    >>> plan = parse_duckdb_plan(duck_instance.execute_query(explain_query), query=query)
     """
-    if isinstance(raw_plan, str):
-        raw_plan = json.loads(raw_plan)
+    return _parse_plan_node(_unwrap_explain_output(raw_plan), query=query)
 
-    node_type = raw_plan.get("name") or raw_plan.get("operator_name")
+
+def _parse_plan_node(raw_plan: dict, *, query: SqlQuery | None) -> QueryPlan:
+    """Parses a single operator of a DuckDB plan, including all of its children."""
+    node_type = raw_plan.get("name")
     if not node_type:
-        assert len(raw_plan["children"]) == 1, "Expected a single child for the root operator"
-        return parse_duckdb_plan(raw_plan["children"][0], query=query)
-
-    if node_type == "EXPLAIN" or node_type == "EXPLAIN_ANALYZE":
-        assert len(raw_plan["children"]) == 1, "Expected a single child for EXPLAIN operator"
-        return parse_duckdb_plan(raw_plan["children"][0], query=query)
+        raise ValueError(f"Not a DuckDB plan node: the operator name is missing (keys: {sorted(raw_plan)})")
 
     extras: dict = raw_plan.get("extra_info", {})
     match node_type:
@@ -582,11 +633,11 @@ def parse_duckdb_plan(raw_plan: dict | str, *, query: SqlQuery | None = None) ->
     card_est = float(
         extras.get("Estimated Cardinality", math.nan)
     )  # Estimated Cardinality is a string for some reason..
-    card_act = raw_plan.get("operator_cardinality", math.nan)
+    card_act = raw_plan.get("intermediate_rows", math.nan)  # only present for EXPLAIN ANALYZE
 
-    children = [parse_duckdb_plan(child, query=query) for child in raw_plan.get("children", [])]
+    children = [_parse_plan_node(child, query=query) for child in raw_plan.get("children", [])]
 
-    own_runtime = raw_plan.get("operator_timing", math.nan)
+    own_runtime = raw_plan.get("timing", math.nan)  # only present for EXPLAIN ANALYZE
     total_runtime = own_runtime + sum(child.execution_time for child in children)
 
     return QueryPlan(
@@ -628,9 +679,7 @@ class DuckDBOptimizer(OptimizerInterface):
         result_set = cur.fetchone()
         assert result_set is not None and len(result_set) == 2
 
-        raw_explain = result_set[1]
-        parsed = json.loads(raw_explain)
-        return parse_duckdb_plan(parsed[0], query=query if isinstance(query, SqlQuery) else None)
+        return parse_duckdb_plan(result_set, query=query if isinstance(query, SqlQuery) else None)
 
     @overload
     def analyze_plan(self, query: SqlQuery) -> QueryPlan: ...
@@ -643,29 +692,21 @@ class DuckDBOptimizer(OptimizerInterface):
         query = transform.as_explain_analyze(query)
 
         try:
-            result_set = self._db.execute_query(query, raw=True, timeout=timeout)[0]
+            result_set = self._db.execute_query(query, raw=True, timeout=timeout)
         except TimeoutError:
             return None
-        assert len(result_set) == 2
 
-        raw_explain = result_set[1]
-        parsed = json.loads(raw_explain)
-        return parse_duckdb_plan(parsed, query=query)
+        return parse_duckdb_plan(result_set, query=query)
 
     @override
     def parse_plan(self, plan: ResultSet, *, query: SqlQuery | None = None) -> QueryPlan | None:
-        # Similar to the Postgres implementation of parse_plan(), we try to be graceful
-        # and accept both simplified and raw versions of the execute_query() output.
-        # In essence, we always try to break the input down to a plain dictionary and
-        # unwrap the lists and tuples that come with a raw result set.
-        if isinstance(plan, list):
-            plan = plan[0]
-        if isinstance(plan, tuple):
-            plan = plan[1]
-        if not isinstance(plan, dict):
-            warnings.warn(f"Could not parse plan: {plan}. Expected a dictionary, but got {type(plan)}.", stacklevel=2)
+        # Similar to the Postgres implementation of parse_plan(), we try to be graceful and accept both simplified and
+        # raw versions of the execute_query() output. parse_duckdb_plan() already handles all of these representations.
+        try:
+            return parse_duckdb_plan(plan, query=query)
+        except ValueError as e:  # includes malformed JSON
+            warnings.warn(f"Could not parse plan: {e}", stacklevel=2)
             return None
-        return parse_duckdb_plan(plan, query=query)
 
     @override
     def cardinality_estimate(self, query: SqlQuery | str) -> Cardinality:

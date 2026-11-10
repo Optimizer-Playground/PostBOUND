@@ -16,6 +16,9 @@ The pure formatting part of the EXPLAIN regression (the *duckdb* flavor of `form
 
 from __future__ import annotations
 
+import json
+import math
+import warnings
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -24,7 +27,9 @@ import pytest
 
 from postbound import ColumnReference, ScanOperator, TableReference, db, parser, transform
 from postbound.db import ForeignKeyRef, Histogram, PreciseStatistics, PrimaryKeyRef
-from postbound.duckdb import DuckDBDatabase
+from postbound.duckdb import DuckDBDatabase, parse_duckdb_plan
+from postbound.qal import SqlQuery
+from tests.unit.test_duckdb import EXPLAIN_ANALYZE_FILTER_SCAN, EXPLAIN_FILTER_SCAN
 
 pytestmark = pytest.mark.embedded
 
@@ -306,6 +311,112 @@ def test_duckdb_lookups_ignore_the_case_of_identifiers(
     assert lookup(mixed_case_instance) == expected
 
 
+# -- plan format drift ----------------------------------------------------------------------------------------
+
+# The plan parser is tested offline against captured EXPLAIN output (`tests/unit/test_duckdb.py`). These tests run it
+# against the live engine instead, so that a DuckDB/quacklab upgrade that changes the JSON format fails here rather
+# than silently producing plans without measurements. They use only operators that `parse_duckdb_plan` knows, so an
+# "Unknown node type" warning signals a new wrapper or a renamed operator.
+DRIFT_QUERIES = [
+    "SELECT * FROM r WHERE r.a = 1",
+    "SELECT * FROM r JOIN s ON r.a = s.a",
+    "SELECT count(*) FROM r JOIN s ON r.a = s.a WHERE r.b < 30",
+    "SELECT r.a, count(*) FROM r GROUP BY r.a",
+]
+DRIFT_IDS = ["filter-scan", "join", "aggregate-over-join", "group-by"]
+
+
+@pytest.fixture
+def plan_instance(duckdb_instance: DuckDBDatabase) -> DuckDBDatabase:
+    """Extends `r` by a second table `s(a)` that joins with two of its rows."""
+    duckdb_instance.execute_query("CREATE TABLE s (a INTEGER)")
+    duckdb_instance.execute_query("INSERT INTO s VALUES (1), (2)")
+    return duckdb_instance
+
+
+def json_shape(value: object) -> object:
+    """The structure of a JSON value -- its keys and nesting -- with every scalar replaced by its kind."""
+    match value:
+        case dict():
+            return {key: json_shape(item) for key, item in value.items()}
+        case list():
+            return [json_shape(item) for item in value]
+        case bool():
+            return "bool"
+        case int() | float():
+            return "number"
+        case _:
+            return type(value).__name__
+
+
+@pytest.mark.parametrize("sql", DRIFT_QUERIES, ids=DRIFT_IDS)
+def test_query_plan_parses_the_live_explain_format(plan_instance: DuckDBDatabase, sql: str) -> None:
+    query = parse(sql)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        plan = plan_instance.optimizer().query_plan(query)
+
+    assert plan.tables() == query.tables()
+    assert all(node.estimated_cardinality.is_valid() for node in plan.iternodes())
+
+
+@pytest.mark.parametrize("sql", DRIFT_QUERIES, ids=DRIFT_IDS)
+def test_analyze_plan_parses_the_live_profiling_format(plan_instance: DuckDBDatabase, sql: str) -> None:
+    """Every operator carries its measurements, and the root produces exactly the rows of the query result."""
+    query = parse(sql)
+    n_result_rows = len(plan_instance.execute_query(query, raw=True))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        plan = plan_instance.optimizer().analyze_plan(query)
+
+    assert plan.tables() == query.tables()
+    assert plan.actual_cardinality == n_result_rows
+    assert all(node.actual_cardinality.is_valid() for node in plan.iternodes())
+    assert all(math.isfinite(node.execution_time) for node in plan.iternodes())
+
+
+EXPLAIN_RESULT_SETS = [
+    (transform.as_explain, True),
+    (transform.as_explain, False),
+    (transform.as_explain_analyze, True),
+    (transform.as_explain_analyze, False),
+]
+EXPLAIN_RESULT_SET_IDS = ["explain-raw", "explain-simplified", "analyze-raw", "analyze-simplified"]
+
+
+@pytest.mark.parametrize(("explain", "raw"), EXPLAIN_RESULT_SETS, ids=EXPLAIN_RESULT_SET_IDS)
+def test_parse_duckdb_plan_accepts_the_result_set_of_execute_query(
+    duckdb_instance: DuckDBDatabase, explain: Callable[[SqlQuery], SqlQuery], raw: bool
+) -> None:
+    """The workflow of the DuckDB docs: the result set of an EXPLAIN query is passed to the parser as-is."""
+    result_set = duckdb_instance.execute_query(explain(FILTER_QUERY), raw=raw)
+
+    plan = parse_duckdb_plan(result_set, query=FILTER_QUERY)
+
+    assert plan == duckdb_instance.optimizer().query_plan(FILTER_QUERY)
+    assert plan.actual_cardinality.is_valid() is (explain is transform.as_explain_analyze)
+
+
+def test_offline_explain_fixtures_match_the_live_format(duckdb_instance: DuckDBDatabase) -> None:
+    """The fixtures of `tests/unit/test_duckdb.py` still have the structure of the live EXPLAIN output.
+
+    If this fails after a DuckDB/quacklab upgrade, re-capture the fixtures (see the docstring of that module) and
+    check whether `parse_duckdb_plan` needs to follow. For the ANALYZE output, only the top-level sections of the
+    profiling summary are compared: the timings within them (e.g. one entry per optimizer pass) change with every
+    release but are irrelevant for parsing.
+    """
+    raw_explain = duckdb_instance.execute_query(transform.as_explain(FILTER_QUERY), raw=True)[0][1]
+    raw_analyze = duckdb_instance.execute_query(transform.as_explain_analyze(FILTER_QUERY), raw=True)[0][1]
+
+    live_explain, live_analyze = json.loads(raw_explain), json.loads(raw_analyze)
+
+    assert json_shape(live_explain) == json_shape(EXPLAIN_FILTER_SCAN)
+    assert set(live_analyze) == set(EXPLAIN_ANALYZE_FILTER_SCAN)
+    assert json_shape(live_analyze["operator"]) == json_shape(EXPLAIN_ANALYZE_FILTER_SCAN["operator"])
+
+
 # -- regression tests --------------------------------------------------------------------------------------------
 
 
@@ -439,3 +550,34 @@ def test_duckdb_schema_all_indexes_on_finds_mixed_case_tables(mixed_case_instanc
         "postHistory_userid_id_fkey": {PH_USER_ID},
         "postHistory_UserId_idx": {PH_USER_ID},
     }
+
+
+def test_analyze_plan_reports_the_measurements_of_the_quacklab_2_profiling_format(
+    duckdb_instance: DuckDBDatabase,
+) -> None:
+    """Regression guard for the quacklab 2 profiling format: since quacklab 2.0, ``EXPLAIN (ANALYZE, FORMAT JSON)``
+    nests the operator tree below the ``operator`` key of a profiling summary, starts it with a ``RESULT_COLLECTOR``
+    operator, and renamed ``operator_cardinality``/``operator_timing`` to ``intermediate_rows``/``timing``.
+    `parse_duckdb_plan` looked for the plan below ``children`` and failed with a `KeyError`. Unwrapping alone was not
+    enough: the parser would have read the old keys and silently reported *NaN* for every measurement.
+    """
+    plan = duckdb_instance.optimizer().analyze_plan(FILTER_QUERY)
+
+    assert plan.operator == ScanOperator.SequentialScan
+    assert plan.actual_cardinality == 1
+    assert math.isfinite(plan.execution_time) and plan.execution_time > 0
+
+
+@pytest.mark.parametrize(("explain", "raw"), EXPLAIN_RESULT_SETS, ids=EXPLAIN_RESULT_SET_IDS)
+def test_parse_plan_accepts_the_result_set_of_an_explain_query(
+    duckdb_instance: DuckDBDatabase, explain: Callable[[SqlQuery], SqlQuery], raw: bool
+) -> None:
+    """Regression guard for `DuckDBOptimizer.parse_plan` rejecting every real result set: it unwrapped the result set
+    down to the JSON column, which is a *string*, and then gave up because it expected a parsed dictionary. Every
+    call therefore warned "Could not parse plan" and returned *None*.
+    """
+    result_set = duckdb_instance.execute_query(explain(FILTER_QUERY), raw=raw)
+
+    plan = duckdb_instance.optimizer().parse_plan(result_set, query=FILTER_QUERY)
+
+    assert plan == duckdb_instance.optimizer().query_plan(FILTER_QUERY)
