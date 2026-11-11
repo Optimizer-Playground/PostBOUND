@@ -765,3 +765,26 @@ def test_exists_predicate_renders_a_single_pair_of_parentheses(sql: str) -> None
     query = parse(sql)
 
     assert str(query) == f"{sql};"
+
+
+@pytest.mark.parametrize(
+    ("sql", "operation"),
+    [
+        ("SELECT * FROM r WHERE r.a IN (1, 2)", BinaryOperator.In),
+        ("SELECT * FROM r WHERE r.a NOT IN (1, 2)", BinaryOperator.NotIn),
+    ],
+    ids=["in", "not-in"],
+)
+def test_simple_filter_retains_the_negation_of_an_in_predicate(sql: str, operation: BinaryOperator) -> None:
+    """Regression guard for the NOT IN fix in `_attempt_filter_unwrap` (e411d61f42518daf03ff97f0674fe59e4b70c673):
+    the `InPredicate` case only destructured the column and the values and hard-coded `BinaryOperator.In` as the
+    operation of the resulting `SimpleFilter`. A ``NOT IN`` filter was therefore silently turned into its exact opposite,
+    e.g. for selectivity estimation.
+    """
+    pred = where(sql)
+
+    wrapped = SimpleFilter.wrap(pred)
+
+    assert wrapped.column == ColumnReference("a", R)
+    assert wrapped.operation == operation
+    assert wrapped.value == (1, 2)
