@@ -3727,7 +3727,7 @@ class PredicateVisitor(ABC, Generic[VisitorResult]):
 @overload
 def as_predicate(
     column: ColumnReference,
-    operation: Literal[BinaryOperator.In, "in", "IN"],
+    operation: Literal[BinaryOperator.In, "in", "IN", BinaryOperator.NotIn, "not in", "NOT IN"],
     *arguments,
 ) -> InPredicate: ...
 
@@ -3843,12 +3843,9 @@ def as_predicate(column: ColumnReference, operation: BinaryOperator | UnaryOpera
                 as_expression(upper, allow_star=False),
             ),
         )
-    elif operation == BinaryOperator.In:
+    elif operation in (BinaryOperator.In, BinaryOperator.NotIn):
         arguments = util.flatten(arguments)
-        return InPredicate(
-            column,
-            [as_expression(value, allow_star=False) for value in arguments],
-        )
+        return InPredicate(column, [as_expression(value, allow_star=False) for value in arguments], operator=operation)
     elif len(arguments) != 1:
         raise ValueError("Too many arguments for binary predicate: " + str(arguments))
 
