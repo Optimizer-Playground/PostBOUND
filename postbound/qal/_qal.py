@@ -4024,7 +4024,7 @@ def _attempt_filter_unwrap(
             assert isinstance(lhs, ColumnReference)
             return lhs, BinaryOperator.Between, (lower, upper)
 
-        case InPredicate(lhs, values):
+        case InPredicate(lhs, values, op):
             status, lhs = _unwrap_expression(lhs)
             if not status:
                 return None
@@ -4037,7 +4037,7 @@ def _attempt_filter_unwrap(
                 unwrapped_vals.append(unwrapped)
 
             assert isinstance(lhs, ColumnReference)
-            return lhs, BinaryOperator.In, tuple(unwrapped_vals)
+            return lhs, op, tuple(unwrapped_vals)
 
         case UnaryPredicate(col, op) if predicate.is_null_test() or predicate.is_bool_test():
             status, col = _unwrap_expression(col)
