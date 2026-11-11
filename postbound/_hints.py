@@ -684,8 +684,12 @@ class PlanParameterization:
         PlanParameterization
             The parameters are updated in place and returned for chaining.
         """
+        tables = frozenset(tables)
+        if not tables:
+            raise ValueError("Cannot assign cardinality to an empty set of tables")
+
         cardinality = Cardinality.of(cardinality)
-        self.cardinalities[frozenset(tables)] = cardinality
+        self.cardinalities[tables] = cardinality
         return self
 
     def set_workers(self, tables: Iterable[TableReference], num_workers: int) -> Self:
@@ -1694,6 +1698,13 @@ def parameters_from_plan(
     `fallback_estimated` is set.
     """
     params = PlanParameterization()
+    tables = query_plan.tables()
+    if not tables:
+        # There are no more base tables left in the plan. No point to traverse further.
+        # Note that this situation is completely legit: For example, consider Postgres Bitmap Scans:
+        # The heap scan contains the actual table while its children (the index lookups) only reference
+        # the indexes. Once we recurse from the heap scan into the index lookups, no base tables are left.
+        return params
 
     if isinstance(query_plan, JoinTree):
         card = query_plan.annotation
@@ -1712,9 +1723,9 @@ def parameters_from_plan(
         parallel_workers = query_plan.params.parallel_workers
 
     if card is not None and not math.isnan(card):
-        params.add_cardinality(query_plan.tables(), card)
+        params.add_cardinality(tables, card)
     if parallel_workers:
-        params.set_workers(query_plan.tables(), parallel_workers)
+        params.set_workers(tables, parallel_workers)
 
     for child in query_plan.children:
         child_params = parameters_from_plan(
