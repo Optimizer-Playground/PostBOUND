@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Sequence
 from typing import Any, Literal, get_args, override
 
-from .._core import Cardinality, IntermediateOperator, JoinOperator, ScanOperator, TableReference
+from .._core import Cardinality, IntermediateOperator, JoinOperator, ScanOperator, TableReference, TimeS
 from .._qep import QueryPlan, SortKey
 
 PostgresExplainJoinNodes = {
@@ -344,15 +344,15 @@ class PostgresExplain:
         )
         return TableReference(self.relation_name, alias)
 
-    def as_qep(self) -> QueryPlan:
+    def as_qep(self, *, planning_time: TimeS = float("nan")) -> QueryPlan:
         """Transforms the postgres-specific plan to a standardized `QueryPlan` instance.
 
-        Notice that this transformation is lossy since not all information from the Postgres plan can be represented in query
-        execution plan instances. Furthermore, this transformation can be problematic for complicated queries that use
-        special Postgres features. Most importantly, for queries involving subqueries, special node types and parent
-        relationships can be contained in the plan, that cannot be represented by other parts of PostBOUND. If this method
-        and the resulting query execution plans should be used on complex workloads, it is advisable to check the plans twice
-        before continuing.
+        Notice that this transformation is lossy since not all information from the Postgres plan can be represented in
+        query execution plan instances. Furthermore, this transformation can be problematic for complicated queries that
+        use special Postgres features. Most importantly, for queries involving subqueries, special node types and parent
+        relationships can be contained in the plan, that cannot be represented by other parts of PostBOUND. If this
+        method and the resulting query execution plans should be used on complex workloads, it is advisable to check the
+        plans twice before continuing.
 
         Returns
         -------
@@ -364,7 +364,12 @@ class PostgresExplain:
         ValueError
             If the node contains more than two children.
         """
-        return self._generate_qep()
+        qep = self._generate_qep()
+
+        if planning_time > 0:
+            qep.measures["planning_time"] = planning_time
+
+        return qep
 
     def _generate_qep(self, *, card_adjustment: float = 1.0) -> QueryPlan:
         child_nodes = []
@@ -551,10 +556,10 @@ class PostgresPlan:
         if not (isinstance(self.explain_data, dict) and "Plan" in self.explain_data):
             raise ValueError(f"Invalid explain data: missing 'Plan' key: {explain_data}")
 
-        self.planning_time: float = self.explain_data.get("Planning Time", math.nan) / 1000
-        self.execution_time: float = self.explain_data.get("Execution Time", math.nan) / 1000
+        self.planning_time: TimeS = self.explain_data.get("Planning Time", math.nan) / 1000
+        self.execution_time: TimeS = self.explain_data.get("Execution Time", math.nan) / 1000
         self.query_plan = PostgresExplain(self.explain_data["Plan"])
-        self._normalized_plan = self.query_plan.as_qep()
+        self._normalized_plan = self.query_plan.as_qep(planning_time=self.planning_time)
 
     @property
     def root(self) -> PostgresExplain:
