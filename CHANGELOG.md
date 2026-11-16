@@ -12,11 +12,20 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-## Version 0.23.3
+## Version 0.23.4
+
+A smaller release that improves the quality-of-life, mostly centered around the
+Postgres plan -> query execution plan conversion.
 
 ### 🐣 New features
 
-None
+- `as_predicate` can now create `NOT IN` filters.
+- When converting a Postgres plan to a QEP, the root node
+  will now contain the optimization time.
+- When converting a Postgres plan to a QEP, the plan measures
+  and estimates now contain the number of launched and planned
+  workers. The `parallel_workers` property still uses the most
+  precise measurement.
 
 ### 💀 Breaking changes
 
@@ -28,11 +37,7 @@ None
 
 ### 🏥 Fixes
 
-- Fixed `parameters_from_plan` sometimes generating cardinality hints with empty
-  intermediates. This bug mostly affected Postgres when the function recursed into
-  the children of a Bitmap Heap Scan. Those nodes have cardinalities, but no more
-  base table.
-- Fixed `SimpleFilter` turning `NOT IN` into a plain `IN` operator.
+- Fixed conversion of Postgres plans to QEPs from raw result sets.
 
 ### ⚠️ Deprecations
 
