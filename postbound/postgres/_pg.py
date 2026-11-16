@@ -2361,6 +2361,9 @@ class PostgresOptimizer(OptimizerInterface):
             plan = plan[0]
         if isinstance(plan, tuple):
             plan = plan[0]
+        if isinstance(plan, list):
+            # the actual EXPLAIN output is wrapped in another list
+            plan = plan[0]
 
         if not isinstance(plan, dict):
             warnings.warn(f"Could not parse plan: {plan}. Expected a dictionary, but got {type(plan)}.", stacklevel=2)
