@@ -447,6 +447,11 @@ class PostgresExplain:
             subplan_target_name=subplan_name,
         )
 
+        if not math.isnan(self.planned_workers):
+            plan.estimates["planned_workers"] = self.planned_workers
+        if not math.isnan(self.launched_workers):
+            plan.measures["launched_workers"] = self.launched_workers
+
         return plan
 
     def inspect(self, *, _indentation: int = 0) -> str:
