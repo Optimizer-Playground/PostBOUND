@@ -35,6 +35,8 @@ None
   query and the WHERE clause of explicit-join queries no longer depends on the Python hash seed.
 - `extract_query_fragment` keeps subqueries, VALUES lists and table functions in the FROM clause instead of replacing
   them with a bare table name.
+- `SimpleJoin` and `SimpleFilter` are now `BasePredicate`s rather than plain `AbstractPredicate`s. This allows them to
+  be matched more easily in `match` blocks.
 
 ### ⚠️ Deprecations
 

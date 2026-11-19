@@ -4063,7 +4063,7 @@ def _unwrap_filter_or_raise(
     return unwrapped
 
 
-class SimpleFilter(AbstractPredicate):
+class SimpleFilter(BasePredicate):
     """A simple filter provides more streamlined and direct access to filter predicates.
 
     A simple filter is a read-only predicate, i.e. it cannot be created on its own and has to be
@@ -4321,7 +4321,7 @@ class SimpleFilter(AbstractPredicate):
         return set()
 
     @override
-    def base_predicates(self) -> Iterable[AbstractPredicate]:
+    def base_predicates(self) -> Iterable[BasePredicate]:
         return [self]
 
     @override
@@ -4386,7 +4386,7 @@ def _unwrap_join_or_raise(
     return unwrapped
 
 
-class SimpleJoin(AbstractPredicate):
+class SimpleJoin(BasePredicate):
     """A simple join provides a more streamlined and direct access to join predicates.
 
     A simple join is a read-only predicate, i.e. it cannot be created on its own and has to be
@@ -4628,7 +4628,7 @@ class SimpleJoin(AbstractPredicate):
         return {(self.lhs, self.rhs)}
 
     @override
-    def base_predicates(self) -> Iterable[AbstractPredicate]:
+    def base_predicates(self) -> Iterable[BasePredicate]:
         return [self]
 
     @override
