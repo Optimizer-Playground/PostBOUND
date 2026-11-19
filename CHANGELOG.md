@@ -12,20 +12,11 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-## Version 0.23.4
-
-A smaller release that improves the quality-of-life, mostly centered around the
-Postgres plan -> query execution plan conversion.
+## Version 0.23.5
 
 ### 🐣 New features
 
-- `as_predicate` can now create `NOT IN` filters.
-- When converting a Postgres plan to a QEP, the root node
-  will now contain the optimization time.
-- When converting a Postgres plan to a QEP, the plan measures
-  and estimates now contain the number of launched and planned
-  workers. The `parallel_workers` property still uses the most
-  precise measurement.
+None
 
 ### 💀 Breaking changes
 
@@ -33,11 +24,17 @@ None
 
 ### 📰 Updates
 
-None
+- `flatten_and_predicate` is now purely structural: it keeps the conjunct order and duplicates, and also flattens
+  conjunctions below OR/NOT.
+- `extract_query_fragment` returns `None` for tables that only occur in nested subqueries and for queries whose joins
+  cannot be rewritten to implicit form.
 
 ### 🏥 Fixes
 
-- Fixed conversion of Postgres plans to QEPs from raw result sets.
+- `extract_query_fragment`/`extract_subquery` are now deterministic: the FROM clause keeps the order of the original
+  query and the WHERE clause of explicit-join queries no longer depends on the Python hash seed.
+- `extract_query_fragment` keeps subqueries, VALUES lists and table functions in the FROM clause instead of replacing
+  them with a bare table name.
 
 ### ⚠️ Deprecations
 

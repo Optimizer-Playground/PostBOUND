@@ -122,34 +122,87 @@ UNION = parse("SELECT r.a FROM r UNION SELECT s.b FROM s")
 # -- flatten_and_predicate ------------------------------------------------------------------------------------
 
 
-def test_flatten_and_predicate_returns_a_non_conjunction_unchanged() -> None:
-    predicate = pred("r.a = 1 OR r.b = 2")
+#
+# The parser already produces flat conjunctions, so nested ones are assembled by hand via `nested_and()`.
+
+
+def nested_and(*parts: AbstractPredicate) -> AndPredicate:
+    """Builds an AND predicate from exactly the given children, without flattening them."""
+    return AndPredicate(parts)
+
+
+def test_flatten_and_predicate_returns_a_base_predicate_unchanged() -> None:
+    predicate = pred("r.a = 1")
 
     assert transform.flatten_and_predicate(predicate) is predicate
 
 
-def test_flatten_and_predicate_moves_nested_conjuncts_to_the_top_level() -> None:
-    predicate = pred("(r.a = s.b AND r.a = 42) AND s.b = 24")
+def test_flatten_and_predicate_keeps_a_flat_conjunction_as_is() -> None:
+    predicate = pred("r.a = 1 AND r.b = 2 AND r.c = 3")
+
+    assert transform.flatten_and_predicate(predicate) == predicate
+
+
+def test_flatten_and_predicate_keeps_a_disjunction_without_nested_conjunctions_as_is() -> None:
+    predicate = pred("r.a = 1 OR r.b = 2")
+
+    assert transform.flatten_and_predicate(predicate) == predicate
+
+
+def test_flatten_and_predicate_moves_nested_conjuncts_to_the_top_level_in_order() -> None:
+    """The docstring example: ``(R.a = S.b AND R.a = 42) AND S.b = 24``."""
+    predicate = nested_and(nested_and(pred("r.a = s.b"), pred("r.a = 42")), pred("s.b = 24"))
 
     flattened = transform.flatten_and_predicate(predicate)
 
-    assert isinstance(flattened, AndPredicate)
-    assert set(flattened.children) == {pred("r.a = s.b"), pred("r.a = 42"), pred("s.b = 24")}
+    assert flattened == pred("r.a = s.b AND r.a = 42 AND s.b = 24")
 
 
-def test_flatten_and_predicate_stops_at_a_disjunction() -> None:
-    predicate = pred("r.a = 1 AND (r.b = 2 OR (r.c = 3 AND r.d = 4))")
+def test_flatten_and_predicate_flattens_arbitrarily_deep_conjunctions() -> None:
+    predicate = nested_and(
+        pred("r.a = 1"),
+        nested_and(nested_and(pred("r.b = 2"), nested_and(pred("r.c = 3"), pred("r.d = 4"))), pred("r.e = 5")),
+    )
 
     flattened = transform.flatten_and_predicate(predicate)
 
-    assert isinstance(flattened, AndPredicate)
-    assert set(flattened.children) == {pred("r.a = 1"), pred("r.b = 2 OR (r.c = 3 AND r.d = 4)")}
+    assert flattened == pred("r.a = 1 AND r.b = 2 AND r.c = 3 AND r.d = 4 AND r.e = 5")
 
 
-def test_flatten_and_predicate_unwraps_a_conjunction_of_identical_children() -> None:
-    predicate = pred("r.a = 1 AND (r.a = 1 AND r.a = 1)")
+def test_flatten_and_predicate_flattens_conjunctions_below_a_disjunction() -> None:
+    """The docstring example: the disjunction stays, but its nested conjunction is flattened."""
+    nested_conjunction = nested_and(pred("r.a = s.b"), nested_and(pred("r.a = 42"), pred("s.b = 24")))
+    predicate = CompoundPredicate.create_or([pred("r.a > s.b"), nested_conjunction])
 
-    assert transform.flatten_and_predicate(predicate) == pred("r.a = 1")
+    flattened = transform.flatten_and_predicate(predicate)
+
+    assert flattened == pred("r.a > s.b OR (r.a = s.b AND r.a = 42 AND s.b = 24)")
+
+
+def test_flatten_and_predicate_flattens_conjunctions_below_a_negation() -> None:
+    predicate = CompoundPredicate.create_not(nested_and(nested_and(pred("r.a = 1"), pred("r.b = 2")), pred("r.c = 3")))
+
+    flattened = transform.flatten_and_predicate(predicate)
+
+    assert flattened == pred("NOT (r.a = 1 AND r.b = 2 AND r.c = 3)")
+
+
+def test_flatten_and_predicate_does_not_merge_a_conjunction_into_a_disjunction() -> None:
+    """A conjunction nested in a disjunction is a single disjunct -- only AND-below-AND is flattened."""
+    predicate = nested_and(pred("r.a = 1"), CompoundPredicate.create_or([pred("r.b = 2"), pred("r.c = 3")]))
+
+    flattened = transform.flatten_and_predicate(predicate)
+
+    assert flattened == pred("r.a = 1 AND (r.b = 2 OR r.c = 3)")
+
+
+def test_flatten_and_predicate_keeps_duplicate_conjuncts() -> None:
+    """Flattening is purely structural: identical conjuncts are neither merged nor removed."""
+    predicate = nested_and(pred("r.a = 1"), nested_and(pred("r.a = 1"), pred("r.a = 1")))
+
+    flattened = transform.flatten_and_predicate(predicate)
+
+    assert flattened == AndPredicate([pred("r.a = 1"), pred("r.a = 1"), pred("r.a = 1")])
 
 
 # -- explicit_to_implicit -------------------------------------------------------------------------------------
@@ -397,6 +450,87 @@ def test_extract_query_fragment_extracts_both_sides_of_a_set_query() -> None:
     assert fragment.set_operation == SetOperator.Union
     assert fragment.lhs.tables() == {R}
     assert fragment.rhs.tables() == {R}
+
+
+@pytest.mark.parametrize(
+    "referenced_tables",
+    [[R, S, T], [T, S, R], {T, R, S}, frozenset({S, T, R})],
+    ids=["list", "reversed", "set", "frozenset"],
+)
+def test_extract_query_fragment_orders_the_from_clause_like_the_original_query(referenced_tables) -> None:
+    """The order of the `referenced_tables` is irrelevant: the FROM items keep their order from the original query."""
+    query = select("SELECT * FROM s, t, r WHERE r.a = s.b AND s.c = t.d")
+
+    fragment = transform.extract_query_fragment(query, referenced_tables)
+
+    assert fragment is not None
+    assert from_items(fragment) == from_items(query)
+
+
+def test_extract_query_fragment_orders_the_from_clause_of_each_set_query_side_independently() -> None:
+    query = parse("SELECT * FROM r, s, t UNION SELECT * FROM t, s, r")
+
+    fragment = transform.extract_query_fragment(query, [R, T])
+
+    assert isinstance(fragment, SetQuery)
+    assert from_items(fragment.lhs) == from_items(select("SELECT * FROM r, t"))
+    assert from_items(fragment.rhs) == from_items(select("SELECT * FROM t, r"))
+
+
+def test_extract_query_fragment_keeps_the_where_clause_of_an_explicit_join_in_join_order() -> None:
+    query = select("SELECT * FROM r JOIN s ON r.a = s.b JOIN t ON s.c = t.d WHERE t.d = 1 AND r.a = 2")
+
+    fragment = transform.extract_query_fragment(query, [T, S, R])
+
+    assert fragment == select("SELECT * FROM r, s, t WHERE r.a = s.b AND s.c = t.d AND t.d = 1 AND r.a = 2")
+
+
+def test_extract_query_fragment_keeps_the_definition_of_non_base_table_sources() -> None:
+    """Subqueries, VALUES lists and table functions are copied over as-is, not replaced by a bare table name."""
+    query = select(
+        "SELECT * FROM r, (SELECT * FROM s) AS sq, (VALUES (1), (2)) AS v(x), generate_series(1, 3) AS g, t "
+        "WHERE r.a = sq.b AND sq.b = v.x AND v.x = t.c"
+    )
+    sq, v, g = (TableReference.create_virtual(name) for name in ("sq", "v", "g"))
+
+    fragment = transform.extract_query_fragment(query, [g, sq, v])
+
+    assert fragment is not None
+    assert from_items(fragment) == from_items(query)[1:4]
+    assert where_root(fragment).tables() == {sq, v}
+
+
+def test_extract_query_fragment_returns_none_for_a_table_that_only_occurs_in_a_nested_subquery() -> None:
+    """``s`` is part of `tables()` via the IN subquery, but it cannot be referenced in the outer FROM clause."""
+    query = select("SELECT * FROM r WHERE r.a IN (SELECT s.b FROM s)")
+
+    assert transform.extract_query_fragment(query, S) is None
+    assert transform.extract_query_fragment(query, [R, S]) is None
+
+
+def test_extract_query_fragment_drops_unaliased_from_items() -> None:
+    """An unaliased table function binds no table, so it can never be one of the `referenced_tables`.
+
+    Keeping it would be wrong in general: here, ``unnest(r.arr)`` would reference ``r``, which is not part of the
+    fragment.
+    """
+    query = select("SELECT * FROM r, s, unnest(r.arr) WHERE r.a = s.b")
+
+    fragment = transform.extract_query_fragment(query, S)
+
+    assert fragment is not None
+    assert from_items(fragment) == from_items(select("SELECT * FROM s"))
+
+
+@pytest.mark.parametrize(
+    "join",
+    ["LEFT JOIN s ON r.a = s.b", "FULL OUTER JOIN s ON r.a = s.b", "NATURAL JOIN s"],
+    ids=["left", "full", "natural"],
+)
+def test_extract_query_fragment_returns_none_for_joins_that_cannot_be_made_implicit(join: str) -> None:
+    query = select(f"SELECT * FROM r {join}")
+
+    assert transform.extract_query_fragment(query, R) is None
 
 
 def test_extract_query_fragment_of_a_set_query_returns_the_only_matching_side() -> None:
@@ -657,8 +791,8 @@ def test_infer_between_predicates_keeps_every_bound_of_the_same_direction(
     """Regression guard for `_BetweenPredCreator` only blocking a column with a second bound of the same direction,
     without keeping that bound: one of the two bounds silently disappeared from the query.
 
-    Whether a surviving bound is rendered as ``r.a <= 5`` or kept as the original ``5 >= r.a`` depends on the
-    (hash-based) child order after `flatten_and_predicate`, so the bounds are compared in their simplified form.
+    Whether a surviving bound is rendered as ``r.a <= 5`` or kept as the original ``5 >= r.a`` is an implementation
+    detail of `_BetweenPredCreator`, so the bounds are compared in their simplified form.
     """
     query = select(f"SELECT * FROM r WHERE {condition}")
 
@@ -1417,3 +1551,47 @@ def test_normalize_query_rejects_outer_joins() -> None:
 )
 def test_transformations_are_reachable_through_the_public_package(name: str) -> None:
     assert getattr(pb.transform, name) is getattr(transform, name)
+
+
+# -- regression tests -----------------------------------------------------------------------------------------
+#
+# The two ordering regressions below used sets, whose iteration order depends on the (per-process) hash seed. Five
+# tables/six conjuncts make an accidental pass of the old code unlikely (1 in 120 resp. 720 per process).
+
+
+def test_extract_query_fragment_from_clause_does_not_depend_on_set_iteration_order() -> None:
+    """Regression guard for the FROM clause of a fragment being built by iterating over ``query.tables()`` (a set):
+    the table order -- and with it the query's equality and hash -- changed with ``PYTHONHASHSEED``.
+    """
+    query = select("SELECT * FROM r, s, t, u, v WHERE r.a = s.a AND s.a = t.a AND t.a = u.a AND u.a = v.a")
+
+    fragment = transform.extract_query_fragment(query, {TableReference(name) for name in "rstuv"})
+
+    assert fragment == query
+
+
+def test_explicit_to_implicit_keeps_the_conjunct_order() -> None:
+    """Regression guard for `flatten_and_predicate` collecting the conjuncts in a set: the WHERE clause created by
+    `explicit_to_implicit` (and therefore every fragment of an explicit-join query) was ordered by hash seed.
+    """
+    query = select(
+        "SELECT * FROM r JOIN s ON r.a = s.a JOIN t ON s.a = t.a JOIN u ON t.a = u.a JOIN v ON u.a = v.a "
+        "WHERE r.b = 1 AND v.b = 2"
+    )
+
+    implicit = transform.explicit_to_implicit(query)
+
+    assert implicit == select(
+        "SELECT * FROM r, s, t, u, v WHERE r.a = s.a AND s.a = t.a AND t.a = u.a AND u.a = v.a AND r.b = 1 AND v.b = 2"
+    )
+
+
+def test_extract_query_fragment_keeps_a_subquery_source_in_the_from_clause() -> None:
+    """Regression guard for the FROM clause of a fragment being rebuilt from bare table references: a subquery
+    ``(SELECT ...) AS sq`` became ``FROM sq`` and lost its definition, producing invalid SQL.
+    """
+    query = select("SELECT * FROM r, (SELECT * FROM s) AS sq WHERE r.a = sq.b")
+
+    fragment = transform.extract_query_fragment(query, [R, TableReference.create_virtual("sq")])
+
+    assert fragment == query

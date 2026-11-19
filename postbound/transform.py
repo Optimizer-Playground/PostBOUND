@@ -7,12 +7,12 @@ that change the entire structure of the query.
 
 Some important transformations include:
 
-- `flatten_and_predicate`: Simplifies the predicate structure by moving all nested ``AND`` predicates to their parent ``AND``
+- `flatten_and_predicate`: Flattens the predicate structure by moving all nested AND predicates to their parent AND
 - `extract_query_fragment`: Extracts parts of an original query based on a subset of its tables (i.e. induced join graph and
   filter predicates)
 - `add_ec_predicates`: Expands a querie's **WHERE** clause to include all join predicates that are implied by other (equi-)
   joins
-- `as_count_star_query` and `as_explain_analyze` change the query to be executed as **COUNT(*)** or **EXPLAIN ANALYZE**
+- `as_count_star_query` and `as_explain_analyze` change the query to be executed as COUNT(\\*) or EXPLAIN ANALYZE
   respectively
 
 In addition to these frequently-used transformations, there are also lots of utilities that add, remove, or modify specific
@@ -36,6 +36,7 @@ from .qal import (
     ArrayAccessExpression,
     ArrayExpression,
     BaseClause,
+    BasePredicate,
     BetweenPredicate,
     BinaryOperator,
     BinaryPredicate,
@@ -111,8 +112,9 @@ def flatten_and_predicate(predicate: AbstractPredicate) -> AbstractPredicate:
     For example, consider the predicate ``(R.a = S.b AND R.a = 42) AND S.b = 24``. This is transformed into the flattened
     equivalent conjunction ``R.a = S.b AND R.a = 42 AND S.b = 24``.
 
-    This procedure continues in a recursive manner, until the first disjunction or negation is encountered. All predicates
-    below that point are left as-is for the current branch of the predicate hierarchy.
+    The procedure continues in a recursive manner, i.e. nested conjunctions are flattened as well. For example, the
+    predicate ``R.a > S.b OR (R.a = S.b AND (R.a = 42 AND S.b = 24))`` is transformed into
+    ``R.a > S.b OR (R.a = S.b AND R.a = 42 AND S.b = 24)``.
 
     Parameters
     ----------
@@ -124,25 +126,30 @@ def flatten_and_predicate(predicate: AbstractPredicate) -> AbstractPredicate:
     AbstractPredicate
         An equivalent version of the given `predicate`, with all conjunctions unnested
     """
-    if not isinstance(predicate, AndPredicate):
-        return predicate
 
-    flattened_children = set()
-    for child in predicate.children:
-        if not isinstance(child, AndPredicate):
-            flattened_children.add(child)
-            continue
+    match predicate:
+        case BasePredicate():
+            return predicate
 
-        flattened_child = flatten_and_predicate(child)
-        if isinstance(flattened_child, AndPredicate):
-            flattened_children |= set(flattened_child.children)
-        else:
-            flattened_children.add(flattened_child)
+        case AndPredicate(children):
+            flattened_children: list[AbstractPredicate] = []
+            for child in children:
+                flattened_child = flatten_and_predicate(child)
+                if isinstance(flattened_child, AndPredicate):
+                    flattened_children.extend(flattened_child.children)
+                else:
+                    flattened_children.append(flattened_child)
+            return CompoundPredicate.create_and(flattened_children)
 
-    if len(flattened_children) == 1:
-        return util.simplify(flattened_children)
+        case NotPredicate(child):
+            rewritten_child = flatten_and_predicate(child)
+            return CompoundPredicate.create_not(rewritten_child)
+        case OrPredicate(children):
+            rewritten_children = [flatten_and_predicate(child) for child in children]
+            return CompoundPredicate.create_or(rewritten_children)
 
-    return CompoundPredicate.create_and(list(flattened_children))
+        case _:
+            raise ValueError(f"Unknown predicate type: {predicate}")
 
 
 class _ImplicitFromClauseRewriter(TableSourceVisitor[tuple[Collection[TableSource], AbstractPredicate | None]]):
@@ -384,24 +391,30 @@ def extract_query_fragment(
 
     Returns
     -------
-    Optional[SelectStatement | SetQuery]
+    SelectStatement | SetQuery | None
         A query that only consists of those parts of the `source_query`, that reference (a subset of) the `referenced_tables`.
-        If there is no such subset, ``None`` is returned.
+        If there is no such subset, ``None`` is returned. This includes tables that only occur in nested subqueries
+        (e.g. in the *WHERE* clause), since they are not available in the *FROM* clause.
 
     Warnings
     --------
-    `explicit_to_implicit` cannot rewrite queries that use outer joins or natural joins - a `ValueError` is raised for
-    `query` (or any of its subqueries) that require such a rewrite.
+    `explicit_to_implicit` cannot rewrite queries that use outer joins or natural joins. For such queries, ``None`` is
+    returned as well.
 
     See Also
     --------
     extract_subquery : A wrapper with sane defaults. Use this whenever possible.
     """
     if isinstance(query, SelectStatement) and not query.has_simple_from():
-        query = explicit_to_implicit(query)
+        try:
+            query = explicit_to_implicit(query)
+        except ValueError:
+            # If the query cannot be converted to implicit form, we cannot extract a fragment.
+            return None
 
     referenced_tables = {referenced_tables} if isinstance(referenced_tables, TableReference) else set(referenced_tables)
     if not referenced_tables.issubset(query.tables()):
+        # Some of the requested tables are not part of the query. Abort.
         return None
 
     cte_fragment: list[WithQuery] = (
@@ -441,6 +454,8 @@ def extract_query_fragment(
                 explain=query.explain,
             )
 
+    assert isinstance(query, SelectStatement)
+
     match projection:
         case "keep":
             select_fragment = []
@@ -466,7 +481,22 @@ def extract_query_fragment(
             raise ValueError("Invalid projection type: " + str(projection))
 
     if query.from_clause:
-        from_clause = From.create_for(tab for tab in query.tables() if tab in referenced_tables)
+        # We retain the original FROM items in their original order. This keeps the output deterministic and ensures
+        # that subqueries, VALUES lists and table functions keep their definition.
+        if not referenced_tables.issubset(query.from_clause.bound_tables()):
+            # Some of the requested tables only appear in nested subqueries (e.g. in the WHERE clause). They cannot
+            # be part of the fragment's FROM clause.
+            return None
+
+        # Unaliased sources (e.g. FROM unnest(r.arr)) do not bind any table. Since they cannot be referenced, they
+        # cannot be part of the fragment either. Notice that the empty set would trivially pass the subset check.
+        from_clause = From(
+            [
+                src
+                for src in query.from_clause.items
+                if src.bound_tables() and src.bound_tables().issubset(referenced_tables)
+            ]
+        )
     else:
         from_clause = None
 
