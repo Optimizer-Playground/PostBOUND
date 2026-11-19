@@ -1,5 +1,3 @@
-"""Utilities to optimize and execute queries and workloads in a reproducible and transparent manner."""
-
 from __future__ import annotations
 
 import json
@@ -15,14 +13,14 @@ import natsort
 import numpy as np
 import pandas as pd
 
-from . import transform, util
-from ._pipelines import (
+from .. import transform, util
+from .._pipelines import (
     IntegratedOptimizationPipeline,
     MultiStageOptimizationPipeline,
     OptimizationPipeline,
     TextBookOptimizationPipeline,
 )
-from ._stages import (
+from .._stages import (
     CompleteOptimizationAlgorithm,
     CostModel,
     JoinOrdering,
@@ -31,7 +29,7 @@ from ._stages import (
     ParameterGeneration,
     PlanEnumerator,
 )
-from .db import (
+from ..db import (
     Database,
     DatabasePool,
     PrewarmingSupport,
@@ -41,10 +39,10 @@ from .db import (
     TimeoutSupport,
     simplify_result_set,
 )
-from .qal import SqlQuery
-from .train import TrainingData, TrainingDataRepository
-from .util.jsonize import Jsonizable
-from .workloads import Workload, generate_workload
+from ..qal import SqlQuery
+from ..train import TrainingData, TrainingDataRepository
+from ..util.jsonize import Jsonizable
+from ..workloads import Workload, generate_workload
 
 PredefLogger = Literal["tqdm"]
 """Pre-defined loggers that can be used to track progress during workload execution."""
