@@ -156,15 +156,17 @@ def _load_offline_json(path: Path) -> dict[SqlQuery, Cardinality]:
 
     with open(path, encoding="utf-8") as f:
         raw_data = json.load(f)
-    return {parser.parse_query(query): Cardinality(card) for query, card in raw_data.items()}
+    return {
+        transform.as_count_star_query(parser.parse_query(query)): Cardinality(card) for query, card in raw_data.items()
+    }
 
 
 def _load_offline_csv(path: Path) -> dict[SqlQuery, Cardinality]:
     if not path.exists():
         return {}
 
-    df = pd.read_csv(path)
-    return {parser.parse_query(row["query"]): Cardinality(row["cardinality"]) for _, row in df.iterrows()}
+    df = pd.read_csv(path, converters={"query": parser.parse_query, "cardinality": Cardinality})
+    return {transform.as_count_star_query(row["query"]): Cardinality(row["cardinality"]) for _, row in df.iterrows()}
 
 
 def _load_offline_parquet(path: Path) -> dict[SqlQuery, Cardinality]:
@@ -172,7 +174,10 @@ def _load_offline_parquet(path: Path) -> dict[SqlQuery, Cardinality]:
         return {}
 
     df = pd.read_parquet(path)
-    return {parser.parse_query(row["query"]): Cardinality(row["cardinality"]) for _, row in df.iterrows()}
+    return {
+        transform.as_count_star_query(parser.parse_query(row["query"])): Cardinality(row["cardinality"])
+        for _, row in df.iterrows()
+    }
 
 
 def _dump_offline_json(cardinalities: dict[SqlQuery, Cardinality], to: Path) -> None:
