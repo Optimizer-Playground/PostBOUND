@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PostBOUND"
-version = "0.23.5.dev1"
+version = "0.23.5"
 authors = [{ name = "Rico Bergmann", email = "rico.bergmann1@tu-dresden.de" }]
 description = "PostBOUND is a research framework to prototype and benchmark database query optimizers"
 readme = "README.md"
@@ -59,6 +59,8 @@ dev = [
   "sphinx-book-theme>=1.1.4",
   "tables==3.11.1",
   "ty==0.0.78",
+  "ipywidgets>=8.1.9",
+  "jupyterlab-widgets>=3.0.17",
 ]
 
 [tool.uv]
