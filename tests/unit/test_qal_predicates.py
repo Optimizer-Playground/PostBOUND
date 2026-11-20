@@ -15,6 +15,7 @@ from postbound import parser
 from postbound._core import ColumnReference, TableReference
 from postbound.qal import (
     AndPredicate,
+    BasePredicate,
     BetweenPredicate,
     BinaryOperator,
     BinaryPredicate,
@@ -788,3 +789,28 @@ def test_simple_filter_retains_the_negation_of_an_in_predicate(sql: str, operati
     assert wrapped.column == ColumnReference("a", R)
     assert wrapped.operation == operation
     assert wrapped.value == (1, 2)
+
+
+@pytest.mark.parametrize(
+    ("sql", "wrapper"),
+    [
+        ("SELECT * FROM r WHERE r.a = 42", SimpleFilter),
+        ("SELECT * FROM r, s WHERE r.a = s.b", SimpleJoin),
+    ],
+    ids=["simple-filter", "simple-join"],
+)
+def test_simple_predicate_views_are_base_predicates(sql: str, wrapper: type[SimpleFilter | SimpleJoin]) -> None:
+    """Regression guard for 52381ef: `SimpleFilter` and `SimpleJoin` derived directly from `AbstractPredicate`, so a
+    ``case BasePredicate()`` arm in a `match` block (or an ``isinstance(pred, BasePredicate)`` check) silently skipped
+    them, even though both always wrap a single, non-compound predicate.
+    """
+    wrapped = wrapper.wrap(where(sql))
+
+    match wrapped:
+        case BasePredicate():
+            matched_as_base = True
+        case _:
+            matched_as_base = False
+
+    assert matched_as_base is True
+    assert list(wrapped.base_predicates()) == [wrapped]

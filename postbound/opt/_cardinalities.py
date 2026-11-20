@@ -165,7 +165,7 @@ def _load_offline_csv(path: Path) -> dict[SqlQuery, Cardinality]:
     if not path.exists():
         return {}
 
-    df = pd.read_csv(path, converters={"query": parser.parse_query, "cardinality": Cardinality})
+    df = pd.read_csv(path, converters={"query": parser.parse_query})
     return {transform.as_count_star_query(row["query"]): Cardinality(row["cardinality"]) for _, row in df.iterrows()}
 
 
@@ -231,6 +231,7 @@ class _DummyCardinalities(CardinalityEstimator):
 
 class _StaticCardinalities(CardinalityEstimator):
     def __init__(self, value: float | Cardinality) -> None:
+        super().__init__(allow_cross_products=False)
         self._value = Cardinality.of(value)
 
     @override
