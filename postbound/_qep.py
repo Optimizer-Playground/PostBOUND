@@ -9,15 +9,7 @@ from numbers import Number
 from typing import Any, Literal, override
 
 from . import util
-from ._core import (
-    Cardinality,
-    ColumnReference,
-    Cost,
-    JoinOperator,
-    PhysicalOperator,
-    ScanOperator,
-    TableReference,
-)
+from ._core import Cardinality, ColumnReference, Cost, JoinOperator, PhysicalOperator, ScanOperator, TableReference
 from .qal import AbstractPredicate, ColumnExpression, SqlExpression
 from .util import StateError, jsondict
 
@@ -2029,12 +2021,13 @@ class QueryPlan:
             isinstance(other, type(self))
             and self._node_type == other._node_type
             and self.base_table == other.base_table
+            and self._plan_params.index == other._plan_params.index
             and self._children == other._children
         )
 
     @override
     def __hash__(self) -> int:
-        return hash((self.node_type, self.base_table, self._children))
+        return hash((self.node_type, self.base_table, self._plan_params.index, tuple(self._children)))
 
     @override
     def __repr__(self) -> str:
