@@ -473,7 +473,7 @@ def read_query_plan_json(json_data: dict | str) -> QueryPlan:
     json_data = json.loads(json_data) if isinstance(json_data, str) else json_data
     node_type: str = json_data["node_type"]
     operator = read_operator_json(json_data["operator"])
-    if not isinstance(operator, PhysicalOperator):
+    if operator is not None and not isinstance(operator, PhysicalOperator):
         raise ValueError(f"Malformed query plan. Expected physical operator but got: {operator}")
     children = [read_query_plan_json(child) for child in json_data.get("children", [])]
 
