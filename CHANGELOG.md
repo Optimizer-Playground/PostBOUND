@@ -21,8 +21,9 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
   to their relations. Structural binding still works as before and workloads like
   JOB do not have the new parameter because they only use structural binding.
   The database pool fallback also works as before.
-  The parameter is intended for situations where multiple DB connections need to be
-  maintained in the pool.
+  The parameter is intended for situations where multiple DB connections need to
+  be maintained in the pool.
+- Allow specific databases to be removed from the database pool.
 
 ### 💀 Breaking changes
 

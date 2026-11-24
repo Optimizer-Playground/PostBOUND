@@ -2821,6 +2821,19 @@ class DatabasePool:
         """Returns the number of databases currently registered in the pool."""
         return len(self._pool)
 
+    def drop_db(self, key: str | Database) -> None:
+        """Removes a database from the pool, either by key or identity."""
+        if isinstance(key, str):
+            self._pool.pop(key, None)
+            return
+
+        needle = key
+        for k, db in self._pool.items():
+            if db is needle:
+                key = k
+                break
+        self._pool.pop(key, None)
+
     def clear(self) -> None:
         """Removes all currently registered databases from the pool."""
         self._pool.clear()
