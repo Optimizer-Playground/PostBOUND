@@ -11,13 +11,49 @@ from __future__ import annotations
 
 import pytest
 
+import postbound as pb
 from postbound import parser
+from postbound._core import ColumnReference, TableReference
 from postbound.parser import ParserError
 from postbound.qal import FunctionTableSource, SelectStatement, SqlQuery
+from tests.doubles import FakeDatabase, StaticSchema
 
 
 def parse(sql: str) -> SqlQuery:
     return parser.parse_query(sql, bind_columns=False)
+
+
+# The unqualified column `a` can only be bound to `r` with the help of the schema.
+UNQUALIFIED_SQL = "SELECT r.id FROM r, s WHERE a = 1 AND r.id = s.id"
+SCHEMA_SPEC = {"r": ["a", "id"], "s": ["b", "id"]}
+
+
+def unqualified_a(query: SqlQuery) -> ColumnReference:
+    (column,) = [col for col in query.columns() if col.name == "a"]
+    return column
+
+
+# -- column binding -------------------------------------------------------------------------------------------
+
+
+def test_parse_query_binds_unqualified_columns_against_the_given_schema() -> None:
+    query = parser.parse_query(UNQUALIFIED_SQL, bind_columns=True, db_schema=StaticSchema(SCHEMA_SPEC))
+
+    assert unqualified_a(query) == ColumnReference("a", TableReference("r"))
+
+
+def test_parse_query_binds_unqualified_columns_against_the_pool_by_default(fake_db: FakeDatabase) -> None:
+    fake_db.set_schema(SCHEMA_SPEC)
+
+    query = parser.parse_query(UNQUALIFIED_SQL)
+
+    assert unqualified_a(query) == ColumnReference("a", TableReference("r"))
+
+
+def test_parse_query_explicit_bind_columns_overrides_the_global_switch(no_column_binding: None) -> None:
+    query = parser.parse_query(UNQUALIFIED_SQL, bind_columns=True, db_schema=StaticSchema(SCHEMA_SPEC))
+
+    assert unqualified_a(query) == ColumnReference("a", TableReference("r"))
 
 
 # -- known bugs -----------------------------------------------------------------------------------------------
@@ -83,3 +119,41 @@ def test_parser_rejects_an_unaliased_subquery_in_the_from_clause(sql: str) -> No
     """
     with pytest.raises(ValueError, match="Full name or alias required"):
         parse(sql)
+
+
+# -- regression tests -----------------------------------------------------------------------------------------
+
+
+def test_parse_query_ignores_the_given_schema_if_binding_is_disabled() -> None:
+    """Regression guard: `parse_query` only consulted `bind_columns` to decide whether to look up a schema in the
+    `DatabasePool`. An explicitly passed `db_schema` was always handed to the query namespace, so
+    ``bind_columns=False`` was silently ignored as soon as a schema was given.
+    """
+    query = parser.parse_query(UNQUALIFIED_SQL, bind_columns=False, db_schema=StaticSchema(SCHEMA_SPEC))
+
+    assert unqualified_a(query) == ColumnReference("a")
+
+
+def test_parse_query_ignores_the_given_schema_if_the_global_switch_is_off(no_column_binding: None) -> None:
+    """Regression guard: like the explicit ``bind_columns=False``, a disabled global switch must win over an
+    explicitly passed `db_schema` (see the test above for the root cause).
+    """
+    query = parser.parse_query(UNQUALIFIED_SQL, db_schema=StaticSchema(SCHEMA_SPEC))
+
+    assert unqualified_a(query) == ColumnReference("a")
+
+
+def test_disabling_auto_bind_columns_on_the_package_disables_binding(
+    fake_db: FakeDatabase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard: the switch was defined in the private ``_parser`` module and re-exported by
+    ``from ._parser import auto_bind_columns``. That import copies the value, so the documented
+    ``postbound.parser.auto_bind_columns = False`` (and the `no_column_binding` fixture) only rebound the package
+    attribute, while `parse_query` kept reading the untouched private copy.
+    """
+    fake_db.set_schema(SCHEMA_SPEC)
+    monkeypatch.setattr(pb.parser, "auto_bind_columns", False)
+
+    query = parser.parse_query(UNQUALIFIED_SQL)
+
+    assert unqualified_a(query) == ColumnReference("a")

@@ -37,6 +37,8 @@ None
 
 - Fixed `read_workload` not adding the label prefix as intended. This also
   affected Stack where directory prefixes were silently dropped.
+- Fixed `pb.parser.auto_bind_columns` having no effect.
+- Fixed `parse_query` ignoring `bind_columns` if a database was given.
 
 ### ⚠️ Deprecations
 

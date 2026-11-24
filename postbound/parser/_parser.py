@@ -68,9 +68,6 @@ from ..qal import (
     build_query,
 )
 
-auto_bind_columns: bool = True
-"""Indicates whether the parser should use the database catalog to obtain column bindings."""
-
 
 class ParserWarning(UserWarning):
     """A warning that is raised during parsing, but does not prevent successful parsing."""
@@ -2144,8 +2141,9 @@ def parse_query(
         text will be parsed as a hint block. Otherwise, these comments are simply ignored.
     bind_columns : bool | None, optional
         Whether to use *live binding*. This does not control the text-based binding, which is always performed. If this
-        parameter is *None* (the default), the global `auto_bind_columns` variable will be queried. Depending on its
-        value, live binding will be performed or not.
+        parameter is *None* (the default), the global `postbound.parser.auto_bind_columns` switch will be queried.
+        Depending on its value, live binding will be performed or not. If live binding is disabled, `db_schema` is
+        ignored.
     db_schema : Optional[DatabaseSchema], optional
         For live binding, this indicates the database to use. If this is *None* (the default), the database will be
         tried to extract from the `DatabasePool`
@@ -2163,7 +2161,11 @@ def parse_query(
     # SQL query anyway so might as well..
     query = query.removeprefix('"').removesuffix('"')
 
-    bind_columns = bind_columns or (bind_columns is None and auto_bind_columns)
+    # The switch is read from the package rather than from a module-level copy, so that the documented way of setting
+    # it (``postbound.parser.auto_bind_columns = False``) takes effect.
+    from .. import parser as _parser_pkg
+
+    bind_columns = bind_columns or (bind_columns is None and _parser_pkg.auto_bind_columns)
     if db_schema is None and bind_columns:
         pool = DatabasePool.get_instance()
         match pool.n_databases():
@@ -2201,7 +2203,7 @@ def parse_query(
 
     parsed_query = _pglast_parse_query(
         stmt,
-        namespace=QueryNamespace.empty(db_schema, top_level=True),
+        namespace=QueryNamespace.empty(db_schema if bind_columns else None, top_level=True),
         query_txt=query,
     )
     if not accept_set_query and isinstance(parsed_query, SetQuery):

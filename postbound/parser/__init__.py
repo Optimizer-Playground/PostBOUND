@@ -30,7 +30,6 @@ References
 from ._parser import (
     ParserError,
     ParserWarning,
-    auto_bind_columns,
     load_column_json,
     load_expression_json,
     load_operator_json,
@@ -39,6 +38,14 @@ from ._parser import (
     load_table_json,
     parse_query,
 )
+
+auto_bind_columns: bool = True
+"""Global switch whether the parser should use the database catalog to obtain column bindings.
+
+The switch only applies to calls that do not set `bind_columns` explicitly. It is read at parse time, so it has to be set
+on this module (``postbound.parser.auto_bind_columns = False``). Importing it by name (``from postbound.parser import
+auto_bind_columns``) only creates a local copy that has no effect on the parser.
+"""
 
 __all__ = [
     "ParserError",
