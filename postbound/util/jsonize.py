@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import abc
 import dataclasses
+import decimal
 import enum
 import json
 from datetime import date, datetime, time, timedelta
@@ -50,6 +51,9 @@ class JsonizeEncoder(json.JSONEncoder):
             return o.isoformat()
         elif isinstance(o, timedelta):
             return o.total_seconds()
+        elif isinstance(o, decimal.Decimal):
+            # Don't use float() here, Decimal was probably used for the arbitrary precision. Float might loose it again.
+            return str(o)
         elif "__json__" in dir(o):
             return o.__json__()
         elif dataclasses.is_dataclass(o):

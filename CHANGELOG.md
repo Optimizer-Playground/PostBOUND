@@ -12,7 +12,7 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ---
 
-## Version 0.23.5
+## Version 0.23.6
 
 ### 🐣 New features
 
@@ -24,25 +24,12 @@ None
 
 ### 📰 Updates
 
-- `extract_query_fragment`/`extract_subquery` are now deterministic: the FROM clause
-  keeps the order of the original query.
-- `OfflineCardinalities` matches queries regardless of their select clause.
-- `flatten_and_predicate` is now purely structural: it keeps the conjunct order
-  and duplicates, and also flattens conjunctions below OR/NOT.
-- `extract_query_fragment` returns `None` for tables that only occur in nested
-  subqueries and for queries whose joins cannot be rewritten to implicit form.
+- JSON handling now supports Python's `Decimal`. This type is used by psycopg
+  and DuckDB to model `NUMERIC` and actual `DECIMAL`.
 
 ### 🏥 Fixes
 
-- `QueryPlan` nodes are now also compared based on index names. Structurally identical
-  plans which scan different indexes no longer compare equal.
-- `extract_query_fragment` keeps subqueries, VALUES lists and table functions in
-  the FROM clause instead of replacing them with a bare table name.
-- `SimpleJoin` and `SimpleFilter` are now `BasePredicate`s rather than plain
-  `AbstractPredicate`s. This allows them to be matched more easily in `match` blocks.
-- Fixed `OfflineCardinalities.fallback_static` raising upon creation.
-- `read_query_plan_json()` no longer raises on nodes without a physical operator
-  (e.g., Postgres aggregates)
+None
 
 ### ⚠️ Deprecations
 
