@@ -16,7 +16,13 @@ The [history](HISTORY.md) contains the changelogs of older PostBOUND releases.
 
 ### 🐣 New features
 
-None
+- The workload-loading functions (`pb.workloads.stack()`, etc.) now accept an explicit
+  `database` argument. This database is used for parsing when binding column references
+  to their relations. Structural binding still works as before and workloads like
+  JOB do not have the new parameter because they only use structural binding.
+  The database pool fallback also works as before.
+  The parameter is intended for situations where multiple DB connections need to be
+  maintained in the pool.
 
 ### 💀 Breaking changes
 
@@ -29,7 +35,8 @@ None
 
 ### 🏥 Fixes
 
-None
+- Fixed `read_workload` not adding the label prefix as intended. This also
+  affected Stack where directory prefixes were silently dropped.
 
 ### ⚠️ Deprecations
 

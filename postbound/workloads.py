@@ -37,7 +37,7 @@ import tqdm
 
 from . import parser, util
 from ._base import pbdir
-from .db import DatabasePool
+from .db import Database, DatabasePool
 from .qal import SelectStatement, SqlQuery
 
 _WorkloadSources = {
@@ -547,6 +547,7 @@ def read_workload(
     query_label_prefix: str = "",
     file_encoding: str = "utf-8",
     bind_columns: bool = True,
+    database: Database | None = None,
     include_hints: bool = True,
     on_error: Literal["raise", "warn", "ignore"] = "raise",
     verbose: bool = False,
@@ -575,6 +576,12 @@ def read_workload(
         string.
     file_encoding : str, optional
         The encoding of the query files. All files must share a common encoding. Defaults to UTF-8
+    bind_columns : bool, optional
+        Whether the parser should try to infer and bind column names to the queries. Depending on the query, this might
+        require access to the database schema if queries contain unqualified column references.
+    database : Optional[Database], optional
+        The database that should be used to resolve unqualified column references. If omitted, the parser will try to
+        use the database pool to find a suitable database. Ignored if `bind_columns` is *False*.
     include_hints : bool, optional
         Whether the parser should try to infer and extract hint blocks from the queries
     on_error : Literal["raise", "warn", "ignore"], optional
@@ -589,6 +596,7 @@ def read_workload(
     """
     root = Path(path)
     queries: dict[str, SqlQuery] = {}
+    db_schema = database.schema() if database is not None else None
 
     if verbose:
         matching_files = list(root.glob(query_file_pattern))
@@ -606,6 +614,7 @@ def read_workload(
                 query_contents,
                 include_hints=include_hints,
                 bind_columns=bind_columns,
+                db_schema=db_schema,
             )
         except Exception as e:
             match on_error:
@@ -615,8 +624,9 @@ def read_workload(
                     warnings.warn(f"Could not parse query {query_file_path}: {e} ({type(e)})", stacklevel=2)
                 case "ignore":
                     pass
+            continue
 
-        query_label = query_file_path.stem
+        query_label = query_label_prefix + query_file_path.stem
         queries[query_label] = parsed_query
 
     base_workload = Workload(queries, name=name, root=root)
@@ -638,6 +648,7 @@ def read_workload(
             recurse_subdirectories=True,
             query_label_prefix=subdir_prefix,
             bind_columns=bind_columns,
+            database=database,
             include_hints=include_hints,
             on_error=on_error,
             verbose=verbose,
@@ -646,7 +657,15 @@ def read_workload(
     return Workload(queries, name, root)
 
 
-def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "utf-8") -> Workload[int, SqlQuery]:
+def read_batch_workload(
+    filename: str,
+    name: str = "",
+    *,
+    file_encoding: str = "utf-8",
+    bind_columns: bool | None = None,
+    database: Database | None = None,
+    include_hints: bool = True,
+) -> Workload[int, SqlQuery]:
     """Loads a workload consisting of multiple queries from a single file.
 
     The input file has to contain one valid SQL query per line. While empty lines are skipped, any non-SQL line will
@@ -664,6 +683,15 @@ def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "
         The name of the workload. If omitted, this defaults to the file name.
     file_encoding : str, optional
         The encoding of the workload file. Defaults to UTF-8
+    bind_columns : Optional[bool], optional
+        Whether the parser should try to infer and bind column names to the queries. Depending on the query, this might
+        require access to the database schema if queries contain unqualified column references. If omitted, the
+        global `postbound.parser.auto_bind_columns` switch decides.
+    database : Optional[Database], optional
+        The database that should be used to resolve unqualified column references. If omitted, the parser will try to
+        use the database pool to find a suitable database. Ignored if `bind_columns` is *False*.
+    include_hints : bool, optional
+        Whether the parser should try to infer and extract hint blocks from the queries
 
     Returns
     -------
@@ -672,9 +700,19 @@ def read_batch_workload(filename: str, name: str = "", *, file_encoding: str = "
     """
     filepath = Path(filename)
     name = name if name else filepath.stem
+    db_schema = database.schema() if database is not None else None
     with open(filename, encoding=file_encoding) as query_file:
         raw_queries = query_file.readlines()
-        parsed_queries = [parser.parse_query(raw) for raw in raw_queries if raw]
+        parsed_queries = [
+            parser.parse_query(
+                raw,
+                bind_columns=bind_columns,
+                include_hints=include_hints,
+                db_schema=db_schema,
+            )
+            for raw in raw_queries
+            if raw.strip()
+        ]
         return generate_workload(parsed_queries, name=name, workload_root=filepath)
 
 
@@ -686,6 +724,9 @@ def read_csv_workload(
     query_column: str = "query",
     label_column: str,
     file_encoding: str = "utf-8",
+    bind_columns: bool | None = None,
+    database: Database | None = None,
+    include_hints: bool = True,
     pd_args: dict | None = None,
 ) -> Workload[str, SqlQuery]: ...
 
@@ -698,6 +739,9 @@ def read_csv_workload(
     query_column: str = "query",
     label_column: Literal[None],
     file_encoding: str = "utf-8",
+    bind_columns: bool | None = None,
+    database: Database | None = None,
+    include_hints: bool = True,
     pd_args: dict | None = None,
 ) -> Workload[int, SqlQuery]: ...
 
@@ -709,6 +753,9 @@ def read_csv_workload(
     query_column: str = "query",
     label_column: str | None = None,
     file_encoding: str = "utf-8",
+    bind_columns: bool | None = None,
+    database: Database | None = None,
+    include_hints: bool = True,
     pd_args: dict | None = None,
 ) -> Workload[str, SqlQuery] | Workload[int, SqlQuery]:
     """Loads a workload consisting of queries from a CSV column.
@@ -733,6 +780,15 @@ def read_csv_workload(
         labels will be inferred based on the row number.
     file_encoding : str, optional
         The encoding of the CSV file. Defaults to UTF-8.
+    bind_columns : Optional[bool], optional
+        Whether the parser should try to infer and bind column names to the queries. Depending on the query, this might
+        require access to the database schema if queries contain unqualified column references. If omitted, the
+        global `postbound.parser.auto_bind_columns` switch decides.
+    database : Optional[Database], optional
+        The database that should be used to resolve unqualified column references. If omitted, the parser will try to
+        use the database pool to find a suitable database. Ignored if `bind_columns` is *False*.
+    include_hints : bool, optional
+        Whether the parser should try to infer and extract hint blocks from the queries
     pd_args : Optional[dict]
         Additional arguments to customize the behaviour of the `pandas.read_csv` method. They will be forwarded as-is. Consult
         the documentation of this method for more details on the allowed parameters and their functionality.
@@ -759,10 +815,20 @@ def read_csv_workload(
     else:
         pd_args = {}
 
+    db_schema = database.schema() if database is not None else None
+
+    def _parser(raw_query: str) -> SqlQuery:
+        return parser.parse_query(
+            raw_query,
+            bind_columns=bind_columns,
+            include_hints=include_hints,
+            db_schema=db_schema,
+        )
+
     workload_df = pd.read_csv(
         filepath,
         usecols=columns,
-        converters={query_column: parser.parse_query},
+        converters={query_column: _parser},
         encoding=file_encoding,
         **pd_args,
     )  # type: ignore
@@ -933,7 +999,12 @@ def job_complex(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatemen
     return cast(Workload[str, SelectStatement], job_complex_workload)
 
 
-def ssb(*, file_encoding: str = "utf-8", bind_columns: bool | None = None) -> Workload[str, SelectStatement]:
+def ssb(
+    *,
+    file_encoding: str = "utf-8",
+    bind_columns: bool | None = None,
+    database: Database | None = None,
+) -> Workload[str, SelectStatement]:
     """Reads the Star Schema Benchmark, with labels according to the original data (e.g. *q1-1*, *q3-2*, etc.).
 
     Parameters
@@ -943,7 +1014,11 @@ def ssb(*, file_encoding: str = "utf-8", bind_columns: bool | None = None) -> Wo
     bind_columns : Optional[bool], optional
         Whether all columns in the queries should be bound to their respective tables. Since SSB does not use qualified
         columns names, these must be inferred from the database schema. Thus, an active database connection is required to
-        bind the columns. By default, binding is attempted if there is an active database connection.
+        bind the columns. By default, binding is attempted if there is an active database connection or an explicit
+        `database` is given.
+    database : Optional[Database], optional
+        The database that should be used to resolve unqualified column references. If omitted, the parser will try to
+        use the database pool to find a suitable database.
 
     Returns
     -------
@@ -955,9 +1030,12 @@ def ssb(*, file_encoding: str = "utf-8", bind_columns: bool | None = None) -> Wo
 
     .. Patrick E. O'Neil et al.: "The Star Schema Benchmark and Augmented Fact Table Indexing." (TPCTC'2009)
     """
-    bind_columns = bind_columns if bind_columns is not None else not DatabasePool.get_instance().empty()
+    if bind_columns is None:
+        bind_columns = database is not None or not DatabasePool.get_instance().empty()
     workload_dir = _fetch_workload("ssb")
-    ssb_workload = read_workload(workload_dir, name="SSB", file_encoding=file_encoding, bind_columns=bind_columns)
+    ssb_workload = read_workload(
+        workload_dir, name="SSB", file_encoding=file_encoding, bind_columns=bind_columns, database=database
+    )
     _assert_workload_loaded(ssb_workload, workload_dir)
     return cast(Workload[str, SelectStatement], ssb_workload)
 
@@ -966,6 +1044,7 @@ def stack(
     *,
     file_encoding: str = "utf-8",
     bind_columns: bool | None = None,
+    database: Database | None = None,
 ) -> Workload[str, SelectStatement]:
     """Reads the Stack Benchmark, as shipped with the PostBOUND repository.
 
@@ -979,8 +1058,12 @@ def stack(
         The encoding of the query files, by default UTF-8.
     bind_columns : Optional[bool], optional
         Whether all columns in the queries should be bound to their respective tables. Since Stack does not use qualified
-        columns names in some queries, these must be inferred from the database schema. Thus, an active database connection is
-        required to bind the columns. By default, binding is attempted if there is an active database connection.
+        columns names in some queries, these must be inferred from the database schema. Thus, an active database
+        connection is required to bind the columns. By default, binding is attempted if there is an active database
+        connection or an explicit `database` is given.
+    database : Optional[Database], optional
+        The database that should be used to resolve unqualified column references. If omitted, the parser will try to
+        use the database pool to find a suitable database.
 
     Returns
     -------
@@ -992,7 +1075,9 @@ def stack(
 
     .. Ryan Marcus et al.: "Bao: Making Learned Query Optimization Practical." (SIGMOD'2021)
     """
-    bind_columns = bind_columns if bind_columns is not None else not DatabasePool.get_instance().empty()
+    if bind_columns is None:
+        bind_columns = database is not None or not DatabasePool.get_instance().empty()
+
     workload_dir = _fetch_workload("stack")
 
     stack_workload = read_workload(
@@ -1001,6 +1086,7 @@ def stack(
         recurse_subdirectories=True,
         file_encoding=file_encoding,
         bind_columns=bind_columns,
+        database=database,
     )
     _assert_workload_loaded(stack_workload, workload_dir)
     return cast(Workload[str, SelectStatement], stack_workload)
@@ -1030,8 +1116,13 @@ def stats(*, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:
     return cast(Workload[str, SelectStatement], stats_workload)
 
 
-def fetch_workload(name: str, *, file_encoding: str = "utf-8") -> Workload[str, SelectStatement]:
-    """Utility method to fetch a pre-defined workload by name."""
+def fetch_workload(
+    name: str, *, file_encoding: str = "utf-8", database: Database | None = None
+) -> Workload[str, SelectStatement]:
+    """Utility method to fetch a pre-defined workload by name.
+
+    The `database` is used to bind unqualified column references for workloads that need it (Stack and SSB).
+    """
     match name:
         case "job" | "imdb":
             return job(flavor="default", file_encoding=file_encoding)
@@ -1042,9 +1133,9 @@ def fetch_workload(name: str, *, file_encoding: str = "utf-8") -> Workload[str, 
         case "stats":
             return stats(file_encoding=file_encoding)
         case "stack":
-            return stack(file_encoding=file_encoding)
+            return stack(file_encoding=file_encoding, database=database)
         case "ssb":
-            return ssb(file_encoding=file_encoding)
+            return ssb(file_encoding=file_encoding, database=database)
         case _:
             raise ValueError(
                 f"No pre-defined workload registered for key '{name}'. "
